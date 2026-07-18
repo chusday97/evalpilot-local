@@ -8,5 +8,6 @@
 - Added explicit, non-overwriting legacy data migration with `evalpilot migrate --confirmed`.
 - Added privacy/package gates, independent tarball installation checks, GitHub CI, and public project documentation.
 - Fixed the public no-API example identity check and added a tarball-installed add → core evaluation → report release gate; CI now executes the real port-recovery test.
+- Fixed the package privacy audit on CI by matching complete local home paths instead of common account-name words such as `runner`.
 
 This is a Public Alpha. macOS is the only formally verified platform.

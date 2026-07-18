@@ -7,9 +7,9 @@ const root = resolve(import.meta.dirname, '..');
 const temporary = mkdtempSync(join(tmpdir(), 'evalpilot-package-audit-'));
 const cache = join(temporary, 'npm-cache');
 const forbiddenPaths = [/(^|\/)\.evalpilot(\/|$)/i, /worktree/i, /screenshots?/i, /trace(?:\.|\/|$)/i, /\.project-journal/i, /(^|\/)HANDOFF\.md$/i, /(^|\/)PROGRESS\.md$/i];
-const localUsername = basename(homedir()).replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+const localHome = homedir().replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 const privateTerms = (process.env.EVALPILOT_PRIVATE_TERMS ?? '').split(',').map((item) => item.trim()).filter(Boolean);
-const forbiddenText = [new RegExp(localUsername, 'i'), ...privateTerms.map((item) => new RegExp(item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')), /BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/];
+const forbiddenText = [new RegExp(localHome, 'i'), ...privateTerms.map((item) => new RegExp(item.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')), /BEGIN (?:RSA |OPENSSH )?PRIVATE KEY/];
 
 function filesBelow(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
