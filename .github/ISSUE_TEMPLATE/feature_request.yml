@@ -1,0 +1,20 @@
+name: Feature request
+description: Propose a user problem EvalPilot should solve
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: User problem
+      description: Who is blocked, what are they trying to do, and what happens today?
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: Observable successful outcome
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered

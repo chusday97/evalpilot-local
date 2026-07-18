@@ -1,0 +1,29 @@
+name: Bug report
+description: Report a reproducible EvalPilot Local problem
+body:
+  - type: markdown
+    attributes:
+      value: Do not attach secrets, private source, unredacted screenshots, Trace archives, or the full data directory.
+  - type: input
+    id: version
+    attributes:
+      label: EvalPilot and Node versions
+      placeholder: evalpilot 0.5.0-alpha.1; Node 24.x
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Operating system
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Reproduction steps and visible result
+    validations:
+      required: true
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Redacted evalpilot doctor output

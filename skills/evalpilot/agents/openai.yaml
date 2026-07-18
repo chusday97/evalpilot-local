@@ -1,0 +1,4 @@
+interface:
+  display_name: "EvalPilot Local"
+  short_description: "Run local simulated-user UX evaluations"
+  default_prompt: "Use $evalpilot to scan this local Web product, run fixed and exploratory evaluations, and summarize functional, UX, and before/after evidence."

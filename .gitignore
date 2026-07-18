@@ -1,0 +1,9 @@
+node_modules/
+dist/
+dist-dashboard/
+coverage/
+.DS_Store
+.evalpilot/
+!.evalpilot/.gitkeep
+.evalpilot/secrets/
+*.log

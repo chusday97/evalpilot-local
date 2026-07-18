@@ -1,0 +1,76 @@
+{
+  "name": "evalpilot-local",
+  "version": "0.5.0-alpha.1",
+  "description": "Local, evidence-first pre-release evaluation CLI for web products",
+  "type": "module",
+  "bin": {
+    "evalpilot": "dist/src/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.build.json && vite build",
+    "build:dashboard": "vite build",
+    "check": "tsc --noEmit",
+    "dev": "tsx src/cli/index.ts",
+    "dashboard": "npm run build && node dist/src/cli/index.js dashboard",
+    "test": "vitest run",
+    "test:browser": "EVALPILOT_BROWSER_TEST=1 vitest run tests/browser-evidence.test.ts",
+    "test:runner": "EVALPILOT_BROWSER_TEST=1 vitest run tests/runner-browser.test.ts",
+    "test:dashboard": "EVALPILOT_DASHBOARD_TEST=1 vitest run tests/dashboard-browser.test.ts tests/project-workspace.test.ts",
+    "test:public-example": "node scripts/verify-public-example.mjs",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "audit:package": "node scripts/audit-package.mjs",
+    "test:consumer": "node scripts/verify-consumer.mjs",
+    "prepack": "npm run build"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chusday97/evalpilot-local.git"
+  },
+  "homepage": "https://github.com/chusday97/evalpilot-local#readme",
+  "bugs": {
+    "url": "https://github.com/chusday97/evalpilot-local/issues"
+  },
+  "keywords": [
+    "ai-evaluation",
+    "ux-testing",
+    "playwright",
+    "local-first",
+    "codex"
+  ],
+  "files": [
+    "dist/",
+    "dist-dashboard/",
+    "skills/evalpilot/",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  },
+  "dependencies": {
+    "commander": "^15.0.0",
+    "playwright": "^1.61.1",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "@vitest/coverage-v8": "^4.1.10",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "tsx": "^4.23.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.4",
+    "vitest": "^4.1.10"
+  }
+}

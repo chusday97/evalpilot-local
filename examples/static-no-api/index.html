@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta name="application-name" content="evalpilot-static-no-api-example"><title>静态任务清单</title></head>
+  <body>
+    <main>
+      <p>EvalPilot Static No API Example</p>
+      <h1>今日任务</h1>
+      <form id="task-form"><label>任务名称 <input id="task" required></label><button>添加任务</button></form>
+      <p id="result" role="status">还没有添加任务。</p>
+    </main>
+    <script>
+      document.querySelector('#task-form').addEventListener('submit', (event) => {
+        event.preventDefault();
+        const value = document.querySelector('#task').value;
+        document.querySelector('#result').textContent = `已添加：${value}`;
+      });
+    </script>
+  </body>
+</html>
