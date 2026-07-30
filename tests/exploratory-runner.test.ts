@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { chooseSemanticTarget, evaluateVisibleConditions } from '../src/ux-evaluation/semantic-explorer.js';
+import {
+  chooseSemanticTarget,
+  evaluateEvidenceConditions,
+  evaluateVisibleConditions,
+  hasObservablePageChange,
+} from '../src/ux-evaluation/semantic-explorer.js';
 
 describe('deterministic semantic explorer', () => {
   it('chooses a goal-relevant safe entry without receiving a selector or path', () => {
@@ -37,5 +42,47 @@ describe('deterministic semantic explorer', () => {
     expect(result.satisfied).toEqual(['推荐结果已生成', '可以保存或修改']);
     expect(result.missing).toEqual(['推荐依据清晰可见']);
     expect(result.complete).toBe(false);
+  });
+
+  it('uses runtime evidence for generic entry-page conditions instead of requiring test prose on the page', () => {
+    const result = evaluateEvidenceConditions('赛程 订阅赛程 返回', [
+      '入口页面可通过 Chromium 正常到达',
+      '主要内容和核心操作元素可见',
+      '执行后页面提供明确结果或下一步',
+    ], {
+      pageReached: true,
+      visibleTargetCount: 3,
+      observableFeedback: true,
+    });
+    expect(result.satisfied).toHaveLength(3);
+    expect(result.missing).toEqual([]);
+    expect(result.complete).toBe(true);
+  });
+
+  it('does not treat ambient countdown changes as feedback from a click', () => {
+    expect(hasObservablePageChange(
+      'http://localhost/',
+      'http://localhost/',
+      '比赛将在 33 : 40 : 31 后开始',
+      '比赛将在 33 : 40 : 30 后开始',
+    )).toBe(false);
+    expect(hasObservablePageChange(
+      'http://localhost/',
+      'http://localhost/',
+      '订阅赛程',
+      '订阅成功，可以返回',
+    )).toBe(true);
+    expect(hasObservablePageChange(
+      'http://localhost/',
+      'http://localhost/',
+      '购物车 0',
+      '购物车 1',
+    )).toBe(true);
+    expect(hasObservablePageChange(
+      'http://localhost/',
+      'http://localhost/details',
+      '赛程',
+      '赛程',
+    )).toBe(true);
   });
 });

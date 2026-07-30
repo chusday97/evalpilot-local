@@ -176,7 +176,10 @@ Dashboard 不得直接读写 YAML/JSONL；所有写操作经 Core 校验并原�
 - `ProjectRegistry`：`version, activeProjectId, projects`，位于 `.evalpilot/projects.json`。
 - `ProjectProfile`：项目身份、源码路径、目标 URL、输出目录、启动命令、状态和最近打开时间。项目列表另返回 `ProjectCardSummary`，包含最近评测时间/状态和 P0/P1 问题数。
 - `ProjectReadiness`：路径/URL/Git/脏工作区事实、启动建议、端口、目标服务指纹是否匹配、阻塞原因和可评测状态。`urlReachable` 只说明端口有响应，`targetVerified` 才说明响应与所选项目匹配。
-- `EvaluationSession`：深度、能力范围、流水线阶段、运行 ID、状态、错误和时间。
+- `EvaluationSession`：深度、请求能力范围、计划能力、实际执行能力、四层覆盖摘要、流水线阶段、运行 ID、状态、错误和时间。旧记录缺少覆盖字段时只标记证据不完整，不根据名称反推已执行。
+- `EvaluationCapabilityCoverage`：每个功能保存入口、是否静态发现、是否有浏览器到达证据、执行状态、关联运行 ID 和未覆盖原因。
+- `EvaluationCoverageSummary`：汇总发现、计划、浏览器到达、已执行、通过、失败、阻塞、不适用和未运行数量；只有计划功能全部产生可信执行结果时 `complete=true`。
+- `capabilityNames` 是实际执行功能名称的兼容快照；`plannedCapabilityNames` 表示本轮原计划。评测名称、历史卡片和上线判断不得用计划范围冒充实际范围。
 - `FixTask`：问题、任务包、基线提交、允许范围、验收命令和复测案例；旧分支/worktree/verification 字段仅兼容读取。
 - `AgentRun`：Agent 适配器、独立分支/worktree、状态、日志、修改文件、验证、退出码和错误。
 - `FixVerification`：测试结果、before/after、安全约束、应用门禁和阻塞项。

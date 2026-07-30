@@ -40,7 +40,11 @@ export function detectFrictions(input: FrictionInput): FrictionEvent[] {
     if (repeated.has(action.actionId)) {
       events.push(event(input, events.length, 'repeated_input_issue', `字段 ${action.inputField ?? 'unknown'} 被重复输入`, '系统未复用已经提供的信息', action));
     }
-    if (action.type === 'click' && /no_feedback|dead_click/.test(action.outcome)) {
+    if (
+      action.type === 'click'
+      && /no_feedback|dead_click/.test(action.outcome)
+      && input.completion.userGoal.complete !== true
+    ) {
       events.push(event(input, events.length, 'interaction_feedback_issue', '点击后没有可观察反馈', '用户可能无法判断操作是否生效', action));
     }
     if (action.type === 'hesitation') {

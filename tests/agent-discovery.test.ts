@@ -24,6 +24,24 @@ describe('agent workspace discovery', () => {
     expect(JSON.stringify(candidates)).not.toContain('不得作为候选名称');
   });
 
+  it('turns a recent parent workspace into direct child project cards instead of asking users to select the parent folder', async () => {
+    const home = await mkdtemp(join(tmpdir(), 'evalpilot-agent-parent-home-'));
+    const projects = resolve(home, 'Projects'); await mkdir(projects, { recursive: true });
+    await mkdir(resolve(projects, '.git'));
+    const webApp = resolve(projects, 'customer-portal'); await mkdir(webApp);
+    await writeFile(resolve(webApp, 'package.json'), JSON.stringify({ dependencies: { react: '1.0.0' } }));
+    const gitApp = resolve(projects, 'content-service'); await mkdir(resolve(gitApp, '.git'), { recursive: true });
+    await mkdir(resolve(projects, 'random-notes'));
+    await mkdir(resolve(home, '.codex'), { recursive: true });
+    await writeFile(resolve(home, '.codex', '.codex-global-state.json'), JSON.stringify({ 'electron-saved-workspace-roots': [projects] }));
+
+    const candidates = await discoverWorkspaceCandidates(['codex'], home);
+
+    expect(candidates.map((candidate) => candidate.name)).toEqual(['content-service', 'customer-portal']);
+    expect(candidates.every((candidate) => candidate.projectRoot !== projects)).toBe(true);
+    expect(candidates.every((candidate) => candidate.sourceAgents.includes('codex'))).toBe(true);
+  });
+
   it('requires confirmation before reading recent workspaces', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-agent-api-'));
     const result = await dispatchDashboardApi(cwd, 'POST', '/api/workspace-candidates', '', { confirmed: false, providers: ['codex'] });

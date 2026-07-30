@@ -32,6 +32,8 @@ flowchart LR
 
 第一次使用时，你需要准备：被测项目文件夹、可访问的本地测试网址，以及该项目的启动命令。目标是在 15 分钟内打开第一份报告。
 
+如果你是首次使用者，可以按 [Public Alpha 15 分钟测试指南](https://github.com/chusday97/evalpilot-local/blob/main/docs/04-validation/PUBLIC_ALPHA_TEST_GUIDE.md) 完成一次不需要了解内部术语的验收。反馈前请先脱敏，不要上传源码、Trace、密钥或完整评测目录。
+
 ## Dashboard
 
 ![EvalPilot Local Dashboard](https://raw.githubusercontent.com/chusday97/evalpilot-local/main/docs/assets/dashboard.png)

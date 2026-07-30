@@ -1,0 +1,6 @@
+tester_id,date,evalpilot_version,node_version,macos_version,target_kind,import_method,result,duration_minutes,blocked_step,observer_help,report_verdict_understood,top_issue_understood,next_action_understood,p0_count,p1_count,github_issue_url,notes_redacted
+tester-01,,,,,,,,,,,,,,,,,
+tester-02,,,,,,,,,,,,,,,,,
+tester-03,,,,,,,,,,,,,,,,,
+tester-04,,,,,,,,,,,,,,,,,
+tester-05,,,,,,,,,,,,,,,,,

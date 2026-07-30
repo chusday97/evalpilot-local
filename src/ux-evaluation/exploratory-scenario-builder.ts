@@ -2,11 +2,14 @@ import type { EvalBlueprint, ExploratoryScenario, Persona } from '../../types.js
 import { exploratoryScenarioSchema } from '../schemas/ux-evaluation.js';
 
 export function buildExploratoryScenarios(blueprint: EvalBlueprint, personas: Persona[]): ExploratoryScenario[] {
-  const capability = blueprint.capabilities.find((item) => item.importance === 'critical') ?? blueprint.capabilities[0];
-  if (!capability) return [];
-  const startingUrl = capability.entryPoints[0] ?? '/';
-  return personas.map((persona, index) => exploratoryScenarioSchema.parse({
-    caseId: `case-exploratory-${String(index + 1).padStart(3, '0')}`,
+  if (!blueprint.capabilities.length || !personas.length) return [];
+  const scenarios: ExploratoryScenario[] = [];
+  const usedPersonaByCapability = new Map<string, string>();
+
+  const addScenario = (capability: EvalBlueprint['capabilities'][number], persona: Persona): void => {
+    const startingUrl = capability.entryPoints[0] ?? '/';
+    scenarios.push(exploratoryScenarioSchema.parse({
+    caseId: `case-exploratory-${String(scenarios.length + 1).padStart(3, '0')}`,
     type: 'exploratory_user_journey',
     title: `${persona.name}自主完成${capability.name}`,
     capability: capability.id,
@@ -27,5 +30,19 @@ export function buildExploratoryScenarios(blueprint: EvalBlueprint, personas: Pe
     },
     severityIfFailed: capability.importance === 'critical' ? 'P1' : 'P2',
     approvalStatus: capability.approvalStatus,
-  }));
+    }));
+  };
+
+  for (const [index, capability] of blueprint.capabilities.entries()) {
+    const persona = personas.find((item) => capability.requiredPersonas.includes(item.personaId))
+      ?? personas[index % personas.length]!;
+    usedPersonaByCapability.set(capability.id, persona.personaId);
+    addScenario(capability, persona);
+  }
+
+  const critical = blueprint.capabilities.find((item) => item.importance === 'critical') ?? blueprint.capabilities[0]!;
+  for (const persona of personas) {
+    if (persona.personaId !== usedPersonaByCapability.get(critical.id)) addScenario(critical, persona);
+  }
+  return scenarios;
 }

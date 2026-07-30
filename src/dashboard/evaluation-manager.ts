@@ -1,5 +1,5 @@
 import { resolve } from 'node:path';
-import type { EvaluationDepthOption, EvaluationEvent, EvaluationRecordSummary, EvaluationSession, EvaluationStageName, EvalBlueprint, ExploratoryScenario, Scenario, UxIssue } from '../../types.js';
+import type { EvaluationDepthOption, EvaluationEvent, EvaluationRecordSummary, EvaluationSession, EvaluationStageName, EvalBlueprint, ExploratoryScenario, PageEvidence, RunStatus, Scenario, UxIssue } from '../../types.js';
 import { generateBackground } from '../generation/background-builder.js';
 import { generateBlueprint } from '../generation/blueprint-builder.js';
 import { generateCases } from '../generation/scenario-builder.js';
@@ -15,6 +15,7 @@ import { configForProject } from '../projects/project-registry.js';
 import { loadProjectRegistry } from '../projects/project-registry.js';
 import { discoverProject } from '../projects/project-service.js';
 import { readOptionalText } from './dashboard-data.js';
+import { buildEvaluationCoverage, planCapabilities, recordCapabilityRun, selectExploratoryScenarios } from './evaluation-coverage.js';
 
 interface ManagedEvaluation { session: EvaluationSession; events: EvaluationEvent[]; listeners: Set<(event: EvaluationEvent) => void> }
 const evaluations = new Map<string, ManagedEvaluation>();
@@ -43,23 +44,62 @@ async function executeEvaluation(cwd: string, managed: ManagedEvaluation): Promi
     if (session.stages.find((item) => item.name === 'blueprint')?.status !== 'completed') { await setStage(managed, config.outputDir, 'blueprint', 'running', '正在生成评测蓝图。'); blueprint = await generateBlueprint(config); await setStage(managed, config.outputDir, 'blueprint', 'completed', '评测蓝图已生成。'); } else blueprint = await readYamlFile<EvalBlueprint>(resolve(config.outputDir, 'eval-blueprint.yaml'));
     let exploratory: ExploratoryScenario[];
     if (session.stages.find((item) => item.name === 'cases')?.status !== 'completed') { await setStage(managed, config.outputDir, 'cases', 'running', '正在生成模拟用户、案例和旅程。'); exploratory = (await generateCases(config)).exploratoryScenarios; await setStage(managed, config.outputDir, 'cases', 'completed', '评测案例已生成。'); } else exploratory = await readJsonLinesFile<ExploratoryScenario>(resolve(config.outputDir, 'exploratory-scenarios.jsonl'));
-    const selectedCapabilities = session.capabilityIds.length ? session.capabilityIds : blueprint.capabilities.filter((item) => session.depth === 'quick' ? item.importance === 'critical' : session.depth === 'core' ? item.importance === 'critical' || item.importance === 'high' : true).map((item) => item.id);
-    session.capabilityNames = blueprint.capabilities.filter((item) => selectedCapabilities.includes(item.id)).map((item) => item.name); await persist(config.outputDir, session);
-    const selectedScenarios = exploratory.filter((item) => selectedCapabilities.includes(item.capability));
+    const plannedCapabilities = planCapabilities(blueprint.capabilities, session.capabilityIds, session.depth);
+    session.plannedCapabilityIds = plannedCapabilities.map((item) => item.id);
+    session.plannedCapabilityNames = plannedCapabilities.map((item) => item.name);
+    let visitedPaths: string[] = [];
+    const rawPages = await readOptionalText(resolve(config.outputDir, 'evidence', 'pages.json'));
+    if (rawPages) {
+      try {
+        const pages = JSON.parse(rawPages) as PageEvidence[];
+        visitedPaths = pages.flatMap((item) => {
+          try { return [new URL(item.url).pathname]; } catch { return []; }
+        });
+      } catch { /* 旧扫描证据格式不可读时保持零个已到达页面。 */ }
+    }
+    if (session.stages.find((item) => item.name === 'run')?.status !== 'completed' || !session.coverage) {
+      session.coverage = buildEvaluationCoverage(blueprint.capabilities, plannedCapabilities, visitedPaths);
+    }
+    const selectedScenarios = selectExploratoryScenarios(exploratory, session.plannedCapabilityIds, session.depth);
+    await persist(config.outputDir, session);
     if (!selectedScenarios.length) throw new EvalPilotError('所选功能没有可运行的探索案例。', 'EVALUATION_CASE_NOT_FOUND');
     if (session.stages.find((item) => item.name === 'run')?.status !== 'completed') {
-      await setStage(managed, config.outputDir, 'run', 'running', 'Chromium 正在执行真实路径。'); session.runIds = [];
+      await setStage(managed, config.outputDir, 'run', 'running', 'Chromium 正在按不同功能执行真实路径。');
+      session.runIds = []; session.executedCapabilityIds = []; session.executedCapabilityNames = [];
       const evaluationIssues: UxIssue[] = [];
-      if (session.depth === 'full') { const fixed = await runScenarios(config, undefined, selectedCapabilities); session.runIds.push(fixed.runDirectory); await buildReport(config); }
-      const limit = session.depth === 'quick' ? 1 : session.depth === 'core' ? Math.max(1, Math.min(3, selectedScenarios.length)) : selectedScenarios.length;
-      for (const scenario of selectedScenarios.slice(0, limit)) {
-        const result = await runExploratoryScenario(config, scenario.caseId); session.runIds.push(result.runId);
-        const issuesPath = resolve(config.outputDir, 'reports', 'ux-issues.jsonl'); if (await pathExists(issuesPath)) for (const issue of await readJsonLinesFile<UxIssue>(issuesPath)) if (!evaluationIssues.some((item) => item.issueId === issue.issueId)) evaluationIssues.push(issue);
+      if (session.depth === 'full') {
+        const fixedScenarios = (await readJsonLinesFile<Scenario>(resolve(config.outputDir, 'scenarios.jsonl')))
+          .filter((item) => item.automationStatus === 'automated' && session.plannedCapabilityIds.includes(item.capability));
+        const capabilityByCase = new Map(fixedScenarios.map((item) => [item.caseId, item.capability]));
+        const fixed = await runScenarios(config, undefined, session.plannedCapabilityIds);
+        session.runIds.push(fixed.runDirectory);
+        for (const result of fixed.results) {
+          const capabilityId = capabilityByCase.get(result.caseId);
+          if (capabilityId && session.coverage) session.coverage = recordCapabilityRun(session.coverage, capabilityId, result.runId, result.status, Boolean(result.finalUrl));
+        }
+        await buildReport(config);
       }
+      for (const scenario of selectedScenarios) {
+        const result = await runExploratoryScenario(config, scenario.caseId); session.runIds.push(result.runId);
+        const status: RunStatus = result.evaluation.functionalStatus === 'blocked'
+          ? 'blocked'
+          : result.evaluation.functionalStatus === 'passed' && result.metrics.fullLoopCompleted
+            ? 'passed'
+            : 'failed';
+        if (session.coverage) session.coverage = recordCapabilityRun(session.coverage, scenario.capability, result.runId, status, result.evaluation.functionalStatus !== 'blocked');
+        for (const issue of result.issues) if (!evaluationIssues.some((item) => item.issueId === issue.issueId)) evaluationIssues.push(issue);
+      }
+      const executed = session.coverage?.capabilities.filter((item) => session.plannedCapabilityIds.includes(item.capabilityId) && item.executionStatus !== 'not_run') ?? [];
+      session.executedCapabilityIds = executed.map((item) => item.capabilityId);
+      session.executedCapabilityNames = executed.map((item) => item.capabilityName);
+      session.capabilityNames = session.executedCapabilityNames;
       const evaluationDirectory = resolve(config.outputDir, 'evaluations', session.evaluationId); await ensureDirectory(evaluationDirectory); await writeJsonLinesAtomic(resolve(evaluationDirectory, 'issues.jsonl'), evaluationIssues); session.issueIds = evaluationIssues.map((item) => item.issueId);
-      await setStage(managed, config.outputDir, 'run', 'completed', `真实路径执行完成，共 ${session.runIds.length} 次运行。`);
+      const coverageMessage = session.coverage?.complete
+        ? `已实际运行 ${session.coverage.executedCount} 个计划功能。`
+        : `仍有 ${session.coverage?.notRunCount ?? session.plannedCapabilityIds.length} 个计划功能未运行。`;
+      await setStage(managed, config.outputDir, 'run', 'completed', `真实路径执行完成。${coverageMessage}`);
     }
-    if (session.stages.find((item) => item.name === 'report')?.status !== 'completed') { await setStage(managed, config.outputDir, 'report', 'running', '正在整理问题、证据和下一步。'); await writeJsonAtomic(resolve(config.outputDir, 'evaluations', session.evaluationId, 'report.json'), { evaluationId: session.evaluationId, generatedAt: new Date().toISOString(), blueprintCapabilities: blueprint.capabilities.filter((item) => selectedCapabilities.includes(item.id)) }); await setStage(managed, config.outputDir, 'report', 'completed', '评测报告已生成。'); }
+    if (session.stages.find((item) => item.name === 'report')?.status !== 'completed') { await setStage(managed, config.outputDir, 'report', 'running', '正在整理问题、覆盖证据和下一步。'); await writeJsonAtomic(resolve(config.outputDir, 'evaluations', session.evaluationId, 'report.json'), { evaluationId: session.evaluationId, generatedAt: new Date().toISOString(), blueprintCapabilities: plannedCapabilities, coverage: session.coverage }); await setStage(managed, config.outputDir, 'report', 'completed', '评测报告已生成。'); }
     session.status = 'completed'; session.completedAt = new Date().toISOString(); emit(managed, '评测完成，可以查看问题。'); await persist(config.outputDir, session);
   } catch (error) { session.status = 'failed'; session.error = error instanceof Error ? error.message : String(error); session.completedAt = new Date().toISOString(); const stage = session.stages.find((item) => item.name === session.currentStage)!; stage.status = 'failed'; stage.message = session.error; emit(managed, `评测停止：${session.error}`); await persist(config.outputDir, session); }
 }
@@ -72,7 +112,7 @@ export async function startEvaluation(cwd: string, input: unknown): Promise<Eval
   const parsed = evaluationRequestSchema.safeParse(input); if (!parsed.success) throw new EvalPilotError('评测范围无效。', 'EVALUATION_INVALID');
   const config = await configForProject(cwd, parsed.data.projectId); const evaluationId = `evaluation-${new Date().toISOString().replace(/[:.]/g, '-')}`;
   const existing = await listEvaluations(cwd, parsed.data.projectId);
-  const session: EvaluationSession = { evaluationId, projectId: parsed.data.projectId, sequenceNumber: existing.length + 1, depth: parsed.data.depth, capabilityIds: parsed.data.capabilityIds, capabilityNames: [], customName: null, competitorSnapshotIds: parsed.data.competitorSnapshotIds, issueIds: [], status: 'queued', currentStage: 'readiness', stages: stageNames.map((name) => ({ name, status: 'pending', message: null })), runIds: [], startedAt: new Date().toISOString(), completedAt: null, error: null };
+  const session: EvaluationSession = { evaluationId, projectId: parsed.data.projectId, sequenceNumber: existing.length + 1, depth: parsed.data.depth, capabilityIds: parsed.data.capabilityIds, capabilityNames: [], plannedCapabilityIds: [], plannedCapabilityNames: [], executedCapabilityIds: [], executedCapabilityNames: [], coverage: null, customName: null, competitorSnapshotIds: parsed.data.competitorSnapshotIds, issueIds: [], status: 'queued', currentStage: 'readiness', stages: stageNames.map((name) => ({ name, status: 'pending', message: null })), runIds: [], startedAt: new Date().toISOString(), completedAt: null, error: null };
   const managed: ManagedEvaluation = { session, events: [], listeners: new Set() }; evaluations.set(evaluationId, managed); await persist(config.outputDir, session);
   void executeEvaluation(cwd, managed);
   return session;
@@ -80,7 +120,19 @@ export async function startEvaluation(cwd: string, input: unknown): Promise<Eval
 
 function normalizeSessions(raw: EvaluationSession[]): EvaluationSession[] {
   const ordered = [...raw].sort((a, b) => a.startedAt.localeCompare(b.startedAt));
-  return ordered.map((item, index) => ({ ...item, sequenceNumber: item.sequenceNumber ?? index + 1, capabilityNames: item.capabilityNames ?? [], customName: item.customName ?? null, competitorSnapshotIds: item.competitorSnapshotIds ?? [], issueIds: item.issueIds ?? [] })).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
+  return ordered.map((item, index) => ({
+    ...item,
+    sequenceNumber: item.sequenceNumber ?? index + 1,
+    capabilityNames: item.capabilityNames ?? [],
+    plannedCapabilityIds: item.plannedCapabilityIds ?? item.capabilityIds ?? [],
+    plannedCapabilityNames: item.plannedCapabilityNames ?? item.capabilityNames ?? [],
+    executedCapabilityIds: item.executedCapabilityIds ?? [],
+    executedCapabilityNames: item.executedCapabilityNames ?? [],
+    coverage: item.coverage ?? null,
+    customName: item.customName ?? null,
+    competitorSnapshotIds: item.competitorSnapshotIds ?? [],
+    issueIds: item.issueIds ?? [],
+  })).sort((a, b) => b.startedAt.localeCompare(a.startedAt));
 }
 
 export async function renameEvaluation(cwd: string, evaluationId: string, input: unknown): Promise<EvaluationSession> {
@@ -95,7 +147,8 @@ export async function renameEvaluation(cwd: string, evaluationId: string, input:
 function displayName(session: EvaluationSession): string {
   if (session.customName) return session.customName;
   const depth = session.depth === 'quick' ? '快速检查' : session.depth === 'full' ? '完整评测' : '核心评测';
-  const capability = session.capabilityNames.length > 1 ? `${session.capabilityNames[0]}等 ${session.capabilityNames.length} 项` : session.capabilityNames[0] ?? '历史评测';
+  const names = session.coverage ? session.executedCapabilityNames : session.capabilityNames;
+  const capability = names.length > 1 ? `${names[0]}等 ${names.length} 项` : names[0] ?? '未完成评测';
   const date = new Date(session.startedAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false });
   return `${capability} · ${depth} · ${date}`;
 }
@@ -105,17 +158,51 @@ export async function listEvaluationRecords(cwd: string, projectId: string): Pro
   for (const session of sessions) {
     const issuesPath = resolve(config.outputDir, 'evaluations', session.evaluationId, 'issues.jsonl'); const hasSnapshot = await pathExists(issuesPath); const issues = hasSnapshot ? await readJsonLinesFile<UxIssue>(issuesPath) : [];
     const severeIssueCount = issues.filter((item) => item.severity === 'P0' || item.severity === 'P1').length; const durationMs = session.completedAt ? Math.max(0, new Date(session.completedAt).getTime() - new Date(session.startedAt).getTime()) : null;
-    let notApplicableCount = 0;
-    for (const runId of session.runIds) {
-      const directory = runId.startsWith('/') ? runId : resolve(config.outputDir, 'runs', runId);
-      const raw = await readOptionalText(resolve(directory, 'summary.json'));
-      if (!raw) continue;
-      try { const summary = JSON.parse(raw) as { notApplicable?: number; results?: Array<{ status?: string }> }; notApplicableCount += summary.notApplicable ?? summary.results?.filter((item) => item.status === 'not_applicable').length ?? 0; } catch { /* 旧运行没有可读取的不适用统计。 */ }
+    let notApplicableCount = session.coverage?.notApplicableCount ?? 0;
+    if (!session.coverage) {
+      for (const runId of session.runIds) {
+        const directory = runId.startsWith('/') ? runId : resolve(config.outputDir, 'runs', runId);
+        const raw = await readOptionalText(resolve(directory, 'summary.json'));
+        if (!raw) continue;
+        try { const summary = JSON.parse(raw) as { notApplicable?: number; results?: Array<{ status?: string }> }; notApplicableCount += summary.notApplicable ?? summary.results?.filter((item) => item.status === 'not_applicable').length ?? 0; } catch { /* 旧运行没有可读取的不适用统计。 */ }
+      }
     }
-    const lastRunId = session.runIds.at(-1); let fullLoopCompleted: boolean | null = null;
-    if (lastRunId) { const runDirectory = lastRunId.startsWith('/') ? lastRunId : resolve(config.outputDir, 'runs', lastRunId); const raw = await readOptionalText(resolve(runDirectory, 'ux-metrics.json')); if (raw) { try { const metrics = JSON.parse(raw) as { fullLoopCompleted?: unknown }; fullLoopCompleted = typeof metrics.fullLoopCompleted === 'boolean' ? metrics.fullLoopCompleted : null; } catch { fullLoopCompleted = null; } } }
-    const verdict = session.status === 'failed' ? 'needs_attention' : session.status !== 'completed' ? 'unknown' : severeIssueCount > 0 || fullLoopCompleted === false ? 'needs_attention' : fullLoopCompleted === true ? 'can_continue' : 'unknown';
-    records.push({ evaluationId: session.evaluationId, projectId, sequenceNumber: session.sequenceNumber, displayName: displayName(session), depth: session.depth, capabilityIds: session.capabilityIds, capabilityNames: session.capabilityNames, status: session.status, verdict, severeIssueCount, issueCount: issues.length, notApplicableCount, durationMs, startedAt: session.startedAt, completedAt: session.completedAt, legacyEvidenceIncomplete: !hasSnapshot });
+    const coveragePassed = Boolean(
+      session.coverage?.complete
+      && session.coverage.notRunCount === 0
+      && session.coverage.failedCount === 0
+      && session.coverage.blockedCount === 0,
+    );
+    const verdict = session.status === 'failed'
+      ? 'needs_attention'
+      : session.status !== 'completed'
+        ? 'unknown'
+        : severeIssueCount > 0 || Boolean(session.coverage && !coveragePassed)
+          ? 'needs_attention'
+          : coveragePassed
+            ? 'can_continue'
+            : 'unknown';
+    const names = session.coverage ? session.executedCapabilityNames : session.capabilityNames;
+    records.push({
+      evaluationId: session.evaluationId,
+      projectId,
+      sequenceNumber: session.sequenceNumber,
+      displayName: displayName(session),
+      depth: session.depth,
+      capabilityIds: session.coverage ? session.executedCapabilityIds : session.capabilityIds,
+      capabilityNames: names,
+      plannedCapabilityNames: session.plannedCapabilityNames,
+      coverage: session.coverage,
+      status: session.status,
+      verdict,
+      severeIssueCount,
+      issueCount: issues.length,
+      notApplicableCount,
+      durationMs,
+      startedAt: session.startedAt,
+      completedAt: session.completedAt,
+      legacyEvidenceIncomplete: !hasSnapshot || !session.coverage,
+    });
   }
   return records;
 }

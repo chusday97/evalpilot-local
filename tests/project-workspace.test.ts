@@ -97,14 +97,24 @@ describe('multi-project workspace', () => {
     await writeFile(resolve(project.outputDir, 'scenarios.jsonl'), `${JSON.stringify({ caseId: 'fixed-1', capability: 'cap-a', automationStatus: 'automated' })}\n`);
     await writeFile(resolve(project.outputDir, 'exploratory-scenarios.jsonl'), `${JSON.stringify({ caseId: 'explore-1', capability: 'cap-a' })}\n`);
     const startedAt = new Date(Date.now() - 120_000).toISOString(); const completedAt = new Date().toISOString();
-    await writeFile(resolve(project.outputDir, 'evaluations', 'sessions.jsonl'), `${JSON.stringify({ evaluationId: 'evaluation-1', projectId: project.projectId, sequenceNumber: 1, depth: 'core', capabilityIds: ['cap-a'], capabilityNames: ['功能 A'], customName: null, competitorSnapshotIds: [], issueIds: ['issue-1'], status: 'completed', currentStage: 'report', stages: [], runIds: [], startedAt, completedAt, error: null })}\n`);
+    const coverage = { discoveredCount: 2, plannedCount: 2, browserVisitedCount: 1, executedCount: 1, passedCount: 1, failedCount: 0, blockedCount: 0, notApplicableCount: 0, notRunCount: 1, complete: false, capabilities: [{ capabilityId: 'cap-a', capabilityName: '功能 A', entryPoint: '/a', discovered: true, browserVisited: true, executionStatus: 'passed', runIds: ['run-a'], reason: '用户任务和完整闭环已通过' }, { capabilityId: 'cap-b', capabilityName: '功能 B', entryPoint: '/b', discovered: true, browserVisited: false, executionStatus: 'not_run', runIds: [], reason: '等待执行' }] };
+    const legacySession = { evaluationId: 'evaluation-1', projectId: project.projectId, sequenceNumber: 1, depth: 'core', capabilityIds: ['cap-a'], capabilityNames: ['功能 A'], customName: null, competitorSnapshotIds: [], issueIds: ['issue-1'], status: 'completed', currentStage: 'report', stages: [], runIds: [], startedAt, completedAt, error: null };
+    const coveredSession = { ...legacySession, evaluationId: 'evaluation-2', sequenceNumber: 2, capabilityIds: ['cap-a', 'cap-b'], capabilityNames: ['功能 A'], plannedCapabilityIds: ['cap-a', 'cap-b'], plannedCapabilityNames: ['功能 A', '功能 B'], executedCapabilityIds: ['cap-a'], executedCapabilityNames: ['功能 A'], coverage, issueIds: [], startedAt: new Date(Date.now() - 60_000).toISOString() };
+    const passedCoverage = { ...coverage, browserVisitedCount: 2, executedCount: 2, passedCount: 2, notRunCount: 0, complete: true, capabilities: coverage.capabilities.map((item) => ({ ...item, browserVisited: true, executionStatus: 'passed', runIds: [`run-${item.capabilityId}`], reason: '用户任务和完整闭环已通过' })) };
+    const passedSession = { ...coveredSession, evaluationId: 'evaluation-3', sequenceNumber: 3, capabilityNames: ['功能 A', '功能 B'], executedCapabilityIds: ['cap-a', 'cap-b'], executedCapabilityNames: ['功能 A', '功能 B'], coverage: passedCoverage, startedAt: new Date(Date.now() - 30_000).toISOString() };
+    await mkdir(resolve(project.outputDir, 'evaluations', 'evaluation-2'), { recursive: true }); await mkdir(resolve(project.outputDir, 'evaluations', 'evaluation-3'), { recursive: true });
+    await writeFile(resolve(project.outputDir, 'evaluations', 'sessions.jsonl'), `${JSON.stringify(legacySession)}\n${JSON.stringify(coveredSession)}\n${JSON.stringify(passedSession)}\n`);
     await writeFile(resolve(project.outputDir, 'evaluations', 'evaluation-1', 'issues.jsonl'), `${JSON.stringify({ issueId: 'issue-1', severity: 'P1' })}\n`);
+    await writeFile(resolve(project.outputDir, 'evaluations', 'evaluation-2', 'issues.jsonl'), '');
+    await writeFile(resolve(project.outputDir, 'evaluations', 'evaluation-3', 'issues.jsonl'), '');
 
     const depths = await evaluationDepthOptions(cwd, project.projectId); const records = await listEvaluationRecords(cwd, project.projectId);
     expect(depths.find((item) => item.depth === 'core')).toEqual(expect.objectContaining({ recommended: true, estimatedCaseCount: 1 }));
     expect(depths.find((item) => item.depth === 'full')?.summary).toContain('所选功能');
-    expect(records[0]).toEqual(expect.objectContaining({ displayName: expect.stringContaining('功能 A'), severeIssueCount: 1, verdict: 'needs_attention' }));
+    expect(records.find((item) => item.evaluationId === 'evaluation-1')).toEqual(expect.objectContaining({ displayName: expect.stringContaining('功能 A'), severeIssueCount: 1, verdict: 'needs_attention', coverage: null }));
+    expect(records.find((item) => item.evaluationId === 'evaluation-2')).toEqual(expect.objectContaining({ capabilityNames: ['功能 A'], plannedCapabilityNames: ['功能 A', '功能 B'], verdict: 'needs_attention', coverage: expect.objectContaining({ notRunCount: 1 }) }));
+    expect(records.find((item) => item.evaluationId === 'evaluation-3')).toEqual(expect.objectContaining({ capabilityNames: ['功能 A', '功能 B'], verdict: 'can_continue', coverage: expect.objectContaining({ complete: true }) }));
     await renameEvaluation(cwd, 'evaluation-1', { customName: '上线前核心检查' });
-    expect((await listEvaluationRecords(cwd, project.projectId))[0]?.displayName).toBe('上线前核心检查');
+    expect((await listEvaluationRecords(cwd, project.projectId)).find((item) => item.evaluationId === 'evaluation-1')?.displayName).toBe('上线前核心检查');
   });
 });

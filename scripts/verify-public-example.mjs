@@ -94,18 +94,25 @@ try {
     session = (await api(dashboardUrl, `/api/evaluations/${encodeURIComponent(created.evaluationId)}`)).session;
   }
   if (session.status !== 'completed') throw new Error(`公开示例核心评测未完成：${JSON.stringify({ status: session.status, stage: session.currentStage, error: session.error })}`);
+  if (!session.coverage || session.coverage.plannedCount < 1) throw new Error('公开示例没有生成功能级覆盖证据。');
+  if (!session.coverage.complete || session.coverage.executedCount !== session.coverage.plannedCount || session.coverage.notRunCount !== 0) {
+    throw new Error(`公开示例没有实际运行全部计划功能：${JSON.stringify(session.coverage)}`);
+  }
+  if (new Set(session.executedCapabilityIds).size !== session.coverage.executedCount) throw new Error('实际运行功能数量与覆盖证据不一致。');
 
   const records = await api(dashboardUrl, `/api/evaluation-records?projectId=${encodeURIComponent(project.projectId)}`);
   const record = records.find((item) => item.evaluationId === session.evaluationId);
   if (!record || record.status !== 'completed') throw new Error('公开示例没有生成可打开的评测记录。');
+  if (record.coverage?.executedCount !== session.coverage.executedCount || record.capabilityNames.length !== session.executedCapabilityNames.length) throw new Error('评测卡片没有使用实际运行功能快照。');
   const reportPath = resolve(project.outputDir, 'evaluations', session.evaluationId, 'report.json');
   if (!existsSync(reportPath)) throw new Error('公开示例没有生成对应的 report.json。');
   const report = JSON.parse(readFileSync(reportPath, 'utf8'));
   if (report.evaluationId !== session.evaluationId) throw new Error('公开示例报告与本次评测不匹配。');
+  if (report.coverage?.executedCount !== session.coverage.executedCount) throw new Error('公开示例报告缺少对应的功能级覆盖证据。');
   const reportPage = await waitFor(`${dashboardUrl}/issues?evaluationId=${encodeURIComponent(session.evaluationId)}`);
   if (!(await reportPage.text()).includes('<div id="root">')) throw new Error('公开示例报告页面无法打开。');
 
-  process.stdout.write(`${JSON.stringify({ ok: true, projectStatus: project.status, evaluationStatus: session.status, report: 'ready', evaluationId: session.evaluationId })}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: true, projectStatus: project.status, evaluationStatus: session.status, report: 'ready', plannedCapabilities: session.coverage.plannedCount, executedCapabilities: session.coverage.executedCount, evaluationId: session.evaluationId })}\n`);
 } finally {
   for (const child of processes.reverse()) child.kill('SIGTERM');
   rmSync(temporary, { recursive: true, force: true });

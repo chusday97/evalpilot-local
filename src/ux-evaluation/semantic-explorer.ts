@@ -29,6 +29,24 @@ export function semanticTargetKey(target: SemanticTarget): string {
   return `${target.kind}:${target.label}`;
 }
 
+function stablePageText(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/(?:\d+\s*[:：]\s*)+\d+/g, '#')
+    .replace(/((?:倒计时|比分|score|库存|剩余)[^\n]{0,24}?)\d+(?:\s*[-/]\s*\d+)?/gi, '$1#')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+export function hasObservablePageChange(
+  beforeUrl: string,
+  afterUrl: string,
+  beforeText: string,
+  afterText: string,
+): boolean {
+  return beforeUrl !== afterUrl || stablePageText(beforeText) !== stablePageText(afterText);
+}
+
 export function chooseSemanticTarget(
   targets: SemanticTarget[],
   goal: string,
@@ -51,6 +69,41 @@ export function evaluateVisibleConditions(visibleText: string, conditions: strin
 } {
   const normalizedText = visibleText.replace(/\s+/g, ' ').trim().toLowerCase();
   const satisfied = conditions.filter((condition) => normalizedText.includes(condition.replace(/\s+/g, ' ').trim().toLowerCase()));
+  const satisfiedSet = new Set(satisfied);
+  const missing = conditions.filter((condition) => !satisfiedSet.has(condition));
+  return { satisfied, missing, complete: conditions.length > 0 && missing.length === 0 };
+}
+
+export interface RuntimeConditionEvidence {
+  pageReached: boolean;
+  visibleTargetCount: number;
+  observableFeedback: boolean;
+}
+
+export function evaluateEvidenceConditions(
+  visibleText: string,
+  conditions: string[],
+  evidence: RuntimeConditionEvidence,
+): {
+  satisfied: string[];
+  missing: string[];
+  complete: boolean;
+} {
+  const visible = evaluateVisibleConditions(visibleText, conditions);
+  const visibleSet = new Set(visible.satisfied);
+  const satisfied = conditions.filter((condition) => {
+    if (visibleSet.has(condition)) return true;
+    if (/入口页面.*(?:Chromium|浏览器).*(?:到达|访问)|entry page.*(?:reach|load)/i.test(condition)) {
+      return evidence.pageReached;
+    }
+    if (/主要内容.*核心操作.*可见|main content.*(?:action|control).*visible/i.test(condition)) {
+      return visibleText.trim().length > 0 && evidence.visibleTargetCount > 0;
+    }
+    if (/执行后页面.*(?:结果|下一步)|after.*action.*(?:result|next step)/i.test(condition)) {
+      return evidence.observableFeedback;
+    }
+    return false;
+  });
   const satisfiedSet = new Set(satisfied);
   const missing = conditions.filter((condition) => !satisfiedSet.has(condition));
   return { satisfied, missing, complete: conditions.length > 0 && missing.length === 0 };

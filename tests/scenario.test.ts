@@ -3,6 +3,8 @@ import type { EvalBlueprint } from '../types.js';
 import { calculateCoverage } from '../src/evaluation/coverage-calculator.js';
 import { buildPersonas } from '../src/generation/persona-builder.js';
 import { buildScenarios } from '../src/generation/scenario-builder.js';
+import { buildExploratoryScenarios } from '../src/ux-evaluation/exploratory-scenario-builder.js';
+import { buildEvaluationCoverage, planCapabilities, recordCapabilityRun, selectExploratoryScenarios } from '../src/dashboard/evaluation-coverage.js';
 
 const blueprint: EvalBlueprint = {
   projectName: 'Fixture',
@@ -70,5 +72,26 @@ describe('persona and scenario generation', () => {
     expect(coverage.dimensions.intentType?.ratio).toBe(1);
     expect(coverage.dimensions.journeyStage?.missing).toEqual([]);
     expect(coverage.dimensions.personas?.missing).toEqual([]);
+  });
+
+  it('plans distinct capabilities and never repeats one feature as fake breadth', () => {
+    const personas = buildPersonas();
+    const exploratory = buildExploratoryScenarios(blueprint, personas);
+    const planned = planCapabilities(blueprint.capabilities, [], 'core');
+    const selected = selectExploratoryScenarios(exploratory, planned.map((item) => item.id), 'core');
+    expect(planned.map((item) => item.id)).toEqual(['cap-1', 'cap-2', 'cap-3']);
+    expect(new Set(selected.map((item) => item.capability))).toEqual(new Set(['cap-1', 'cap-2', 'cap-3']));
+    expect(new Set(exploratory.map((item) => item.capability))).toEqual(new Set(blueprint.capabilities.map((item) => item.id)));
+  });
+
+  it('keeps coverage incomplete until every planned capability has a real run', () => {
+    const planned = planCapabilities(blueprint.capabilities, [], 'core');
+    let coverage = buildEvaluationCoverage(blueprint.capabilities, planned, ['/']);
+    expect(coverage).toMatchObject({ plannedCount: 3, executedCount: 0, notRunCount: 3, complete: false });
+    coverage = recordCapabilityRun(coverage, 'cap-1', 'run-1', 'passed');
+    coverage = recordCapabilityRun(coverage, 'cap-2', 'run-2', 'passed');
+    expect(coverage.complete).toBe(false);
+    coverage = recordCapabilityRun(coverage, 'cap-3', 'run-3', 'passed');
+    expect(coverage).toMatchObject({ executedCount: 3, passedCount: 3, notRunCount: 0, complete: true });
   });
 });

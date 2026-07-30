@@ -37,7 +37,8 @@ import { compareJourneys } from './journey-comparison.js';
 import { repeatedInputActionIds } from './repeated-input-detector.js';
 import {
   chooseSemanticTarget,
-  evaluateVisibleConditions,
+  evaluateEvidenceConditions,
+  hasObservablePageChange,
   semanticTargetKey,
   type SemanticTarget,
 } from './semantic-explorer.js';
@@ -199,6 +200,7 @@ export async function runExploratoryScenario(
   let functionalStatus: 'passed' | 'failed' | 'blocked' = 'passed';
   let finalVisibleText = '';
   let finalEvidence: string[] = [];
+  let lastVisibleTargetCount = 0;
 
   try {
     browserContext = await browser.newContext({ viewport: { width: 1440, height: 900 } });
@@ -227,10 +229,15 @@ export async function runExploratoryScenario(
           break;
         }
         finalVisibleText = await page.locator('body').innerText().catch(() => '');
-        const conditionState = evaluateVisibleConditions(finalVisibleText, context.successConditions);
+        const targets = await collectSemanticTargets(page);
+        lastVisibleTargetCount = targets.length;
+        const conditionState = evaluateEvidenceConditions(finalVisibleText, context.successConditions, {
+          pageReached: actions.some((item) => item.type === 'navigation'),
+          visibleTargetCount: lastVisibleTargetCount,
+          observableFeedback: actions.some((item) => item.type === 'click' && item.outcome === 'observable_feedback'),
+        });
         if (conditionState.complete) break;
 
-        const targets = await collectSemanticTargets(page);
         const target = chooseSemanticTarget(targets, `${context.goal} ${conditionState.missing.join(' ')}`, visited);
         if (!target) {
           abandonment = { abandoned: true, reason: '当前页面没有与目标相关且安全的未尝试操作', step: actions.at(-1)?.actionId ?? null };
@@ -257,7 +264,7 @@ export async function runExploratoryScenario(
           await page.locator('a,button,[role="button"],input,textarea,select').nth(target.index).click({ timeout: 5_000 });
           await page.waitForTimeout(350);
           const afterText = await page.locator('body').innerText().catch(() => '');
-          const changed = beforeUrl !== page.url() || beforeText !== afterText;
+          const changed = hasObservablePageChange(beforeUrl, page.url(), beforeText, afterText);
           const evidence = await screenshotEvidence(page, runDirectory, actions.length + 1);
           action(actions, {
             type: 'click', timestampMs: Date.now() - started.getTime(), page: beforeUrl, target: target.label,
@@ -319,8 +326,12 @@ export async function runExploratoryScenario(
     if (ownBrowser) await browser.close();
   }
 
-  const visibleConditions = evaluateVisibleConditions(finalVisibleText, context.successConditions);
-  const followUpVisible = /保存|修改|导出|分享|继续|完成|结束|save|edit|export|share|continue|finish/i.test(finalVisibleText);
+  const visibleConditions = evaluateEvidenceConditions(finalVisibleText, context.successConditions, {
+    pageReached: actions.some((item) => item.type === 'navigation'),
+    visibleTargetCount: lastVisibleTargetCount,
+    observableFeedback: actions.some((item) => item.type === 'click' && item.outcome === 'observable_feedback'),
+  });
+  const followUpVisible = /保存|修改|导出|分享|继续|完成|结束|返回|关闭|save|edit|export|share|continue|finish|back|close/i.test(finalVisibleText);
   const closure = analyzeClosure({
     technical: { conditions: graph.completionDefinition.technical.conditions, evidence: [tracePath], satisfied: functionalStatus === 'passed' },
     interface: { conditions: graph.completionDefinition.interface.conditions, evidence: finalEvidence, satisfied: functionalStatus === 'passed' && consoleErrors.length === 0 },

@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { basename, resolve } from 'node:path';
 import { promisify } from 'node:util';
-import { readFile, stat } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
 import type { AgentConnection, AgentProviderName, WorkspaceCandidate } from '../../types.js';
 import { pathExists } from '../utils/file-system.js';
 
@@ -95,12 +95,43 @@ async function stackFor(root: string): Promise<string[]> {
   } catch { return []; }
 }
 
+async function hasApplicationMarker(root: string): Promise<boolean> {
+  return (await Promise.all([
+    'package.json',
+    'pyproject.toml',
+    'Cargo.toml',
+    'go.mod',
+    'index.html',
+  ].map((marker) => pathExists(resolve(root, marker))))).some(Boolean);
+}
+
+async function projectRootsForWorkspace(root: string): Promise<string[]> {
+  if (!(await pathExists(root))) return [root];
+  if (await hasApplicationMarker(root)) return [root];
+  try {
+    const rootHasGit = await pathExists(resolve(root, '.git'));
+    const children = await readdir(root, { withFileTypes: true });
+    const projectChildren: string[] = [];
+    for (const child of children) {
+      if (!child.isDirectory() || child.name.startsWith('.') || child.name === 'node_modules') continue;
+      const childRoot = resolve(root, child.name);
+      if (await hasApplicationMarker(childRoot) || await pathExists(resolve(childRoot, '.git'))) projectChildren.push(childRoot);
+    }
+    if (projectChildren.length) return projectChildren;
+    return rootHasGit ? [root] : [];
+  } catch {
+    return [];
+  }
+}
+
 export async function discoverWorkspaceCandidates(providers: AgentProviderName[], home = homedir()): Promise<WorkspaceCandidate[]> {
   const loaders: Record<AgentProviderName, (homePath: string) => Promise<Array<{ path: string; mtime: number }>>> = { codex: codexRoots, claude_code: claudeRoots, antigravity: antigravityRoots };
   const byPath = new Map<string, { sourceAgents: Set<AgentProviderName>; mtime: number }>();
   for (const provider of providers) for (const item of await loaders[provider](home)) {
-    const root = resolve(item.path); const current = byPath.get(root) ?? { sourceAgents: new Set<AgentProviderName>(), mtime: 0 };
-    current.sourceAgents.add(provider); current.mtime = Math.max(current.mtime, item.mtime); byPath.set(root, current);
+    for (const root of await projectRootsForWorkspace(resolve(item.path))) {
+      const current = byPath.get(root) ?? { sourceAgents: new Set<AgentProviderName>(), mtime: 0 };
+      current.sourceAgents.add(provider); current.mtime = Math.max(current.mtime, item.mtime); byPath.set(root, current);
+    }
   }
   const candidates: WorkspaceCandidate[] = [];
   for (const [projectRoot, metadata] of byPath) {

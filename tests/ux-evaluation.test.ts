@@ -133,6 +133,30 @@ describe('UX evaluation contracts', () => {
     expect(frictions.every((event) => event.possibleUserReason.startsWith('推测：'))).toBe(true);
   });
 
+  it('does not report an earlier no-feedback click when later evidence proves the user goal completed', () => {
+    const recorded: InteractionAction[] = [
+      { actionId: 'a1', type: 'navigation', timestampMs: 0, page: '/', target: '/', inputField: null, inputLength: null, inputFingerprint: null, outcome: 'started', evidence: ['start.png'] },
+      { actionId: 'a2', type: 'click', timestampMs: 100, page: '/', target: '当前标签', inputField: null, inputLength: null, inputFingerprint: null, outcome: 'no_feedback', evidence: ['same.png'] },
+      { actionId: 'a3', type: 'click', timestampMs: 200, page: '/', target: '进入详情', inputField: null, inputLength: null, inputFingerprint: null, outcome: 'observable_feedback', evidence: ['detail.png'] },
+    ];
+    const completed = completion(true);
+    const metrics = calculateInteractionMetrics(recorded, {
+      completion: completed,
+      requiredActionIds: ['a1', 'a3'],
+      redundantActionIds: ['a2'],
+      abandoned: false,
+      abandonmentReason: null,
+    });
+    const frictions = detectFrictions({
+      featureId: capability.id,
+      personaId: 'persona-new-user',
+      actions: recorded,
+      metrics,
+      completion: completed,
+    });
+    expect(frictions.some((event) => event.type === 'interaction_feedback_issue')).toBe(false);
+  });
+
   it('compares ideal, actual, and shortest reasonable paths without deleting safety', () => {
     const graph = buildFeatureJourneyGraph(capability);
     const metrics = calculateInteractionMetrics(actions(), {
