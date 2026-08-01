@@ -25,6 +25,13 @@ import { buildGuidedFlow } from './guidance-service.js';
 import { presentIssue } from './issue-presenter.js';
 import { inspectRuntime } from '../runtime/runtime-readiness.js';
 import { dashboardAssetsRoot, isLegacyDataRoot } from '../runtime/paths.js';
+import { evalCaseResultPath, loadEvalCaseResult } from '../judge/eval-result-store.js';
+import { storageIdSchema } from '../eval-set/schemas.js';
+import { evalSetSummary, findAdaptiveCase, generateAdaptiveFoundation, latestCoverage, latestProductModel, listAdaptiveCases, listAdaptiveRuns, projectBadcase, projectBadcases, regressionCases } from './adaptive-dashboard-data.js';
+import { chromium } from 'playwright';
+import { OpenAiProvider } from '../ai/openai-provider.js';
+import { runAdaptiveCase } from '../evaluation/adaptive-evaluation-service.js';
+import { loadEvalSetManifest } from '../eval-set/eval-set-store.js';
 
 interface ApiResult { status: number; body: ApiResponse<unknown> }
 const execFileAsync = promisify(execFile);
@@ -101,8 +108,9 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
         status: 'ok',
         packageVersion: runtime.packageVersion,
         contractVersion: runtime.contractVersion,
-        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff'],
+        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'adaptive_eval_set', 'hybrid_judge_assets'],
         runtime,
+        aiTestAgent: { configured: Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim()), provider: 'openai', screenshotDefault: false },
       });
     }
     const safeLegacyPost = pathname === '/api/workspace-candidates' || pathname === '/api/system/pick-directory' || pathname === '/api/connect/check' || /^\/api\/agents\/(codex|claude_code|antigravity)\/check$/.test(pathname);
@@ -130,6 +138,24 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
       }
     }
     if (method === 'GET' && pathname === '/api/projects') { const registry = await loadProjectRegistry(cwd); return ok({ ...registry, summaries: await Promise.all(registry.projects.map((project) => projectSummary(project.projectId, project.outputDir))) }); }
+    const adaptiveProjectRoute = pathname.match(/^\/api\/projects\/([^/]+)\/(product-model|eval-set|eval-cases|adaptive-runs|coverage|badcases|regression)(\/generate)?$/);
+    if (adaptiveProjectRoute) {
+      const projectId = decodeURIComponent(adaptiveProjectRoute[1] ?? '');
+      const resource = adaptiveProjectRoute[2];
+      const config = await configForProject(cwd, projectId);
+      if (method === 'POST' && resource === 'eval-set' && adaptiveProjectRoute[3] === '/generate') {
+        if (recordBody(body)?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '生成评测集前需要明确确认。');
+        return ok(await generateAdaptiveFoundation({ projectId, outputDir: config.outputDir }));
+      }
+      if (method !== 'GET' || adaptiveProjectRoute[3]) return fail(405, 'METHOD_NOT_ALLOWED', '该评测资产接口不支持这个操作。');
+      if (resource === 'product-model') return ok(await latestProductModel(config.outputDir));
+      if (resource === 'eval-set') return ok(await evalSetSummary(config.outputDir));
+      if (resource === 'eval-cases') return ok(await listAdaptiveCases(config.outputDir));
+      if (resource === 'adaptive-runs') return ok(await listAdaptiveRuns(config.outputDir));
+      if (resource === 'coverage') return ok(await latestCoverage(config.outputDir));
+      if (resource === 'badcases') return ok(await projectBadcases(config.outputDir));
+      if (resource === 'regression') return ok(await regressionCases(config.outputDir));
+    }
     if (method === 'POST' && pathname === '/api/projects/discover') {
       const input = recordBody(body); return ok(await discoverProject(String(input?.projectRoot ?? ''), typeof input?.targetUrl === 'string' ? input.targetUrl : null));
     }
@@ -156,6 +182,38 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
     if (fixAction && method === 'POST') { const id = decodeURIComponent(fixAction[1] ?? ''); const input = recordBody(body); if (input?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '该操作需要明确确认。'); return ok(fixAction[2] === 'run' ? await startAgent(cwd, id, body) : await applyFix(cwd, id, body)); }
     if (method === 'GET' && /^\/api\/agent-runs\/[^/]+$/.test(pathname)) { const id = decodeURIComponent(pathname.slice('/api/agent-runs/'.length)); const snapshot = agentSnapshot(id); return snapshot ? ok(snapshot) : fail(404, 'AGENT_RUN_NOT_FOUND', `没有找到 Agent 运行：${id}`); }
     const query = new URLSearchParams(search); const requestedProjectId = query.get('projectId') ?? undefined; const config = await configForProject(cwd, requestedProjectId);
+    if (method === 'POST' && /^\/api\/eval-cases\/[^/]+\/run$/.test(pathname)) {
+      const input = recordBody(body); if (input?.confirmed !== true || input.allowRemoteModel !== true) return fail(409, 'CONFIRMATION_REQUIRED', '运行 AI Test Agent 前必须确认远程模型和最小化页面文本传输。');
+      const apiKey = process.env.EVALPILOT_OPENAI_API_KEY?.trim(); if (!apiKey) return fail(409, 'AI_PROVIDER_NOT_CONFIGURED', '尚未配置实验 AI Provider。请在启动 Dashboard 前设置 EVALPILOT_OPENAI_API_KEY。');
+      const caseId = decodeURIComponent(pathname.slice('/api/eval-cases/'.length, -'/run'.length)); const evalCase = await findAdaptiveCase(config.outputDir, caseId); if (!evalCase) return fail(404, 'EVAL_CASE_NOT_FOUND', `没有找到评测案例：${caseId}`);
+      const [model, manifest, allCases] = await Promise.all([latestProductModel(config.outputDir), loadEvalSetManifest(config.outputDir), listAdaptiveCases(config.outputDir)]); if (!model) return fail(409, 'PRODUCT_MODEL_REQUIRED', '请先生成评测集，再运行 AI Test Agent。');
+      const capability = model.capabilities.find((item) => item.capabilityId === evalCase.capabilityId); const entry = capability?.entryPoints[0] ?? config.targetUrl; let startingUrl: string; try { startingUrl = new URL(entry, config.targetUrl).toString(); } catch { return fail(422, 'STARTING_URL_INVALID', '该案例没有可用的公开起始页面。'); }
+      const provider = new OpenAiProvider({ apiKey, model: process.env.EVALPILOT_OPENAI_MODEL?.trim() || 'gpt-5-mini' }); const browser = await chromium.launch({ headless: true });
+      let targetAppGitSha: string | null = null; try { targetAppGitSha = (await execFileAsync('git', ['-C', config.projectRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 4_000 })).stdout.trim() || null; } catch { targetAppGitSha = null; }
+      try { const page = await browser.newPage(); return ok(await runAdaptiveCase({ page, provider, outputDir: config.outputDir, evalCase, productModel: model, existingCases: allCases, startingUrl, evalSetVersion: manifest.version, targetAppGitSha, allowRemoteModel: true, allowScreenshotToProvider: input.allowScreenshot === true })); }
+      finally { await browser.close(); }
+    }
+    if (method === 'GET' && /^\/api\/eval-cases\/[^/]+$/.test(pathname)) {
+      const id = decodeURIComponent(pathname.slice('/api/eval-cases/'.length));
+      const evalCase = await findAdaptiveCase(config.outputDir, id);
+      return evalCase ? ok(evalCase) : fail(404, 'EVAL_CASE_NOT_FOUND', `没有找到评测案例：${id}`);
+    }
+    if (method === 'GET' && /^\/api\/badcases\/[^/]+$/.test(pathname)) {
+      const id = decodeURIComponent(pathname.slice('/api/badcases/'.length));
+      const badcase = await projectBadcase(config.outputDir, storageIdSchema.parse(id));
+      return badcase ? ok(badcase) : fail(404, 'BADCASE_NOT_FOUND', `没有找到 Badcase：${id}`);
+    }
+    const adaptiveRunRoute = pathname.match(/^\/api\/runs\/([^/]+)\/(evidence|result)$/);
+    if (method === 'GET' && adaptiveRunRoute) {
+      const runId = storageIdSchema.parse(decodeURIComponent(adaptiveRunRoute[1] ?? ''));
+      if (adaptiveRunRoute[2] === 'result') {
+        const path = evalCaseResultPath(config.outputDir, runId);
+        return await pathExists(path) ? ok(await loadEvalCaseResult(config.outputDir, runId)) : fail(404, 'RUN_RESULT_NOT_FOUND', `没有找到运行结果：${runId}`);
+      }
+      const path = resolve(config.outputDir, 'runs', runId, 'evidence-packet.json');
+      const evidence = await readOptionalText(path);
+      return evidence ? ok(JSON.parse(evidence)) : fail(404, 'RUN_EVIDENCE_NOT_FOUND', `没有找到运行证据：${runId}`);
+    }
     if (method === 'GET' && pathname === '/api/reports/history') return ok(await readRunHistory(config.outputDir));
     if (method === 'GET' && pathname === '/api/issues') { const evaluationId = query.get('evaluationId'); const issuesPath = evaluationId ? resolve(config.outputDir, 'evaluations', evaluationId, 'issues.jsonl') : resolve(config.outputDir, 'reports', 'ux-issues.jsonl'); const issues = await pathExists(issuesPath) ? await readJsonLinesFile<UxIssue>(issuesPath) : []; const dismissedPath = resolve(config.outputDir, 'reports', 'dismissed-issues.json'); const dismissed = await pathExists(dismissedPath) ? JSON.parse(await readOptionalText(dismissedPath) ?? '[]') as string[] : []; return ok(issues.map((item) => ({ ...presentIssue(item), dismissed: dismissed.includes(item.issueId) }))); }
     if (method === 'POST' && /^\/api\/issues\/[^/]+\/dismiss$/.test(pathname)) { if (recordBody(body)?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '暂不处理问题前需要确认。'); const id = decodeURIComponent(pathname.slice('/api/issues/'.length, -'/dismiss'.length)); const path = resolve(config.outputDir, 'reports', 'dismissed-issues.json'); const current = await pathExists(path) ? JSON.parse(await readOptionalText(path) ?? '[]') as string[] : []; await writeJsonAtomic(path, [...new Set([...current, id])]); return ok({ issueId: id, dismissed: true }); }

@@ -21,6 +21,7 @@ import { startDashboardServer } from '../dashboard/server.js';
 import { EvalPilotError } from '../utils/errors.js';
 import { dashboardAssetsRoot, isLegacyDataRoot, migrateLegacyData, packageVersion, resolveDataRoot } from '../runtime/paths.js';
 import { inspectRuntime } from '../runtime/runtime-readiness.js';
+import { runBuiltinBenchmark } from '../benchmark/runner.js';
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -85,6 +86,26 @@ export function createProgram(cwd = process.cwd()): Command {
       } catch (error) {
         throw new EvalPilotError(error instanceof Error ? error.message : String(error), 'LEGACY_MIGRATION_FAILED');
       }
+    });
+
+  program
+    .command('benchmark')
+    .description('运行 20 个已知失败与 20 个干净行为的本地自基准')
+    .option('--json', '输出完整 JSON 指标与逐夹具预测')
+    .action(({ json }: { json?: boolean }) => {
+      const report = runBuiltinBenchmark();
+      if (json) { process.stdout.write(`${JSON.stringify(report, null, 2)}\n`); return; }
+      const percent = (value: number) => `${(value * 100).toFixed(1)}%`;
+      process.stdout.write([
+        `EvalPilot 内置自基准 v${report.benchmarkVersion}`,
+        `已知失败：${report.metrics.knownFailures}；干净行为：${report.metrics.cleanBehaviors}`,
+        `Bug Detection Recall：${percent(report.metrics.bugDetectionRecall)}`,
+        `Precision：${percent(report.metrics.precision)}`,
+        `False Positive Rate：${percent(report.metrics.falsePositiveRate)}`,
+        `Classification Accuracy：${percent(report.metrics.classificationAccuracy)}`,
+        `Evaluator Failure Rate：${percent(report.metrics.evaluatorFailureRate)}`,
+        `边界：${report.limitation}`,
+      ].join('\n') + '\n');
     });
 
   program

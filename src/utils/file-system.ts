@@ -42,6 +42,15 @@ export async function readYamlFile<T>(path: string): Promise<T> {
   return parse(await readFile(path, 'utf8')) as T;
 }
 
+export async function readJsonFile<T>(path: string): Promise<T> {
+  const content = await readFile(path, 'utf8');
+  try {
+    return JSON.parse(content) as T;
+  } catch (error) {
+    throw new Error(`${path} 不是合法 JSON：${String(error)}`);
+  }
+}
+
 export async function readJsonLinesFile<T>(path: string): Promise<T[]> {
   const content = await readFile(path, 'utf8');
   if (!content.trim()) return [];

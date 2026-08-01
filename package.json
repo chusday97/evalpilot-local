@@ -19,6 +19,7 @@
     "test:public-example": "node scripts/verify-public-example.mjs",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:benchmark": "tsx src/cli/index.ts benchmark --json",
     "audit:package": "node scripts/audit-package.mjs",
     "test:consumer": "node scripts/verify-consumer.mjs",
     "prepack": "npm run build"
@@ -43,7 +44,7 @@
     "codex"
   ],
   "files": [
-    "dist/",
+    "dist/**/*.js",
     "dist-dashboard/",
     "skills/evalpilot/",
     "README.md",

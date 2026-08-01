@@ -20,7 +20,7 @@ export type GuidedStepStatus = 'completed' | 'current' | 'waiting' | 'attention'
 
 export interface AgentCapabilities { workspaceDiscovery: boolean; directFix: boolean; taskPackageHandoff: boolean }
 export interface RuntimeCheck { status: 'ready' | 'missing' | 'blocked'; label: string; detail: string; recoveryAction: string | null }
-export interface RuntimeReadiness { packageVersion: string; contractVersion: '0.5.0'; platform: NodeJS.Platform; nodeVersion: string; dataRoot: string; checks: { node: RuntimeCheck; chromium: RuntimeCheck; git: RuntimeCheck }; agents: AgentConnection[]; blockingIssues: string[]; recoveryActions: string[]; checkedAt: string }
+export interface RuntimeReadiness { packageVersion: string; contractVersion: '0.5.0'; platform: NodeJS.Platform; nodeVersion: string; dataRoot: string; checks: { node: RuntimeCheck; chromium: RuntimeCheck; git: RuntimeCheck; aiProvider: RuntimeCheck }; agents: AgentConnection[]; blockingIssues: string[]; recoveryActions: string[]; checkedAt: string }
 export interface DashboardHealth { status: 'ok'; packageVersion: string; contractVersion: '0.5.0'; capabilities: string[]; runtime: RuntimeReadiness }
 export interface GuidedFlowStep { id: Exclude<GuidedStepId, 'complete'>; title: string; description: string; status: GuidedStepStatus; actionLabel: string | null; route: string; anchor: string | null }
 export interface GuidedFlowState { projectId: string | null; currentStep: GuidedStepId; steps: GuidedFlowStep[]; updatedAt: string }
@@ -235,6 +235,591 @@ export interface EvalBlueprint {
   releaseGates: string[];
   approvalStatus: ApprovalStatus;
   generatedAt: string;
+}
+
+export interface ProductUserType {
+  userTypeId: string;
+  name: string;
+  description: string;
+  goals: string[];
+  evidenceStatus: FactStatus;
+  evidence: EvidenceClaim[];
+  needsHumanReview: boolean;
+}
+
+export interface ProductCapability {
+  capabilityId: string;
+  name: string;
+  description: string;
+  routes: string[];
+  entryPoints: string[];
+  userGoals: string[];
+  supportedTasks: string[];
+  importance: Importance;
+  evidenceStatus: FactStatus;
+  evidence: EvidenceClaim[];
+  needsHumanReview: boolean;
+}
+
+export interface ProductTask {
+  taskId: string;
+  capabilityId: string;
+  name: string;
+  goal: string;
+  preconditions: string[];
+  successConditions: string[];
+  evidenceStatus: FactStatus;
+  evidence: EvidenceClaim[];
+  needsHumanReview: boolean;
+}
+
+export interface BusinessRule {
+  ruleId: string;
+  statement: string;
+  evidenceStatus: FactStatus;
+  evidence: EvidenceClaim[];
+  needsHumanReview: boolean;
+}
+
+export interface KnownRisk {
+  riskId: string;
+  title: string;
+  description: string;
+  severity: Severity;
+  evidenceStatus: FactStatus;
+  evidence: EvidenceClaim[];
+  needsHumanReview: boolean;
+}
+
+export interface ProductUnknown {
+  unknownId: string;
+  question: string;
+  impact: string;
+  resolutionHint: string;
+}
+
+export interface ProductModel {
+  projectId: string;
+  version: number;
+  generatedAt: string;
+  productName: string;
+  productType: string;
+  targetUsers: ProductUserType[];
+  capabilities: ProductCapability[];
+  userTasks: ProductTask[];
+  businessRules: BusinessRule[];
+  knownRisks: KnownRisk[];
+  unknowns: ProductUnknown[];
+  evidence: EvidenceClaim[];
+}
+
+export type EvalSetType = 'baseline' | 'regression' | 'challenge' | 'exploratory';
+export type EvalCaseLifecycleStatus = 'candidate' | 'active' | 'stable' | 'retired';
+export type EvalVerdict = 'pass' | 'fail' | 'inconclusive';
+export type BadcaseCategory = 'functional' | 'navigation' | 'interaction' | 'ux' | 'state' | 'api' | 'data' | 'auth' | 'ai_output' | 'prompt' | 'rag' | 'tool' | 'safety' | 'performance' | 'evaluator' | 'unknown';
+export type CoverageDimension = 'capability' | 'persona' | 'input_quality' | 'system_state' | 'journey_stage' | 'risk' | 'recovery' | 'interaction_pattern' | 'ai_output';
+
+export interface EvalPersonaRef {
+  personaId: string;
+  name: string;
+  behaviorPolicy: string[];
+}
+
+export interface DeterministicAssertion {
+  assertionId: string;
+  type: 'url_matches' | 'text_visible' | 'text_absent' | 'request_observed' | 'console_error_absent' | 'state_persisted';
+  target: string;
+  expected: string | number | boolean | null;
+  negated: boolean;
+}
+
+export interface EvalOracle {
+  expectedOutcome: string[];
+  mustObserve: string[];
+  mustNotObserve: string[];
+  businessRules: string[];
+  semanticRubric: string[];
+  deterministicAssertions: DeterministicAssertion[];
+  inconclusiveWhen: string[];
+  aiOutputCriteria?: AiOutputCriterion[];
+}
+
+export interface AiOutputCriterion {
+  type: 'relevance' | 'factuality' | 'consistency' | 'instruction_following' | 'uncertainty_expression' | 'citation_quality' | 'hallucination' | 'safety' | 'format_correctness';
+  description: string;
+  referenceAnswer: string | null;
+  humanReviewRequired: boolean;
+}
+
+export type EvalCaseOrigin =
+  | { type: 'generated_from_product_model'; productModelVersion: number }
+  | { type: 'generated_from_coverage_gap'; sourceCaseIds: string[]; gapId: string }
+  | { type: 'badcase'; issueId: string; badcaseId: string; firstFailedRunId: string }
+  | { type: 'human'; note: string };
+
+export interface CoverageDimensionValue {
+  dimension: CoverageDimension;
+  value: string;
+}
+
+export interface RegressionMetadata {
+  badcaseId: string;
+  issueId: string;
+  firstFailedAt: string;
+  fixedAt: string;
+  originalFailure: string;
+  sourceRunId: string;
+  fixTaskId: string | null;
+}
+
+export interface EvalCaseStats {
+  passCount: number;
+  failCount: number;
+  inconclusiveCount: number;
+  latestResult: EvalVerdict | null;
+  latestRunId: string | null;
+  uniqueCoverageContribution: number;
+  lastExecutedAt: string | null;
+}
+
+export interface EvalCase {
+  caseId: string;
+  projectId: string;
+  setType: EvalSetType;
+  status: EvalCaseLifecycleStatus;
+  origin: EvalCaseOrigin;
+  capabilityId: string;
+  taskId: string | null;
+  title: string;
+  hypothesis: string;
+  persona: EvalPersonaRef;
+  goal: string;
+  knownInformation: Record<string, unknown>;
+  preconditions: string[];
+  oracle: EvalOracle;
+  coverageDimensions: CoverageDimensionValue[];
+  riskLevel: Severity;
+  generationReason: string;
+  version: number;
+  stats: EvalCaseStats;
+  regressionMetadata: RegressionMetadata | null;
+  retirementReason: string | null;
+  needsHumanReview: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface EvalSetCaseReference {
+  caseId: string;
+  setType: EvalSetType;
+  status: EvalCaseLifecycleStatus;
+  version: number;
+  updatedAt: string;
+}
+
+export interface EvalSetManifest {
+  projectId: string;
+  version: number;
+  generatedAt: string;
+  updatedAt: string;
+  cases: EvalSetCaseReference[];
+}
+
+export interface DeterministicCheckResult {
+  assertionId: string;
+  verdict: EvalVerdict;
+  summary: string;
+  evidenceRefs: string[];
+}
+
+export interface DeterministicJudgeResult {
+  checks: DeterministicCheckResult[];
+  hardFailure: boolean;
+  severity: Severity | null;
+  evidenceRefs: string[];
+}
+
+export interface RootCauseHypothesis {
+  hypothesis: string;
+  confidence: number;
+  supportingEvidence: string[];
+  contradictingEvidence: string[];
+  howToVerify: string[];
+}
+
+export interface SemanticJudgeResult {
+  verdict: EvalVerdict;
+  taskCompletion: 'complete' | 'partial' | 'failed' | 'unknown';
+  summary: string;
+  whatWorked: string[];
+  whatFailed: string[];
+  whyItMatters: string[];
+  confirmedFacts: string[];
+  hypotheses: RootCauseHypothesis[];
+  unknowns: string[];
+  evidenceRefs: string[];
+  confidence: number;
+}
+
+export interface EvalCaseResult {
+  runId: string;
+  caseId: string;
+  verdict: EvalVerdict;
+  failureSource: 'product' | 'evaluator' | 'unknown' | null;
+  severity: Severity | null;
+  deterministic: DeterministicJudgeResult;
+  semantic: SemanticJudgeResult;
+  evidencePacketPath: string;
+  createdAt: string;
+}
+
+export interface Badcase {
+  badcaseId: string;
+  projectId: string;
+  caseId: string;
+  runId: string;
+  category: BadcaseCategory;
+  title: string;
+  observedFailure: string;
+  userImpact: string;
+  severity: Severity;
+  confirmedFacts: string[];
+  rootCauseHypotheses: RootCauseHypothesis[];
+  unknowns: string[];
+  evidenceRefs: string[];
+  fixStatus: 'open' | 'in_progress' | 'fixed' | 'wont_fix';
+  regressionCaseId: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface FailureClassification {
+  kind: 'product' | 'evaluator' | 'unknown' | 'none';
+  category: BadcaseCategory | null;
+  reason: string;
+}
+
+export type ChallengeMutationType = 'boundary' | 'journey_mutation' | 'persona_mutation';
+
+export interface PassAnalysis {
+  confirmedConditions: CoverageDimensionValue[];
+  remainingGaps: CoverageGap[];
+  challengeCandidates: EvalCase[];
+}
+
+export interface ExplorationHypothesis {
+  hypothesisId: string;
+  title: string;
+  rationale: string;
+  capabilityId: string;
+  goal: string;
+  riskLevel: Severity;
+  coverageDimensions: CoverageDimensionValue[];
+  safeActions: string[];
+  status: 'proposed' | 'testing' | 'confirmed' | 'rejected' | 'inconclusive';
+}
+
+export interface ExplorationPlan {
+  scopeSummary: string;
+  hypotheses: ExplorationHypothesis[];
+  rejectedForSafety: string[];
+}
+
+export interface ExplorationFinding {
+  findingId: string;
+  hypothesisId: string;
+  verdict: EvalVerdict;
+  summary: string;
+  evidenceRefs: string[];
+  uniqueCoverageContribution: number;
+  reusable: boolean;
+  promotionEligible: boolean;
+  promotionReason: string;
+}
+
+export interface EvalSetDashboardSummary {
+  manifest: EvalSetManifest | null;
+  counts: Record<EvalSetType, number>;
+  retiredCount: number;
+  latestProductModelVersion: number | null;
+}
+
+export interface AdaptiveRunSummary {
+  runId: string;
+  caseId: string;
+  caseTitle: string | null;
+  setType: EvalSetType | null;
+  verdict: EvalVerdict;
+  failureSource: 'product' | 'evaluator' | 'unknown' | null;
+  severity: Severity | null;
+  summary: string;
+  createdAt: string;
+}
+
+export interface BenchmarkIssue {
+  issueId: string;
+  category: BadcaseCategory;
+  severity: Severity;
+  summary: string;
+}
+
+export interface BenchmarkGroundTruth {
+  fixtureId: string;
+  expectedIssues: BenchmarkIssue[];
+  forbiddenFalsePositives: string[];
+}
+
+export interface BenchmarkObservation {
+  interactionAttempted: boolean;
+  stableFeedback: boolean;
+  urlChanged: boolean;
+  statePersisted: boolean;
+  networkStatus: number;
+  duplicateRequests: number;
+  nextActionVisible: boolean;
+  timedOut: boolean;
+  aiOutputRelevant: boolean;
+  destructiveActionBlocked: boolean;
+}
+
+export interface BenchmarkFixture {
+  groundTruth: BenchmarkGroundTruth;
+  title: string;
+  observation: BenchmarkObservation;
+}
+
+export interface BenchmarkPrediction {
+  fixtureId: string;
+  issues: BenchmarkIssue[];
+  evaluatorFailure: boolean;
+}
+
+export interface BenchmarkMetrics {
+  total: number;
+  knownFailures: number;
+  cleanBehaviors: number;
+  truePositives: number;
+  falsePositives: number;
+  falseNegatives: number;
+  trueNegatives: number;
+  bugDetectionRecall: number;
+  precision: number;
+  falsePositiveRate: number;
+  classificationAccuracy: number;
+  evaluatorFailureRate: number;
+}
+
+export interface BenchmarkReport {
+  benchmarkVersion: string;
+  generatedAt: string;
+  metrics: BenchmarkMetrics;
+  predictions: BenchmarkPrediction[];
+  limitation: string;
+}
+
+export interface EvalSetSelection {
+  depth: EvaluationDepth;
+  selectedCapabilityIds: string[];
+  cases: EvalCase[];
+  counts: Record<EvalSetType, number>;
+  reason: string;
+}
+
+export interface AdaptiveEvaluationReport {
+  reportId: string;
+  projectId: string;
+  generatedAt: string;
+  executiveVerdict: 'can_continue' | 'needs_attention' | 'insufficient_evidence';
+  testedCaseIds: string[];
+  notTestedCaseIds: string[];
+  coverage: CoverageMatrix | null;
+  caseResults: EvalCaseResult[];
+  journeys: Array<{ runId: string; caseId: string; actions: InteractionAction[]; finalState: string }>;
+  failures: Array<{ caseId: string; summary: string; severity: Severity; evidenceRefs: string[] }>;
+  inconclusiveCases: Array<{ caseId: string; summary: string; failureSource: string | null }>;
+  confirmedFacts: string[];
+  rootCauseHypotheses: RootCauseHypothesis[];
+  newBadcaseIds: string[];
+  newRegressionCaseIds: string[];
+  passingCoverageGaps: CoverageGap[];
+  newChallengeCaseIds: string[];
+  recommendedNextActions: string[];
+  authenticityNotice: string;
+  versionMetadata: RunVersionMetadata[];
+}
+
+export interface CoverageDimensionSummary {
+  dimension: CoverageDimension;
+  targetValues: string[];
+  coveredValues: string[];
+  missingValues: string[];
+  coverageRatio: number;
+}
+
+export interface CoverageGap {
+  gapId: string;
+  capabilityId: string;
+  dimension: CoverageDimension;
+  missingValue: string;
+  priority: Importance;
+  reason: string;
+  candidateCaseIds: string[];
+}
+
+export interface CoverageMatrix {
+  projectId: string;
+  generatedAt: string;
+  dimensions: CoverageDimensionSummary[];
+  gaps: CoverageGap[];
+  totalTargetCells: number;
+  coveredCells: number;
+  coverageRatio: number;
+}
+
+export interface AiProviderInfo {
+  providerId: string;
+  model: string;
+  remote: boolean;
+  structuredOutput: boolean;
+  screenshotInput: boolean;
+}
+
+export interface AiPrivacyPolicy {
+  allowRemoteModel: boolean;
+  allowScreenshot: boolean;
+  visibleTextOnly: boolean;
+  redactionApplied: boolean;
+}
+
+export interface AiStructuredRequest {
+  requestId: string;
+  task: 'actor' | 'semantic_judge' | 'product_model' | 'challenge' | 'exploration';
+  systemPrompt: string;
+  userPrompt: string;
+  schemaName: string;
+  imageDataUrls: string[];
+  privacy: AiPrivacyPolicy;
+  metadata: Record<string, string | number | boolean | null>;
+}
+
+export interface GroundedElement {
+  elementId: string;
+  role: string | null;
+  tagName: string;
+  label: string;
+  text: string | null;
+  placeholder: string | null;
+  disabled: boolean;
+  risk: 'safe' | 'sensitive' | 'high';
+  locatorHint: string;
+}
+
+export interface GroundedField extends GroundedElement {
+  fieldName: string | null;
+  inputType: string;
+  required: boolean;
+  currentValuePresent: boolean;
+  options: string[];
+}
+
+export interface PageObservation {
+  pageUrl: string;
+  pagePurpose: string;
+  visibleStateSummary: string;
+  primaryAreas: string[];
+  visibleProblems: string[];
+  interactableElements: GroundedElement[];
+  formFields: GroundedField[];
+  evidenceRefs: string[];
+  confidence: number;
+}
+
+export type AgentAction = 'click' | 'fill' | 'select' | 'scroll' | 'back' | 'wait' | 'retry' | 'finish' | 'abandon';
+
+export interface AgentDecision {
+  intentSummary: string;
+  action: AgentAction;
+  targetElementId: string | null;
+  value: string | null;
+  expectedResult: string;
+  confidence: number;
+}
+
+export interface SafeInputValue {
+  status: 'ready' | 'blocked_by_safety';
+  value: string | null;
+  origin: 'known_fixture' | 'synthetic_generated' | null;
+  reason: string;
+}
+
+export interface AgentActionResult {
+  status: 'executed' | 'blocked_by_safety' | 'failed';
+  action: AgentAction;
+  targetElementId: string | null;
+  summary: string;
+  evidenceRefs: string[];
+}
+
+export interface StepVerification {
+  expectation: string;
+  observed: string;
+  status: 'confirmed' | 'not_confirmed' | 'inconclusive';
+  evidenceRefs: string[];
+  confidence: number;
+}
+
+export interface ReflectionDecision {
+  nextStep: 'continue' | 'retry' | 'backtrack' | 'seek_another_path' | 'finish' | 'abandon';
+  summary: string;
+  confidence: number;
+}
+
+export interface EvidencePacket {
+  runId: string;
+  caseId: string;
+  targetAppCommit: string | null;
+  actorModel: string;
+  actorPromptVersion: string;
+  startedAt: string;
+  completedAt: string;
+  actions: InteractionAction[];
+  observations: PageObservation[];
+  stepVerifications: StepVerification[];
+  screenshots: string[];
+  tracePath: string | null;
+  consoleEvidence: string[];
+  networkEvidence: string[];
+  finalState: { url: string; visibleTextSummary: string };
+  versions: RunVersionMetadata;
+}
+
+export interface RunVersionMetadata {
+  targetAppGitSha: string | null;
+  productModelVersion: number;
+  evalSetVersion: number;
+  caseVersion: number;
+  evalPilotVersion: string;
+  actorModel: string;
+  judgeModel: string;
+  actorPromptVersion: string;
+  judgePromptVersion: string;
+  toolSchemaVersion: string;
+  timestamp: string;
+}
+
+export interface AiTestAgentRun {
+  runId: string;
+  caseId: string;
+  mode: 'task' | 'exploration';
+  status: 'completed' | 'abandoned' | 'blocked_by_safety' | 'inconclusive';
+  failureSource: 'evaluator' | null;
+  decisions: AgentDecision[];
+  actionResults: AgentActionResult[];
+  reflections: ReflectionDecision[];
+  evidencePacketPath: string;
+  startedAt: string;
+  completedAt: string;
+  error: string | null;
 }
 
 export interface Persona {

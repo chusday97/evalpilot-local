@@ -32,12 +32,20 @@ async function gitCheck(): Promise<RuntimeCheck> {
   }
 }
 
+function aiProviderCheck(): RuntimeCheck {
+  const configured = Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim());
+  return configured
+    ? { status: 'ready', label: '实验 AI Test Agent', detail: `OpenAI Provider 已配置（模型：${process.env.EVALPILOT_OPENAI_MODEL?.trim() || 'gpt-5-mini'}）。默认只发送最小化可见页面文字；截图仍需每次显式确认。`, recoveryAction: null }
+    : { status: 'missing', label: '实验 AI Test Agent', detail: '未配置远程模型；稳定评测、Dashboard 和任务包仍可使用，AI 用户运行按钮会给出恢复说明。', recoveryAction: '需要实验 AI 用户时，在启动 Dashboard 前设置 EVALPILOT_OPENAI_API_KEY；不要把密钥写入项目文件。' };
+}
+
 export async function inspectRuntime(cwd: string, dataDir?: string | null): Promise<RuntimeReadiness> {
   const node = nodeCheck();
   const chromiumResult = chromiumCheck();
   const git = await gitCheck();
+  const aiProvider = aiProviderCheck();
   const agents = await detectAgentConnections(false);
-  const checks = { node, chromium: chromiumResult, git };
+  const checks = { node, chromium: chromiumResult, git, aiProvider };
   const blockingIssues = Object.values(checks).filter((item) => item.status === 'blocked').map((item) => item.detail);
   const recoveryActions = [...new Set(Object.values(checks).flatMap((item) => item.recoveryAction ? [item.recoveryAction] : []))];
   return { packageVersion: packageVersion(), contractVersion: '0.5.0', platform: process.platform, nodeVersion: process.versions.node, dataRoot: resolveDataRoot(cwd, dataDir), checks, agents, blockingIssues, recoveryActions, checkedAt: new Date().toISOString() };

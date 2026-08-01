@@ -1,6 +1,6 @@
 # EvalPilot Local 数据契约
 
-版本：0.5.0；来源：用户提供的 EvalPilot Local MVP/v0.2 规格、v0.3 四步工作台方案、v0.4.1 小白引导方案，以及 2026-07-18 对 GitHub Public Alpha、npm CLI、MIT 许可和真实能力收口方案的确认。后续字段变化必须先更新本文件和 `types.ts`。
+版本：0.5.0 + Next Phase 0；来源：用户提供的 EvalPilot Local MVP/v0.2 规格、v0.3 四步工作台方案、v0.4.1 小白引导方案、2026-07-18 对 GitHub Public Alpha、npm CLI、MIT 许可和真实能力收口方案的确认，以及 2026-08-01 确认的自适应 Eval Set 基础方案。后续字段变化必须先更新本文件和 `types.ts`。
 
 ## 1. 项目描述与边界
 
@@ -49,6 +49,14 @@ EvalPilot Local 读取本地 Web 项目及其测试网址，将可追溯证据�
 | `RuntimeReadiness` | 包版本、数据目录、Node/Chromium/Git/Agent 检查、阻塞与恢复动作 | CLI doctor 与 Dashboard 健康检查共享 |
 | `CompetitorCandidate` | GitHub、Apple App Store 或公开链接的规划中搜索结果 | v0.5 不属于已支持能力，不计入评分 |
 | `CompetitorSnapshot` | 规划中的用户确认竞品事实、观察和真实性边界 | v0.5 不提供公开 API |
+| `ProductModel` | 项目、版本、产品信息、用户、能力、任务、业务规则、风险、未知项和证据 | 面向任务的产品模型；与旧 `ProjectBackground` 并存 |
+| `EvalCase` | 集合类型、资产状态、来源、能力/任务、Persona、目标、Oracle、覆盖维度、风险和版本 | 新 Eval Set 的案例资产；不替换旧 `Scenario` |
+| `EvalOracle` | 预期、必须/禁止观察、业务规则、语义 Rubric、确定性断言和无法判定条件 | 稳定 Baseline/Regression 的必备判定契约 |
+| `EvalSetManifest` | 项目、版本、时间和案例引用 | 四类 Eval Set 的索引，不复制案例正文 |
+| `EvalCaseResult` | 运行、案例、三态结论、失败来源、严重度、双 Judge 结果、证据路径和时间 | 运行结果；与案例资产生命周期严格分离 |
+| `Badcase` | 项目、案例、运行、分类、失败、用户影响、事实、原因假设、证据、修复状态和回归关联 | 已确认失败的长期资产 |
+| `CoverageMatrix` | 项目、时间、维度汇总、缺口和覆盖率 | 多维覆盖快照，不把单次 PASS 表述为功能已验证 |
+| `RegressionMetadata` | Badcase/Issue、首次失败、修复时间、原始失败、来源运行和修复任务 | 回归案例的可追溯来源 |
 
 完整字段、联合类型和可选性以同版本 `types.ts` 为机器可读权威定义；Zod Schema 必须与其一致。
 
@@ -214,3 +222,128 @@ Dashboard 不得直接读写 YAML/JSONL；所有写操作经 Core 校验并原�
 - 安全步骤只能标记为 `safety`，路径优化不得建议删除安全确认或硬约束。
 - 所有 UX 原因推测必须带置信度；低置信度或缺乏直接证据的判断设置 `needsHumanReview=true`。
 - 所有报告必须附带真实性声明：模拟用户数据不是实际用户满意度、留存、转化或市场需求证据。
+
+## 8. EvalPilot Next Phase 0 文件契约
+
+Phase 0 只增加数据基础，不改变现有 Dashboard、Explorer、评测流水线或 Provider 能力。新增文件全部位于项目独立 `outputDir` 内：
+
+```text
+product-model/product-model.v<version>.json
+eval-sets/manifest.json
+eval-sets/<baseline|regression|challenge|exploratory>/<case-id>.json
+runs/<run-id>/result.json
+badcases/<badcase-id>.json
+coverage/latest.json
+coverage/history/<timestamp>.json
+```
+
+- 新 JSON 必须先通过对应 Zod Schema，再使用临时文件 + 原子重命名写入。
+- 读取时同样执行 Schema 校验；非法内容必须返回带文件路径的明确错误，不静默修正。
+- `EvalCase.status` 仅表示案例资产生命周期：`candidate | active | stable | retired`；执行结果只写入 `EvalCaseResult.verdict`：`pass | fail | inconclusive`。
+- `EvalSetManifest` 只保存案例引用和版本摘要；案例正文以各集合目录下的 JSON 为唯一事实来源。
+- Stable Baseline 和 Regression 案例必须拥有非空 Oracle；Phase 0 Schema 对所有案例要求 Oracle，以避免后续出现不可判定案例。
+- `RegressionMetadata` 仅在回归案例中使用；退役必须保留明确 `retirementReason`。
+- Product Model、Eval Set、结果、Badcase 和 Coverage 均为新旁路数据。旧 `project-background.yaml`、`scenarios.jsonl`、`runs/*/summary.json`、评测会话和问题记录继续按原路径读取，Phase 0 不移动、不覆盖、不回填。
+- Phase 0 不新增公开 Dashboard API；后续 Phase 1 接入实验路径前必须再次更新契约。
+
+## 9. EvalPilot Next Phase 1 AI Test Agent 契约
+
+Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定性探索路径。
+
+- `AiProvider` 只提供经过 Zod 校验的结构化输出；输出非法时最多按调用配置重试，耗尽后返回明确 Provider 错误，不进行字段补写或静默纠正。
+- `OpenAiProvider` 使用 Responses API 的 Structured Outputs。只有调用者显式允许时才发送截图；默认只发送最小化可见页面摘要和 DOM grounding，不发送源码、Trace、环境变量、任意本地文件或隐藏推理。
+- `PageObservation` 只包含当前 URL、可见状态摘要、可交互元素、表单字段、公开页面问题和证据引用。每次观察生成 `E001` 起的稳定元素 ID；Actor 只能引用这些 ID，不能生成 CSS/XPath 或坐标。
+- `AgentDecision` 每次只允许一个动作。`ActionExecutor` 必须重新校验元素是否存在、是否禁用及风险等级；删除、支付、发布、外部发送、凭证和其他高风险动作即使模型要求也返回 `blocked_by_safety`。
+- 安全输入按 `known_fixture | synthetic_generated` 记录来源；敏感或高风险字段返回 `blocked_by_safety`，不生成真实个人信息、凭证或秘密。
+- 每个动作必须保存前置 Observation、单步 Decision、执行结果和 `StepVerification`。模型输出损坏、DOM 目标消失、页面证据不足或工具失败时结果为 `inconclusive/evaluator_failure`，不能生成产品失败。
+- 只保存简短 `intentSummary`、动作、期望、验证和置信度，不保存或请求隐藏 chain-of-thought。
+- Evidence Packet 位于 `runs/<run-id>/evidence-packet.json`；Observation、Decision、Verification 同时以 JSONL 保存。截图只保存在本地运行目录。
+- Phase 1 实验入口必须显式启用；现有评测 API、Dashboard 导航和默认流水线保持兼容。
+
+## 10. EvalPilot Next Phase 2 Hybrid Judge 契约
+
+- Deterministic Judge 只判断 Evidence Packet 中可直接观察的 URL、可见文本、网络、控制台和状态证据；无法从现有证据证明的断言必须返回 `inconclusive`。
+- Semantic Judge 只接收 Eval Case、Oracle、最小化 Evidence Packet 摘要和确定性结果；输出必须区分 `confirmedFacts`、带置信度的 `hypotheses` 和 `unknowns`。
+- Verdict Merger 的优先级为：证据完整性门禁 → 确定性硬失败 → 语义失败 → 任一无法判断 → 双方通过。缺少 Observation、逐步 Verification 或最终状态时禁止 PASS。
+- Provider/Schema/工具失败统一产生 `verdict=inconclusive, failureSource=evaluator, severity=null`，不得创建产品问题或 Product Regression。
+- 直接证据支持的产品失败为 `failureSource=product`；无法区分产品与评测器时使用 `unknown`，不得伪造根因。
+- Judge 产物写入 `runs/<run-id>/deterministic-judge.json`、`semantic-judge.json` 和 `result.json`，均先过 Schema 后原子落盘。
+
+## 11. EvalPilot Next Phase 3 Product Model 与 Baseline 契约
+
+- Product Model 由现有证据化 `ProjectBackground + EvalBlueprint` 生成；Capability 表示用户任务能力，不按路由数量机械拆分。每个 Capability 至少关联一个 `ProductTask`，推断任务必须保留 `needsHumanReview=true`。
+- 用户类型、任务、规则、风险和未知项必须保留原始 EvidenceClaim/FactStatus；没有证据的内容不得升级为 verified。
+- Baseline 按 ProductTask 生成稳定案例；每个 stable Baseline 必须包含非空 `expectedOutcome`、`semanticRubric` 和 `inconclusiveWhen`。不可靠的业务规则继续标记案例 `needsHumanReview=true`。
+- 生成器使用确定性 ID，重复生成相同 Product Model 版本时更新同一案例，不制造重复资产；生成结果通过现有 Eval Set Store 持久化。
+- 本阶段不自动运行新 Baseline，也不删除旧 Scenario；实验流水线明确选择新架构时才消费这些资产。
+
+## 12. EvalPilot Next Phase 4 Badcase 与 Regression 契约
+
+- 只有 `EvalCaseResult.verdict=fail && failureSource=product` 可创建 Product Badcase。Evaluator Failure、unknown 和 inconclusive 不得进入产品回归。
+- Badcase 的 `confirmedFacts` 只复制 Judge 已确认事实；根因保持为带置信度、支持/反证和验证方法的 Hypothesis，不生成唯一确定根因。
+- 修复状态必须显式更新为 `fixed`；随后使用同一个原始 `caseId` 的 PASS 结果复测，才可晋升 Regression。
+- Regression 使用新案例 ID，保留 Badcase、Issue、首次失败运行、修复时间、原始失败、复测来源和 FixTask 谱系；状态固定为 stable。
+- 晋升操作先验证全部门禁，再写 Regression Case，最后更新 Badcase 的 `regressionCaseId`，避免失败路径污染现有回归集。
+
+## 13. EvalPilot Next Phase 5 PASS、Coverage Gap 与 Challenge 契约
+
+- PASS 只确认当前案例覆盖维度中的具体条件，不等于整个功能已验证；每次 PASS 都必须重新计算 Coverage Matrix。
+- Coverage 目标由 Product Model 和固定最小变体集合生成，至少覆盖 capability、persona、input quality、system state、journey、risk、recovery 与 interaction pattern；没有 AI 输出能力时不伪造 AI-output 覆盖。
+- `PassAnalysis` 返回本次确认条件、仍存在的 Coverage Gap 和候选 Challenge；候选默认只存在内存中，用户/流水线显式保存后才进入 Eval Set。
+- 第一版 Challenge 必须支持 boundary、journey mutation 和 persona mutation。每个候选保留来源案例和 Gap ID，继承 Oracle 并明确新的假设与覆盖维度。
+- Challenge 不得自动成为 permanent/stable；初始状态固定为 candidate。Repeated PASS 的稳定/退役策略在后续演进服务中执行。
+
+## 14. EvalPilot Next Phase 6 自由探索契约
+
+- Exploration Planner 只接收 Product Model、Coverage Gap 和用户确认的公开范围，由 Agent 提出可验证假设；禁止把固定步骤、选择器或隐藏标准答案注入探索上下文。
+- 每个 `ExplorationHypothesis` 必须关联一个能力、可观察目标、覆盖维度和安全动作边界。支付、删除、发布、外部发送、凭证与其他不可逆动作在规划阶段直接拒绝。
+- 探索执行复用 Phase 1 的 grounding、动作门禁、逐步验证和 Evidence Packet，并以 `mode=exploration` 标识；模型或工具失败仍归类为 evaluator/inconclusive。
+- `ExplorationFinding` 只有在证据可复核、贡献新覆盖且结果可复用时才具备晋升资格；晋升仍需显式调用，生成的案例固定为 `setType=exploratory,status=candidate`，不得自动进入稳定集或回归集。
+
+## 15. EvalPilot Next Phase 7 Dashboard 读取与生成接口
+
+主导航迁移为 `Projects → Eval Set → Runs → Findings → Fixes → Regression`。首页仍从品牌入口访问，旧 `/evaluate`、`/issues` 与现有 API 保持兼容。
+
+| Method | Path | 说明 |
+|---|---|---|
+| GET | `/api/projects/:id/product-model` | 读取最新 Product Model；未生成时返回 `null`。 |
+| GET | `/api/projects/:id/eval-set` | 返回 Manifest、四类计数、退役数和模型版本。 |
+| POST | `/api/projects/:id/eval-set/generate` | 明确确认后从现有背景/蓝图生成并原子保存 Product Model、Baseline 与 Coverage。 |
+| GET | `/api/projects/:id/eval-cases` | 读取项目全部新架构案例。 |
+| GET | `/api/eval-cases/:caseId?projectId=` | 读取单案例；项目隔离以查询参数或当前项目为准。 |
+| GET | `/api/projects/:id/adaptive-runs` | 返回新架构运行摘要，不混入旧运行推断。 |
+| GET | `/api/projects/:id/coverage` | 读取最新 Coverage；尚未生成时返回 `null`。 |
+| GET | `/api/projects/:id/badcases` | 返回已确认产品失败的 Badcase。 |
+| GET | `/api/badcases/:badcaseId?projectId=` | 返回 Badcase 详情。 |
+| GET | `/api/projects/:id/regression` | 返回 Regression 案例与谱系。 |
+| GET | `/api/runs/:runId/evidence?projectId=` | 返回对应 Evidence Packet；缺失时为 404。 |
+| GET | `/api/runs/:runId/result?projectId=` | 返回经 Schema 校验的 Hybrid Judge 结果。 |
+
+- 所有列表在资产不存在时返回空数组或 `null`，不把“尚未生成”显示为服务错误。
+- 生成接口必须要求 `confirmed=true`；部分生成失败不得伪装成功，原子存储继续由各 Store 保证。
+- Dashboard 中“已测试”只来自 `EvalCaseResult`，案例存在但无结果统一计为 `NOT RUN`；Coverage Gap 存在时禁止展示“完全验证”。
+
+## 16. EvalPilot Next Phase 8 自基准契约
+
+- 内置基准第一版固定包含 20 个已知失败和 20 个干净/预期行为，覆盖死点击、无反馈、状态丢失、API 500、重复提交、超时、下一步缺失、AI 输出不相关和危险动作门禁。
+- `BenchmarkGroundTruth` 与原始 Observation 分离；评测器不得读取 `expectedIssues` 决定预测，只能读取可观察信号。
+- 报告计算 Bug Detection Recall、Precision、False Positive Rate、Classification Accuracy 与 Evaluator Failure Rate，并保存逐夹具预测。
+- CLI `evalpilot benchmark [--json]` 运行本地确定性基准，不访问网络、不调用远程模型。该成绩只说明内置直接证据规则在已知夹具上的表现，不能作为真实世界“可靠自动测试”声明。
+
+## 17. 跨阶段运行版本与 AI 输出 Oracle
+
+- 每个新架构 Evidence Packet 必须包含 `RunVersionMetadata`：目标 Git SHA、Product Model/Eval Set/Case/EvalPilot 版本、Actor/Judge 模型、两类 Prompt 版本、工具 Schema 版本和运行时间。缺少这些字段的旧证据可兼容查看，但不能用于严格回归对比。
+- `EvalOracle.aiOutputCriteria` 仅在产品能力确实包含 AI 输出时使用，支持 relevance、factuality、consistency、instruction following、uncertainty expression、citation quality、hallucination、safety 和 format correctness。
+- 领域关键事实不得只由 LLM-as-Judge 决定；对应 Criterion 必须设置 `humanReviewRequired=true`，可选参考答案只作为证据之一。
+
+## 18. 下一轮 Eval Set 选择契约
+
+- 快速检查选择所选功能中的 P0/P1 Baseline 与 P0/P1 Regression；核心评测选择 P0–P2 Baseline、全部相关 Regression 和最多 3 条 Challenge；完整评测选择所选功能的全部 Baseline、Regression、Challenge 与 Exploratory。
+- 任何深度都必须先按用户所选 `capabilityId` 过滤，完整评测不得运行无关功能。Regression 在同一功能内优先于 Challenge，确保历史失败进入下一轮。
+- `EvalSetSelection.counts` 必须与实际返回案例一致，Dashboard/报告不得用 Manifest 总数冒充本轮运行数。
+
+## 19. 新架构报告契约
+
+- `AdaptiveEvaluationReport` 固定保存 16 个语义区块：执行结论、已测、未测、覆盖矩阵、案例结果、AI 用户旅程、失败、无法判断、已确认事实、根因假设、新 Badcase、新 Regression、PASS 后缺口、新 Challenge、建议下一步、真实性/不确定性声明。
+- `executiveVerdict` 只有在没有产品失败、没有无法判断、没有未运行且没有高优先级 Coverage Gap 时才可为 `can_continue`；否则分别使用 `needs_attention` 或 `insufficient_evidence`。
+- JSON 与 Markdown 同源生成并原子保存到 `reports/latest-evaluation.json|md`；版本元数据从每个 Evidence Packet 复制，不重新推断。

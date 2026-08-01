@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+- Added the Phase 0 data foundation for Product Models, adaptive Eval Sets, Oracles, hybrid Judge results, Badcases, multidimensional coverage, and regression lineage.
+- Added schema-validated atomic JSON stores with project/path isolation and compatibility tests that leave existing Public Alpha evaluation history untouched.
+- Added an experimental grounded AI test agent, evidence-gated hybrid Judge, Product Model baseline generation, Badcase regression promotion, coverage analysis, and challenge-case candidates.
+- Added safe free-exploration planning and explicit promotion of evidenced reusable findings into exploratory candidates.
+- Added the six-goal adaptive Dashboard, Eval Set/Run/Badcase/Regression APIs, coverage gaps, rich evidence journeys, and backward-compatible legacy routes.
+- Added a local 40-fixture self-benchmark command with recall, precision, false-positive, classification and evaluator-failure metrics.
+- Added the complete experimental execution path from AI Test Agent through Hybrid Judge, Badcase or passing-case analysis, coverage persistence, and a 16-section evidence report.
+- Added run selection for Quick/Core/Full, complete version metadata, optional AI-output Oracles, explicit remote-model consent, and provider readiness without exposing credentials.
+- Changed passing-case evolution so generated Challenge cases persist as reviewable candidates and are linked from their originating coverage gaps; they are never auto-promoted to stable cases.
+- Reduced the publish whitelist to runtime JavaScript so the expanded package remains 137 files, about 213KB, with zero sensitive matches.
+
 ## 0.5.0-alpha.1
 
 - Added portable npm CLI packaging, `doctor`, explicit Chromium setup, and user-level data storage.
