@@ -12,6 +12,7 @@
 - Added run selection for Quick/Core/Full, complete version metadata, optional AI-output Oracles, explicit remote-model consent, and provider readiness without exposing credentials.
 - Changed passing-case evolution so generated Challenge cases persist as reviewable candidates and are linked from their originating coverage gaps; they are never auto-promoted to stable cases.
 - Reduced the publish whitelist to runtime JavaScript so the expanded package remains 137 files, about 213KB, with zero sensitive matches.
+- Fixed clean tarball browser installs by pinning Playwright to the browser revision installed by CI instead of allowing a newer runtime to drift beyond the lockfile.
 
 ## 0.5.0-alpha.1
 
