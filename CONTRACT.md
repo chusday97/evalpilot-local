@@ -232,6 +232,7 @@ product-model/product-model.v<version>.json
 eval-sets/manifest.json
 eval-sets/<baseline|regression|challenge|exploratory>/<case-id>.json
 runs/<run-id>/result.json
+findings/v1/<finding-id>.json
 badcases/<badcase-id>.json
 coverage/latest.json
 coverage/history/<timestamp>.json
@@ -267,11 +268,24 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 
 - Deterministic Judge 只判断 Evidence Packet 中可直接观察的 URL、可见文本、网络、控制台和状态证据；无法从现有证据证明的断言必须返回 `inconclusive`。
 - Semantic Judge 只接收 Eval Case、Oracle、最小化 Evidence Packet 摘要和确定性结果；输出必须区分 `confirmedFacts`、带置信度的 `hypotheses` 和 `unknowns`。
-- Verdict Merger 的优先级为：证据完整性门禁 → 确定性硬失败 → 语义失败 → 任一无法判断 → 双方通过。缺少初始/最终 Observation、任一步前后截图、逐步 Verification、有效证据引用、最终状态或本地 Trace 时，统一返回 `verdict=inconclusive, failureSource=evaluator`，禁止 PASS 和 Product FAIL。
+- Verdict Merger 的优先级为：证据完整性门禁 → 确定性硬失败 → 任一无法判断 → 双方通过。单次 Semantic Fail 不再直接生成 Product Failure；必须继续通过 Finding Triage 门禁，否则统一返回 `verdict=inconclusive, failureSource=unknown`。
 - 旧 Evidence Packet 继续兼容读取；缺少 Phase 2 字段时通过兼容转换生成不完整状态，不改写旧文件，也不得补推验证通过。
 - Provider/Schema/工具失败统一产生 `verdict=inconclusive, failureSource=evaluator, severity=null`，不得创建产品问题或 Product Regression。
 - 直接证据支持的产品失败为 `failureSource=product`；无法区分产品与评测器时使用 `unknown`，不得伪造根因。
 - Judge 产物写入 `runs/<run-id>/deterministic-judge.json`、`semantic-judge.json` 和 `result.json`，均先过 Schema 后原子落盘。
+
+### 10.1 Accuracy Sprint Phase 3 Finding Triage 契约
+
+- `CandidateFinding.status` 固定为 `candidate | confirmed_product_failure | evaluator_failure | dismissed | needs_human_review`。每个项目在 `findings/v1/` 下保存版本化本地记录；旧 Badcase 继续兼容读取，不反向伪造 Finding。
+- Product Failure 只允许由以下任一门禁确认：
+  1. Evidence Gate 完整且 Deterministic Judge 存在硬失败；
+  2. Semantic Fail 置信度不低于 `0.80`、至少两个有效证据引用且来自至少两类独立证据、案例不要求人工审核、Actor/Judge 没有评测器错误；
+  3. 同一 stable Case 在至少两个独立运行中出现相同归一化失败类别和相同可观察失败，且两次 Evidence Gate 都完整；
+  4. 用户通过显式确认接口确认产品失败。
+- 未通过确认门禁的 Semantic Fail 保存为 Candidate Finding；运行结果保持 `inconclusive/unknown`，不得创建 Badcase、Regression 或增加已验证覆盖。
+- `needsHumanReview=true` 的案例只能生成 `needs_human_review` Finding，不能自动确认 Product Failure。Provider、Schema、Trace 或工具错误保存为 `evaluator_failure`，不得冒充候选产品问题。
+- `Badcase` 创建接口必须同时收到状态为 `confirmed_product_failure`、且 `projectId/caseId/runId` 与运行结果一致的 Finding。原始 Semantic Fail 或手工构造的 `fail/product` 结果不能绕过该门禁。
+- Finding 状态变更必须原子写入且要求请求体 `{ "confirmed": true }`。确认产品失败会创建对应 Badcase；标记评测器失败或忽略不会创建 Badcase。
 
 ## 11. EvalPilot Next Phase 3 Product Model 与 Baseline 契约
 
@@ -328,6 +342,11 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 | GET | `/api/projects/:id/adaptive-runs` | 返回新架构运行摘要，不混入旧运行推断。 |
 | GET | `/api/projects/:id/coverage` | 读取最新 Coverage；尚未生成时返回 `null`。 |
 | GET | `/api/projects/:id/badcases` | 返回已确认产品失败的 Badcase。 |
+| GET | `/api/projects/:id/findings` | 返回候选、待人工审核、评测器失败、已忽略和已确认发现。 |
+| GET | `/api/findings/:findingId?projectId=` | 返回单条 Finding。 |
+| POST | `/api/findings/:findingId/confirm-product-failure?projectId=` | `{ confirmed: true }` 后确认产品失败并创建 Badcase。 |
+| POST | `/api/findings/:findingId/mark-evaluator-failure?projectId=` | `{ confirmed: true }` 后标记为评测器失败，不创建 Badcase。 |
+| POST | `/api/findings/:findingId/dismiss?projectId=` | `{ confirmed: true }` 后忽略发现，不创建 Badcase。 |
 | GET | `/api/badcases/:badcaseId?projectId=` | 返回 Badcase 详情。 |
 | GET | `/api/projects/:id/regression` | 返回 Regression 案例与谱系。 |
 | GET | `/api/runs/:runId/evidence?projectId=` | 返回对应 Evidence Packet；缺失时为 404。 |

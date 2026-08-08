@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added versioned Candidate Finding storage, explicit product/evaluator/dismiss triage actions, and a novice-facing Findings view that separates suspicious observations from confirmed product failures.
+- Changed single Semantic Fail results to `inconclusive/unknown` unless they pass deterministic, multi-evidence, repeated-stable-run, or explicit human-confirmation gates.
+- Restricted Badcase creation to persisted `confirmed_product_failure` Findings so evaluator errors, low-confidence judgments, and review-required cases cannot pollute regression assets.
 - Added per-action before/after observations and screenshots, explicit `StepEvidence`, local Playwright Trace with source capture disabled, and a recomputed Evidence Completeness Gate.
 - Changed incomplete adaptive evidence to Evaluator Inconclusive so missing screenshots, verifications, references, final state, or Trace cannot produce PASS or Product FAIL.
 - Preserved legacy Evidence Packets through an in-memory compatibility view that marks them incomplete without rewriting historical files.

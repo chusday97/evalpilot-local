@@ -19,4 +19,6 @@ Adaptive Coverage 按 `capabilityId + dimension + value` 建立功能级单元�
 
 Adaptive AI 运行按动作保存独立 before/after Observation 与截图，并使用 `StepEvidence` 连接 Decision、Verification 和动作状态。Playwright Trace 仅保存到本机且关闭源码采集；Evidence Completeness Gate 会重新核对初始/最终观察、截图、验证和 Trace，任一缺失都只能产生 Evaluator Inconclusive。旧 Evidence Packet 通过内存兼容视图保持可读，但不会被改写或补推为可信结论。
 
+Finding Triage 位于 Hybrid Judge 与 Badcase 之间。单次 Semantic Fail 默认只保存到 `findings/v1/`，运行结果保持 Inconclusive；只有确定性硬失败、双类型强证据、stable Case 的重复同类失败或人工明确确认，才能转为 `confirmed_product_failure`。Badcase Store 会重新读取已持久化 Finding 校验谱系，原始模型输出不能直接写入回归资产。
+
 设计取舍：生成器在 MVP 使用证据驱动的确定性规则和模板，不接入模型供应商。这样能完成可测试闭环，并避免同一模型生成、执行和自评。开放式 Rubric 交给人工审核。

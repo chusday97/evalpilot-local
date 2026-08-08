@@ -473,6 +473,27 @@ export interface EvalCaseResult {
   createdAt: string;
 }
 
+export type FindingStatus = 'candidate' | 'confirmed_product_failure' | 'evaluator_failure' | 'dismissed' | 'needs_human_review';
+
+export interface CandidateFinding {
+  findingId: string;
+  projectId: string;
+  caseId: string;
+  runId: string;
+  title: string;
+  summary: string;
+  status: FindingStatus;
+  semanticConfidence: number;
+  deterministicSupport: boolean;
+  independentEvidenceTypes: string[];
+  confirmedFacts: string[];
+  hypotheses: RootCauseHypothesis[];
+  unknowns: string[];
+  evidenceRefs: string[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface Badcase {
   badcaseId: string;
   projectId: string;

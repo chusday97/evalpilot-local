@@ -9,22 +9,25 @@ import { buildPersonas } from '../src/generation/persona-builder.js';
 import { buildExploratoryScenarios } from '../src/ux-evaluation/exploratory-scenario-builder.js';
 import { buildFeatureJourneyGraph } from '../src/ux-evaluation/journey-graph-builder.js';
 import type { BlueprintCapability, EvalBlueprint } from '../types.js';
-import type { Badcase, EvalCase, EvalCaseResult } from '../types.js';
+import type { Badcase, CandidateFinding, EvalCase, EvalCaseResult } from '../types.js';
 import { saveEvalCase } from '../src/eval-set/eval-set-store.js';
 import { saveCoverageMatrix } from '../src/eval-set/coverage-store.js';
 import { saveBadcase } from '../src/badcase/badcase-store.js';
 import { saveEvalCaseResult } from '../src/judge/eval-result-store.js';
+import { saveFinding } from '../src/findings/finding-store.js';
 
 const enabled = process.env.EVALPILOT_DASHBOARD_TEST === '1';
 
 describe.skipIf(!enabled)('dashboard browser', () => {
   let close: (() => Promise<void>) | undefined;
   let baseUrl = '';
+  let projectOutputDir = '';
 
   beforeAll(async () => {
     process.env.EVALPILOT_OPENAI_API_KEY = '';
     const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-dashboard-browser-'));
     const outputDir = resolve(cwd, '.evalpilot-data');
+    projectOutputDir = outputDir;
     await mkdir(resolve(outputDir, 'journeys'), { recursive: true });
     await mkdir(resolve(outputDir, 'reports'), { recursive: true });
     await mkdir(resolve(outputDir, 'runs'), { recursive: true });
@@ -136,6 +139,14 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.getByText('已确认事实', { exact: true }).waitFor({ state: 'visible' });
     expect(await page.getByText('已确认事实').isVisible()).toBe(true);
     expect(await page.getByText('可能根因（仍需验证）').isVisible()).toBe(true);
+    const candidate: CandidateFinding = { findingId: 'finding-browser-candidate', projectId: 'dashboard-fixture', caseId: 'case-baseline-recommend', runId: 'run-browser-candidate', title: '可疑问题：新用户完成首次推荐', summary: '推荐结果之后可能缺少下一步', status: 'candidate', semanticConfidence: 0.6, deterministicSupport: false, independentEvidenceTypes: ['screenshot'], confirmedFacts: ['推荐结果已显示'], hypotheses: [], unknowns: ['是否属于产品问题'], evidenceRefs: ['step-2.png'], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    await saveFinding(projectOutputDir, candidate);
+    await page.goto(`${baseUrl}/findings?findingId=${candidate.findingId}`, { waitUntil: 'networkidle' });
+    expect(await page.getByRole('heading', { name: '发现可疑问题，证据尚不足' }).isVisible()).toBe(true);
+    await page.getByRole('button', { name: '暂不处理' }).click();
+    expect(await page.getByRole('dialog', { name: '确认更改问题判断' }).isVisible()).toBe(true);
+    await page.getByRole('button', { name: '确认并保存' }).click();
+    await page.getByText('已忽略这条发现，不会创建 Badcase。').waitFor({ state: 'visible' });
     expect(errors).toEqual([]);
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${baseUrl}/home`, { waitUntil: 'networkidle' });

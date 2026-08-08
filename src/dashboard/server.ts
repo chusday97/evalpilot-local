@@ -27,7 +27,8 @@ import { inspectRuntime } from '../runtime/runtime-readiness.js';
 import { dashboardAssetsRoot, isLegacyDataRoot } from '../runtime/paths.js';
 import { evalCaseResultPath, loadEvalCaseResult } from '../judge/eval-result-store.js';
 import { storageIdSchema } from '../eval-set/schemas.js';
-import { evalSetSummary, findAdaptiveCase, generateAdaptiveFoundation, latestCoverage, latestProductModel, listAdaptiveCases, listAdaptiveRuns, projectBadcase, projectBadcases, regressionCases } from './adaptive-dashboard-data.js';
+import { evalSetSummary, findAdaptiveCase, generateAdaptiveFoundation, latestCoverage, latestProductModel, listAdaptiveCases, listAdaptiveRuns, projectBadcase, projectBadcases, projectFinding, projectFindings, regressionCases } from './adaptive-dashboard-data.js';
+import { confirmProductFailure, dismissFinding, markEvaluatorFailure } from '../findings/finding-triage.js';
 import { chromium } from 'playwright';
 import { OpenAiProvider } from '../ai/openai-provider.js';
 import { runAdaptiveCase } from '../evaluation/adaptive-evaluation-service.js';
@@ -109,7 +110,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
         status: 'ok',
         packageVersion: runtime.packageVersion,
         contractVersion: runtime.contractVersion,
-        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'adaptive_eval_set', 'hybrid_judge_assets'],
+        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'adaptive_eval_set', 'hybrid_judge_assets', 'finding_triage'],
         runtime,
         aiTestAgent: { configured: Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim()), provider: 'openai', screenshotDefault: false },
       });
@@ -139,7 +140,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
       }
     }
     if (method === 'GET' && pathname === '/api/projects') { const registry = await loadProjectRegistry(cwd); return ok({ ...registry, summaries: await Promise.all(registry.projects.map((project) => projectSummary(project.projectId, project.outputDir))) }); }
-    const adaptiveProjectRoute = pathname.match(/^\/api\/projects\/([^/]+)\/(product-model|eval-set|eval-cases|adaptive-runs|coverage|badcases|regression)(\/generate)?$/);
+    const adaptiveProjectRoute = pathname.match(/^\/api\/projects\/([^/]+)\/(product-model|eval-set|eval-cases|adaptive-runs|coverage|findings|badcases|regression)(\/generate)?$/);
     if (adaptiveProjectRoute) {
       const projectId = decodeURIComponent(adaptiveProjectRoute[1] ?? '');
       const resource = adaptiveProjectRoute[2];
@@ -154,6 +155,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
       if (resource === 'eval-cases') return ok(await listAdaptiveCases(config.outputDir));
       if (resource === 'adaptive-runs') return ok(await listAdaptiveRuns(config.outputDir));
       if (resource === 'coverage') return ok(await latestCoverage(config.outputDir));
+      if (resource === 'findings') return ok(await projectFindings(config.outputDir));
       if (resource === 'badcases') return ok(await projectBadcases(config.outputDir));
       if (resource === 'regression') return ok(await regressionCases(config.outputDir));
     }
@@ -203,6 +205,20 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
       const id = decodeURIComponent(pathname.slice('/api/badcases/'.length));
       const badcase = await projectBadcase(config.outputDir, storageIdSchema.parse(id));
       return badcase ? ok(badcase) : fail(404, 'BADCASE_NOT_FOUND', `没有找到 Badcase：${id}`);
+    }
+    if (method === 'GET' && /^\/api\/findings\/[^/]+$/.test(pathname)) {
+      const id = storageIdSchema.parse(decodeURIComponent(pathname.slice('/api/findings/'.length)));
+      const finding = await projectFinding(config.outputDir, id);
+      return finding ? ok(finding) : fail(404, 'FINDING_NOT_FOUND', `没有找到问题发现：${id}`);
+    }
+    const findingAction = pathname.match(/^\/api\/findings\/([^/]+)\/(confirm-product-failure|mark-evaluator-failure|dismiss)$/);
+    if (method === 'POST' && findingAction) {
+      if (recordBody(body)?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '更改问题判断前需要明确确认。');
+      const findingId = storageIdSchema.parse(decodeURIComponent(findingAction[1] ?? ''));
+      if (!await projectFinding(config.outputDir, findingId)) return fail(404, 'FINDING_NOT_FOUND', `没有找到问题发现：${findingId}`);
+      if (findingAction[2] === 'confirm-product-failure') return ok(await confirmProductFailure(config.outputDir, findingId));
+      if (findingAction[2] === 'mark-evaluator-failure') return ok(await markEvaluatorFailure(config.outputDir, findingId));
+      return ok(await dismissFinding(config.outputDir, findingId));
     }
     const adaptiveRunRoute = pathname.match(/^\/api\/runs\/([^/]+)\/(evidence|result)$/);
     if (method === 'GET' && adaptiveRunRoute) {

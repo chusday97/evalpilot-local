@@ -7,6 +7,7 @@ import type { EvalPilotConfig } from '../types.js';
 import { loadDashboardOverview, validateDashboardHost } from '../src/dashboard/dashboard-data.js';
 import { dispatchDashboardApi } from '../src/dashboard/server.js';
 import { saveCoverageMatrix } from '../src/eval-set/coverage-store.js';
+import { saveFinding } from '../src/findings/finding-store.js';
 
 describe('dashboard local data boundary', () => {
   it('reports the local contract version before the UI calls feature APIs', async () => {
@@ -17,7 +18,7 @@ describe('dashboard local data boundary', () => {
     expect(result.body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({
       status: 'ok',
       contractVersion: '0.5.0',
-      capabilities: expect.arrayContaining(['guidance', 'structured_evidence', 'not_applicable_runs', 'adaptive_eval_set', 'hybrid_judge_assets']),
+      capabilities: expect.arrayContaining(['guidance', 'structured_evidence', 'not_applicable_runs', 'adaptive_eval_set', 'hybrid_judge_assets', 'finding_triage']),
     }) }));
   });
 
@@ -120,6 +121,21 @@ describe('dashboard local data boundary', () => {
     try {
       const response = await dispatchDashboardApi(cwd, 'GET', '/api/projects/project-demo/coverage', '', {});
       expect(response.body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({ assetCoverageRatio: 1, executionCoverageRatio: 0, verifiedCoverageRatio: 0, coverageRatio: 0 }) }));
+    } finally { delete process.env.EVALPILOT_DATA_DIR; }
+  });
+
+  it('lists candidate findings and requires explicit confirmation for triage actions', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-finding-api-'));
+    const dataDir = resolve(cwd, 'data'); const outputDir = resolve(dataDir, 'projects', 'project-demo'); const now = new Date().toISOString();
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(resolve(dataDir, 'projects.json'), JSON.stringify({ version: 1, activeProjectId: 'project-demo', projects: [{ projectId: 'project-demo', name: 'Demo', projectRoot: cwd, targetUrl: 'http://127.0.0.1:3000', outputDir, browser: 'chromium', startCommand: null, status: 'ready', importSource: 'manual', preferredAgent: null, createdAt: now, updatedAt: now, lastOpenedAt: now }] }));
+    await saveFinding(outputDir, { findingId: 'finding-run-api', projectId: 'project-demo', caseId: 'case-api', runId: 'run-api', title: '可疑问题', summary: '点击后没有反馈', status: 'candidate', semanticConfidence: 0.6, deterministicSupport: false, independentEvidenceTypes: ['screenshot'], confirmedFacts: ['点击已执行'], hypotheses: [], unknowns: ['是否属于产品问题'], evidenceRefs: ['after.png'], createdAt: now, updatedAt: now });
+    process.env.EVALPILOT_DATA_DIR = dataDir;
+    try {
+      const list = await dispatchDashboardApi(cwd, 'GET', '/api/projects/project-demo/findings', '', {});
+      const mutation = await dispatchDashboardApi(cwd, 'POST', '/api/findings/finding-run-api/dismiss', '?projectId=project-demo', { confirmed: false });
+      expect(list.body).toEqual(expect.objectContaining({ success: true, data: [expect.objectContaining({ status: 'candidate' })] }));
+      expect(mutation.body).toEqual(expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'CONFIRMATION_REQUIRED' }) }));
     } finally { delete process.env.EVALPILOT_DATA_DIR; }
   });
 });

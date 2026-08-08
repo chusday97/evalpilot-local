@@ -21,8 +21,10 @@ export function mergeJudgeVerdicts(input: {
   let severity: EvalCaseResult['severity'] = null;
   if (!complete || input.semanticEvaluatorFailed) {
     failureSource = 'evaluator';
-  } else if (input.deterministic.hardFailure || input.semantic.verdict === 'fail') {
+  } else if (input.deterministic.hardFailure) {
     verdict = 'fail'; failureSource = 'product'; severity = input.deterministic.severity ?? input.evalCase.riskLevel;
+  } else if (input.semantic.verdict === 'fail') {
+    failureSource = 'unknown';
   } else if (input.deterministic.checks.some((item) => item.verdict === 'inconclusive') || input.semantic.verdict === 'inconclusive') {
     failureSource = 'unknown';
   } else if (input.deterministic.checks.every((item) => item.verdict === 'pass') && input.semantic.verdict === 'pass') {

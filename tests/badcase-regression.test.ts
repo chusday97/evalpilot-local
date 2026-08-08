@@ -2,12 +2,13 @@ import { mkdtemp } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import type { EvalCase, EvalCaseResult } from '../types.js';
+import type { CandidateFinding, EvalCase, EvalCaseResult } from '../types.js';
 import { badcaseFromProductFailure, createAndSaveBadcase, markBadcaseFixed } from '../src/badcase/badcase-service.js';
 import { classifyEvalFailure } from '../src/badcase/classifier.js';
 import { promoteFixedBadcaseToRegression } from '../src/badcase/regression-promoter.js';
 import { loadBadcase } from '../src/badcase/badcase-store.js';
 import { loadRegressionCases } from '../src/eval-set/regression-store.js';
+import { saveFinding } from '../src/findings/finding-store.js';
 
 const failedAt = '2026-08-01T12:00:00.000Z';
 const fixedAt = '2026-08-01T13:00:00.000Z';
@@ -29,23 +30,28 @@ function result(verdict: 'pass' | 'fail' | 'inconclusive', failureSource: EvalCa
   };
 }
 
+function confirmedFinding(runId = 'run-failed'): CandidateFinding {
+  return { findingId: `finding-${runId}`, projectId: 'project-demo', caseId: 'case-create', runId, title: '按钮点击后没有结果反馈', summary: '按钮点击后没有结果反馈', status: 'confirmed_product_failure', semanticConfidence: 0.9, deterministicSupport: true, independentEvidenceTypes: ['screenshot', 'deterministic_assertion'], confirmedFacts: ['点击已执行', '页面状态未变化'], hypotheses: [], unknowns: [], evidenceRefs: ['screenshots/final.png'], createdAt: failedAt, updatedAt: failedAt };
+}
+
 describe('Badcase and Regression lifecycle', () => {
   it('creates a Badcase only from confirmed product failure without inventing a root cause', () => {
     const failed = result('fail', 'product', 'run-failed');
     expect(classifyEvalFailure(sourceCase(), failed)).toMatchObject({ kind: 'product', category: 'interaction' });
-    const badcase = badcaseFromProductFailure({ evalCase: sourceCase(), result: failed, createdAt: failedAt });
+    const badcase = badcaseFromProductFailure({ evalCase: sourceCase(), result: failed, finding: confirmedFinding(), createdAt: failedAt });
     expect(badcase).toMatchObject({ fixStatus: 'open', confirmedFacts: ['点击已执行', '页面状态未变化'], rootCauseHypotheses: [{ hypothesis: '前端没有更新结果状态', confidence: 0.6 }] });
   });
 
   it('keeps evaluator failures out of Product Badcases', () => {
     const evaluatorFailure = result('inconclusive', 'evaluator', 'run-evaluator');
     expect(classifyEvalFailure(sourceCase(), evaluatorFailure)).toMatchObject({ kind: 'evaluator', category: 'evaluator' });
-    expect(() => badcaseFromProductFailure({ evalCase: sourceCase(), result: evaluatorFailure })).toThrow(/不能创建 Product Badcase/);
+    expect(() => badcaseFromProductFailure({ evalCase: sourceCase(), result: evaluatorFailure, finding: confirmedFinding('run-evaluator') })).toThrow(/不能创建 Product Badcase/);
   });
 
   it('promotes a fixed Badcase only after the same case passes and preserves lineage', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-regression-'));
-    const created = await createAndSaveBadcase(outputDir, { evalCase: sourceCase(), result: result('fail', 'product', 'run-failed'), createdAt: failedAt });
+    const finding = await saveFinding(outputDir, confirmedFinding());
+    const created = await createAndSaveBadcase(outputDir, { evalCase: sourceCase(), result: result('fail', 'product', 'run-failed'), finding, createdAt: failedAt });
     await expect(promoteFixedBadcaseToRegression({ outputDir, badcase: created, sourceCase: sourceCase(), passingRetest: result('pass', null, 'run-passed'), fixedAt })).rejects.toThrow(/标记为 fixed/);
     const fixed = await markBadcaseFixed(outputDir, created, fixedAt);
     const promoted = await promoteFixedBadcaseToRegression({ outputDir, badcase: fixed, sourceCase: sourceCase(), passingRetest: result('pass', null, 'run-passed'), fixedAt, fixTaskId: 'fix-1' });
@@ -56,7 +62,8 @@ describe('Badcase and Regression lifecycle', () => {
 
   it('rejects a passing result for a different case', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-regression-mismatch-'));
-    const created = await createAndSaveBadcase(outputDir, { evalCase: sourceCase(), result: result('fail', 'product', 'run-failed'), createdAt: failedAt });
+    const finding = await saveFinding(outputDir, confirmedFinding());
+    const created = await createAndSaveBadcase(outputDir, { evalCase: sourceCase(), result: result('fail', 'product', 'run-failed'), finding, createdAt: failedAt });
     const fixed = await markBadcaseFixed(outputDir, created, fixedAt);
     await expect(promoteFixedBadcaseToRegression({ outputDir, badcase: fixed, sourceCase: sourceCase(), passingRetest: { ...result('pass', null, 'run-other'), caseId: 'case-other' }, fixedAt })).rejects.toThrow(/同一个原始案例/);
   });

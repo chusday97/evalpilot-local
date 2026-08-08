@@ -1,10 +1,17 @@
-import type { Badcase, EvalCase, EvalCaseResult } from '../../types.js';
+import type { Badcase, CandidateFinding, EvalCase, EvalCaseResult } from '../../types.js';
 import { classifyEvalFailure } from './classifier.js';
 import { rootCauseHypothesesFromResult } from './root-cause-analyzer.js';
 import { saveBadcase } from './badcase-store.js';
 import { badcaseSchema } from './schemas.js';
+import { loadFinding } from '../findings/finding-store.js';
 
-export function badcaseFromProductFailure(input: { evalCase: EvalCase; result: EvalCaseResult; createdAt?: string }): Badcase {
+export function badcaseFromProductFailure(input: { evalCase: EvalCase; result: EvalCaseResult; finding: CandidateFinding; createdAt?: string }): Badcase {
+  if (input.finding.status !== 'confirmed_product_failure'
+    || input.finding.projectId !== input.evalCase.projectId
+    || input.finding.caseId !== input.evalCase.caseId
+    || input.finding.runId !== input.result.runId) {
+    throw new Error('不能创建 Product Badcase：缺少与本次运行匹配的已确认 Finding。');
+  }
   const classification = classifyEvalFailure(input.evalCase, input.result);
   if (classification.kind !== 'product' || !classification.category || input.result.verdict !== 'fail') {
     throw new Error(`不能创建 Product Badcase：${classification.reason}`);
@@ -31,8 +38,12 @@ export function badcaseFromProductFailure(input: { evalCase: EvalCase; result: E
   });
 }
 
-export async function createAndSaveBadcase(outputDir: string, input: { evalCase: EvalCase; result: EvalCaseResult; createdAt?: string }): Promise<Badcase> {
-  return saveBadcase(outputDir, badcaseFromProductFailure(input));
+export async function createAndSaveBadcase(outputDir: string, input: { evalCase: EvalCase; result: EvalCaseResult; finding: CandidateFinding; createdAt?: string }): Promise<Badcase> {
+  const persistedFinding = await loadFinding(outputDir, input.finding.findingId);
+  if (persistedFinding.status !== 'confirmed_product_failure' || persistedFinding.updatedAt !== input.finding.updatedAt) {
+    throw new Error('不能创建 Product Badcase：Finding 尚未以已确认状态原子保存。');
+  }
+  return saveBadcase(outputDir, badcaseFromProductFailure({ ...input, finding: persistedFinding }));
 }
 
 export async function markBadcaseFixed(outputDir: string, badcase: Badcase, fixedAt = new Date().toISOString()): Promise<Badcase> {

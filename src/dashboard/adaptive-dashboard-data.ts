@@ -1,6 +1,6 @@
 import { readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { AdaptiveRunSummary, Badcase, CoverageMatrix, EvalCase, EvalSetDashboardSummary, EvalSetType, ProductModel } from '../../types.js';
+import type { AdaptiveRunSummary, Badcase, CandidateFinding, CoverageMatrix, EvalCase, EvalSetDashboardSummary, EvalSetType, ProductModel } from '../../types.js';
 import { buildProductModel } from '../product-model/product-model-builder.js';
 import { listProductModelVersions, loadProductModel, saveProductModel } from '../product-model/product-model-store.js';
 import { generateAndSaveBaseline } from '../eval-set/eval-set-generator.js';
@@ -9,6 +9,7 @@ import { loadLatestCoverageMatrix, saveCoverageMatrix } from '../eval-set/covera
 import { evalSetManifestPath, loadEvalCase, loadEvalSetCases, loadEvalSetManifest } from '../eval-set/eval-set-store.js';
 import { listBadcases, loadBadcase } from '../badcase/badcase-store.js';
 import { loadEvalCaseResult } from '../judge/eval-result-store.js';
+import { listFindings, loadFinding } from '../findings/finding-store.js';
 import { pathExists, readYamlFile } from '../utils/file-system.js';
 import type { EvalBlueprint, ProjectBackground } from '../../types.js';
 
@@ -49,6 +50,14 @@ export async function projectBadcases(outputDir: string): Promise<Badcase[]> {
 
 export async function projectBadcase(outputDir: string, badcaseId: string): Promise<Badcase | null> {
   return await pathExists(resolve(outputDir, 'badcases', `${badcaseId}.json`)) ? loadBadcase(outputDir, badcaseId) : null;
+}
+
+export async function projectFindings(outputDir: string): Promise<CandidateFinding[]> {
+  return listFindings(outputDir);
+}
+
+export async function projectFinding(outputDir: string, findingId: string): Promise<CandidateFinding | null> {
+  return await pathExists(resolve(outputDir, 'findings', 'v1', `${findingId}.json`)) ? loadFinding(outputDir, findingId) : null;
 }
 
 export async function regressionCases(outputDir: string): Promise<EvalCase[]> {
