@@ -39,6 +39,7 @@ jobs:
       - run: npx playwright install --with-deps chromium
       - run: npm run build
       - run: npm run test:ai-agent
+      - run: npm run test:semantic-verifier
       - run: npm run test:browser
       - run: npm run test:runner
       - run: npm run test:dashboard

@@ -9,7 +9,12 @@ export const coverageDimensionSchema = z.enum(['capability', 'persona', 'input_q
 export const evalPersonaRefSchema = z.object({
   personaId: storageIdSchema,
   name: z.string().min(1),
+  knowledgeLevel: z.enum(['low', 'medium', 'high']).default('medium'),
+  patienceTurns: z.number().int().min(1).max(20).default(3),
+  retryTolerance: z.number().int().min(0).max(10).default(1),
+  privacySensitivity: z.enum(['low', 'medium', 'high']).default('medium'),
   behaviorPolicy: z.array(z.string().min(1)),
+  exitConditions: z.array(z.string().min(1)).default(['证据不足时退出']),
 }).strict();
 
 export const deterministicAssertionSchema = z.object({

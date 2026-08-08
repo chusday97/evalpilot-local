@@ -294,6 +294,15 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - CI 至少覆盖：表单完成 PASS、死点击确认失败、危险动作阻止、模型输出损坏产生 Evaluator Failure、Candidate Challenge 不增加 Verified Coverage、证据缺失不生成 Product Badcase、修复后同案例 PASS 晋升 Regression、PASS 生成 Challenge candidates。
 - `test:ai-agent` 任一失败必须使 `chromium-smoke` 失败；不得使用 `continue-on-error`、空 catch 或缺少浏览器时静默跳过。
 
+### 10.3 Accuracy Sprint Phase 5 Semantic Verifier 契约
+
+- `EvalPersonaRef` 新增显式 Agent Policy：知识水平、耐心动作数、允许重试次数、隐私敏感度和退出条件。新案例必须写入全部字段；旧案例只在兼容读取时使用 `medium / 3 / 1 / medium / 证据不足时退出`，不得覆盖原文件。
+- 每个 Agent 动作继续先执行确定性验证，再以最小化 before/after Observation、动作结果、控制台/网络增量和获准的截图运行 `SemanticStepVerification`。远程 Provider 未获得截图授权时不得接收截图，也不得确认只能由视觉证据证明的结果。
+- 合并规则固定为：动作执行硬失败优先；确定性与高置信度语义结果冲突时为 `inconclusive`；语义置信度低于 `0.8` 不能独立确认；视觉目标缺少获准截图时为 `inconclusive`；其余确定性证据仍可独立确认非视觉结果。
+- Reflector 不得再用 `behaviorPolicy.length` 代替耐心。重试和放弃必须使用 `patienceTurns`、`retryTolerance` 与 `exitConditions`；可选 Semantic Reflector 的建议仍受固定最大动作数、危险动作门禁和 Persona 上限约束。
+- 固定 `50ms/300ms` 等待替换为有界信号等待：目标文本出现、DOM/URL 变化、加载标记消失或网络空闲；所有路径必须有明确超时，超时只表示当前步骤未确认，不能无限等待或伪造通过。
+- 新运行在版本矩阵中记录 `verifierPromptVersion`、可选 `reflectorPromptVersion` 和 `toolSchemaVersion=1.1.0`；旧 Evidence Packet 缺少这些字段时继续兼容读取，不补写原文件。
+
 ## 11. EvalPilot Next Phase 3 Product Model 与 Baseline 契约
 
 - Product Model 由现有证据化 `ProjectBackground + EvalBlueprint` 生成；Capability 表示用户任务能力，不按路由数量机械拆分。每个 Capability 至少关联一个 `ProductTask`，推断任务必须保留 `needsHumanReview=true`。

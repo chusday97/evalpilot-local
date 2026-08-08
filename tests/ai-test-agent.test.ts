@@ -104,7 +104,7 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
     expect(result.decisions.map((item) => item.action)).toEqual(['fill', 'click', 'finish']);
     expect(result.actionResults[0]).toMatchObject({ status: 'executed', targetElementId: 'E001' });
     expect(provider.requests.every((item) => item.imageDataUrls[0]?.startsWith('data:image/png;base64,'))).toBe(true);
-    expect(provider.requests.every((item) => item.userPrompt.includes('interactableElements'))).toBe(true);
+    expect(provider.requests.filter((item) => item.task === 'actor').every((item) => item.userPrompt.includes('interactableElements'))).toBe(true);
     const packet = JSON.parse(await readFile(result.evidencePacketPath, 'utf8')) as { actions: unknown[]; stepEvidence: Array<{ beforeScreenshotPath: string; afterScreenshotPath: string }>; tracePath: string | null; evidenceCompleteness: { complete: boolean } };
     expect(packet.evidenceCompleteness.complete).toBe(true);
     expect(packet.stepEvidence).toHaveLength(packet.actions.length);
@@ -158,7 +158,17 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
     expect(candidateOnlyCells.length).toBeGreaterThan(0);
     expect(candidateOnlyCells.every((cell) => !cell.verified)).toBe(true);
     const packet = JSON.parse(await readFile(outcome.agentRun.evidencePacketPath, 'utf8')) as { versions: Record<string, unknown> };
-    expect(packet.versions).toMatchObject({ targetAppGitSha: 'abc123', productModelVersion: 2, evalSetVersion: 3, caseVersion: 1, actorModel: 'evalpilot-mock-v1', judgeModel: 'evalpilot-mock-v1' });
+    expect(packet.versions).toMatchObject({
+      targetAppGitSha: 'abc123',
+      productModelVersion: 2,
+      evalSetVersion: 3,
+      caseVersion: 1,
+      actorModel: 'evalpilot-mock-v1',
+      judgeModel: 'evalpilot-mock-v1',
+      verifierPromptVersion: '1.0.0',
+      reflectorPromptVersion: null,
+      toolSchemaVersion: '1.1.0',
+    });
     const markdown = await readFile(join(outputDir, 'reports', 'latest-evaluation.md'), 'utf8'); expect(markdown).toContain('## 16. Authenticity / uncertainty notice');
     await browser.close();
   });

@@ -1,5 +1,6 @@
 import type { EvalCase, EvalCaseResult, ExplorationFinding, ExplorationHypothesis, ProductModel } from '../../types.js';
 import { evalCaseSchema, explorationFindingSchema } from '../eval-set/schemas.js';
+import { defaultPersonaRef } from '../eval-set/persona-policy.js';
 
 export function createExplorationFinding(input: {
   hypothesis: ExplorationHypothesis;
@@ -43,7 +44,7 @@ export function promoteExplorationFinding(input: {
     taskId: task?.taskId ?? null,
     title: input.hypothesis.title,
     hypothesis: input.hypothesis.rationale,
-    persona: { personaId: user?.userTypeId ?? 'user-general', name: user?.name ?? '普通用户', behaviorPolicy: ['只使用页面可见信息', '遇到高风险操作立即停止'] },
+    persona: defaultPersonaRef(user?.userTypeId ?? 'user-general', user?.name ?? '普通用户', ['只使用页面可见信息', '遇到高风险操作立即停止'], { privacySensitivity: 'high', exitConditions: ['遇到高风险或敏感信息要求时退出', '证据不足时退出'] }),
     goal: input.hypothesis.goal,
     knownInformation: {},
     preconditions: task?.preconditions ?? [],

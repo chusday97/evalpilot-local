@@ -40,7 +40,7 @@ function evalCase(overrides: Partial<EvalCase> = {}): EvalCase {
   return {
     caseId: 'case-create', projectId: 'project-demo', setType: 'baseline', status: 'stable',
     origin: { type: 'generated_from_product_model', productModelVersion: 1 }, capabilityId: 'cap-create', taskId: 'task-create',
-    title: '新用户完成首次创建', hypothesis: '新用户可以从首页完成创建', persona: { personaId: 'user-new', name: '新用户', behaviorPolicy: ['只使用可见入口'] },
+    title: '新用户完成首次创建', hypothesis: '新用户可以从首页完成创建', persona: { personaId: 'user-new', name: '新用户', knowledgeLevel: 'low', patienceTurns: 3, retryTolerance: 1, privacySensitivity: 'medium', behaviorPolicy: ['只使用可见入口'], exitConditions: ['证据不足时退出'] },
     goal: '获得第一份结果', knownInformation: {}, preconditions: ['项目已启动'],
     oracle: { expectedOutcome: ['显示创建结果'], mustObserve: ['结果标题'], mustNotObserve: ['未处理异常'], businessRules: ['结果必须可见'], semanticRubric: ['用户能确认任务已经完成'], deterministicAssertions: [{ assertionId: 'assert-result', type: 'text_visible', target: '结果标题', expected: true, negated: false }], inconclusiveWhen: ['目标服务断开'] },
     coverageDimensions: [{ dimension: 'capability', value: 'cap-create' }, { dimension: 'persona', value: 'user-new' }], riskLevel: 'P1', generationReason: '覆盖关键用户任务', version: 1,

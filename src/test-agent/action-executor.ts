@@ -20,7 +20,7 @@ export async function executeAgentAction(page: Page, observation: PageObservatio
     else if (decision.action === 'select') await locator!.selectOption(decision.value ?? '');
     else if (decision.action === 'scroll') await page.mouse.wheel(0, 600);
     else if (decision.action === 'back') await page.goBack({ waitUntil: 'domcontentloaded' });
-    else if (decision.action === 'wait' || decision.action === 'retry') await page.waitForTimeout(300);
+    else if (decision.action === 'wait' || decision.action === 'retry') { /* bounded signal waiting is handled by the runner */ }
     return { status: 'executed', action: decision.action, targetElementId: decision.targetElementId, summary: `${decision.action} 已执行。`, evidenceRefs: observation.evidenceRefs };
   } catch (error) {
     return { status: 'failed', action: decision.action, targetElementId: decision.targetElementId, summary: error instanceof Error ? error.message : String(error), evidenceRefs: observation.evidenceRefs };

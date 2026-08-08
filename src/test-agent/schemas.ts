@@ -54,7 +54,18 @@ export const stepVerificationSchema = z.object({
   status: z.enum(['confirmed', 'not_confirmed', 'inconclusive']),
   evidenceRefs: z.array(z.string()),
   confidence: z.number().min(0).max(1),
+  deterministicStatus: z.enum(['confirmed', 'not_confirmed', 'inconclusive']).optional(),
+  semantic: z.object({
+    status: z.enum(['confirmed', 'not_confirmed', 'inconclusive']),
+    observed: z.string().min(1),
+    confirmedFacts: z.array(z.string().min(1)),
+    unknowns: z.array(z.string().min(1)),
+    evidenceRefs: z.array(z.string()),
+    confidence: z.number().min(0).max(1),
+  }).strict().nullable().optional(),
 }).strict();
+
+export const semanticStepVerificationSchema = stepVerificationSchema.shape.semantic.unwrap().unwrap();
 
 export const stepEvidenceSchema = z.object({
   stepIndex: z.number().int().positive(),
@@ -93,6 +104,8 @@ export const runVersionMetadataSchema = z.object({
   judgeModel: z.string().min(1),
   actorPromptVersion: z.string().min(1),
   judgePromptVersion: z.string().min(1),
+  verifierPromptVersion: z.string().min(1).optional(),
+  reflectorPromptVersion: z.string().min(1).nullable().optional(),
   toolSchemaVersion: z.string().min(1),
   timestamp: z.iso.datetime(),
 }).strict();

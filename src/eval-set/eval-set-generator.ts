@@ -1,6 +1,7 @@
 import type { EvalCase, ProductModel, ProductTask } from '../../types.js';
 import { evalCaseSchema } from './schemas.js';
 import { saveEvalCase } from './eval-set-store.js';
+import { defaultPersonaRef } from './persona-policy.js';
 
 function safeId(value: string): string {
   return value.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-|-$/g, '').toLowerCase();
@@ -22,7 +23,7 @@ function taskCase(model: ProductModel, task: ProductTask, generatedAt: string): 
     taskId: task.taskId,
     title: `${user?.name ?? '用户'}：${task.name}`,
     hypothesis: `${user?.name ?? '用户'}可以完成“${task.goal}”，并理解结果或下一步。`,
-    persona: { personaId: user?.userTypeId ?? 'user-general', name: user?.name ?? '普通用户', behaviorPolicy: ['只使用可见且安全的入口', '证据不足时停止并标记无法判断'] },
+    persona: defaultPersonaRef(user?.userTypeId ?? 'user-general', user?.name ?? '普通用户', ['只使用可见且安全的入口', '证据不足时停止并标记无法判断']),
     goal: task.goal,
     knownInformation: {},
     preconditions: task.preconditions,

@@ -1,5 +1,6 @@
 import type { CoverageGap, EvalCase, ProductModel } from '../../types.js';
 import { evalCaseSchema } from './schemas.js';
+import { defaultPersonaRef } from './persona-policy.js';
 
 function withDimension(source: EvalCase, dimension: EvalCase['coverageDimensions'][number]['dimension'], value: string) {
   return [...source.coverageDimensions.filter((item) => item.dimension !== dimension), { dimension, value }];
@@ -51,7 +52,7 @@ export function generateChallengeCandidates(source: EvalCase, model: ProductMode
     candidate(source, personaGap, 'persona', {
       title: `${source.title}（${alternativeUser?.name ?? '低耐心用户'}）`,
       hypothesis: `${alternativeUser?.name ?? '低耐心用户'}也能发现入口并理解结果。`,
-      persona: { personaId: alternativeUser?.userTypeId ?? 'user-low-patience', name: alternativeUser?.name ?? '低耐心用户', behaviorPolicy: ['一次失败后放弃', '不使用专业术语猜测入口'] },
+      persona: defaultPersonaRef(alternativeUser?.userTypeId ?? 'user-low-patience', alternativeUser?.name ?? '低耐心用户', ['一次失败后放弃', '不使用专业术语猜测入口'], { knowledgeLevel: 'low', patienceTurns: 1, retryTolerance: 0, privacySensitivity: 'high', exitConditions: ['一次失败后退出', '需要提供敏感信息时退出'] }),
       coverageDimensions: withDimension(source, 'persona', personaGap.missingValue),
       createdAt,
     }),

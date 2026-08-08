@@ -65,6 +65,8 @@ EvalPilot 分开显示“通过、失败、阻塞、不适用”。如果项目�
 
 实验路径不会替换默认流程，也不代表当前已达到“可靠自主评测”。达到真实浏览器基准的准确率门禁前，结果仍需结合证据人工复核。
 
+`0.6.0-alpha.0` 的 Phase 5 会在每个动作后组合确定性信号和语义步骤验证：执行失败优先，两个验证器冲突时显示“无法判断”，低置信度语义结果不能单独判定成功。等待依据目标文字、页面变化、加载完成和网络空闲，并始终有超时上限；Persona 的耐心和重试次数使用明确字段，不再从描述文案数量猜测。
+
 ### 实验 AI Provider 与授权
 
 - 远程模型仅用于 Experimental Adaptive Evaluation。启动 Dashboard 前通过终端环境变量提供 `EVALPILOT_OPENAI_API_KEY`；可用 `EVALPILOT_OPENAI_MODEL` 选择模型。不要把密钥写进项目或提交到 Git。
@@ -116,6 +118,7 @@ npm run check
 npm test
 npm run build
 npm run test:ai-agent
+npm run test:semantic-verifier
 ```
 
 发布包还需通过：

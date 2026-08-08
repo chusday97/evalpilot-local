@@ -12,6 +12,13 @@ import { generateSafeInput } from './safe-input-generator.js';
 import { verifyAgentStep } from './verifier.js';
 import { packageVersion } from '../runtime/paths.js';
 import { semanticJudgePromptV1 } from '../prompts/semantic-judge.v1.js';
+import { capturePageWaitBaseline, waitForAdaptiveOutcome } from './adaptive-wait.js';
+import { runSemanticStepVerifier } from './semantic-verifier.js';
+import { mergeStepVerifications } from './verification-merger.js';
+import { reflectOnStepSemantically } from './semantic-reflector.js';
+import { resolvePersonaPolicy } from '../eval-set/persona-policy.js';
+import { verifierPromptV1 } from '../prompts/verifier.v1.js';
+import { reflectorPromptV1 } from '../prompts/reflector.v1.js';
 
 interface AgentRunnerOptions {
   outputDir: string;
@@ -24,7 +31,13 @@ interface AgentRunnerOptions {
   productModelVersion?: number;
   evalSetVersion?: number;
   judgeModel?: string;
+  useSemanticReflector?: boolean;
+  waitTimeoutMs?: number;
   now?: () => Date;
+}
+
+function inputScreenshotAllowed(remoteProvider: boolean, explicitPermission: boolean | undefined): boolean {
+  return remoteProvider ? explicitPermission === true : true;
 }
 
 function interactionFor(decision: AgentDecision, result: AgentActionResult, index: number, elapsedMs: number, pageUrl: string): InteractionAction {
@@ -78,6 +91,9 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       screenshots.push(beforeScreenshotPath);
       const before = await observePage(page, [beforeScreenshotPath], `observation-${stepLabel}-before`);
       observations.push(before);
+      const waitBaseline = await capturePageWaitBaseline(page);
+      const consoleStart = consoleEvidence.length;
+      const networkStart = networkEvidence.length;
       let decision: AgentDecision;
       try {
         decision = await chooseAgentAction({
@@ -108,10 +124,12 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       }
       decisions.push(decision);
       actionResult ??= await executeAgentAction(page, before, decision);
+      const policy = resolvePersonaPolicy(evalCase.persona);
+      const waitResult = await waitForAdaptiveOutcome(page, waitBaseline, decision, options.waitTimeoutMs ?? Math.min(3_000, 750 + policy.patienceTurns * 250));
+      actionResult = { ...actionResult, summary: `${actionResult.summary} ${waitResult.summary}` };
       actionResults.push(actionResult);
       interactions.push(interactionFor(decision, actionResult, interactions.length, performance.now() - monotonicStartedAt, before.pageUrl));
-      await page.waitForTimeout(50);
-      await page.screenshot({ path: afterScreenshotPath, fullPage: true });
+      const afterBuffer = await page.screenshot({ path: afterScreenshotPath, fullPage: true });
       screenshots.push(afterScreenshotPath);
       const after = await observePage(page, [afterScreenshotPath], `observation-${stepLabel}-after`);
       observations.push(after);
@@ -119,7 +137,24 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       actionResult = { ...actionResult, evidenceRefs: [beforeScreenshotPath, afterScreenshotPath] };
       actionResults[actionResults.length - 1] = actionResult;
       interactions[interactions.length - 1] = interactionFor(decision, actionResult, interactions.length - 1, performance.now() - monotonicStartedAt, before.pageUrl);
-      const verification = verifyAgentStep(before, after, decision, actionResult, `verification-${stepLabel}`);
+      const deterministicVerification = verifyAgentStep(before, after, decision, actionResult, `verification-${stepLabel}`);
+      const screenshotAllowed = inputScreenshotAllowed(provider.info.remote, options.allowScreenshotToProvider);
+      const semanticVerification = actionResult.status === 'executed'
+        ? await runSemanticStepVerifier({
+          provider,
+          decision,
+          before,
+          after,
+          actionResult,
+          networkDelta: networkEvidence.slice(networkStart),
+          consoleDelta: consoleEvidence.slice(consoleStart),
+          beforeScreenshotDataUrl: `data:image/png;base64,${beforeBuffer.toString('base64')}`,
+          afterScreenshotDataUrl: `data:image/png;base64,${afterBuffer.toString('base64')}`,
+          allowRemoteModel: provider.info.remote ? Boolean(options.allowRemoteModel) : true,
+          allowScreenshot: screenshotAllowed,
+        })
+        : { status: 'inconclusive' as const, observed: actionResult.summary, confirmedFacts: [], unknowns: ['动作未执行，未调用语义验证器。'], evidenceRefs: actionResult.evidenceRefs, confidence: 1 };
+      const verification = mergeStepVerifications({ deterministic: deterministicVerification, semantic: semanticVerification, hardFailure: actionResult.status === 'failed', expectation: decision.expectedResult, visualEvidenceIncluded: screenshotAllowed });
       verifications.push(verification);
       stepEvidence.push({
         stepIndex,
@@ -131,8 +166,13 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
         verificationId: verification.verificationId,
         actionStatus: actionResult.status,
       });
-      const failedAttempts = verifications.filter((item) => item.status === 'not_confirmed').length;
-      const reflection = reflectOnStep({ evalCase, decision, result: actionResult, verification, failedAttempts });
+      const failedAttempts = verifications.filter((item) => item.status !== 'confirmed').length;
+      const retryAttempts = decisions.filter((item) => item.action === decision.action && item.targetElementId === decision.targetElementId).length;
+      const deterministicReflection = reflectOnStep({ evalCase, decision, result: actionResult, verification, failedAttempts, retryAttempts });
+      const semanticReflection = options.useSemanticReflector
+        ? await reflectOnStepSemantically({ provider, evalCase, decision, result: actionResult, verification, failedAttempts, retryAttempts, history: reflections, allowRemoteModel: provider.info.remote ? Boolean(options.allowRemoteModel) : true })
+        : null;
+      const reflection = semanticReflection ?? deterministicReflection;
       reflections.push(reflection);
       if (actionResult.status === 'blocked_by_safety') { status = 'blocked_by_safety'; break; }
       if (reflection.nextStep === 'finish') { status = 'completed'; break; }
@@ -183,7 +223,9 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       judgeModel: options.judgeModel ?? provider.info.model,
       actorPromptVersion: '1.0.0',
       judgePromptVersion: semanticJudgePromptV1.version,
-      toolSchemaVersion: '1.0.0',
+      verifierPromptVersion: verifierPromptV1.version,
+      reflectorPromptVersion: options.useSemanticReflector ? reflectorPromptV1.version : null,
+      toolSchemaVersion: '1.1.0',
       timestamp: started.toISOString(),
     },
   };

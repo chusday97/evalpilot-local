@@ -322,7 +322,17 @@ export type CoverageDimension = 'capability' | 'persona' | 'input_quality' | 'sy
 export interface EvalPersonaRef {
   personaId: string;
   name: string;
+  /** Optional only for legacy in-memory compatibility; new cases must persist this field. */
+  knowledgeLevel?: 'low' | 'medium' | 'high';
+  /** Optional only for legacy in-memory compatibility; new cases must persist this field. */
+  patienceTurns?: number;
+  /** Optional only for legacy in-memory compatibility; new cases must persist this field. */
+  retryTolerance?: number;
+  /** Optional only for legacy in-memory compatibility; new cases must persist this field. */
+  privacySensitivity?: 'low' | 'medium' | 'high';
   behaviorPolicy: string[];
+  /** Optional only for legacy in-memory compatibility; new cases must persist this field. */
+  exitConditions?: string[];
 }
 
 export interface DeterministicAssertion {
@@ -740,7 +750,7 @@ export interface AiPrivacyPolicy {
 
 export interface AiStructuredRequest {
   requestId: string;
-  task: 'actor' | 'semantic_judge' | 'product_model' | 'challenge' | 'exploration';
+  task: 'actor' | 'semantic_verifier' | 'semantic_reflector' | 'semantic_judge' | 'product_model' | 'challenge' | 'exploration';
   systemPrompt: string;
   userPrompt: string;
   schemaName: string;
@@ -816,6 +826,17 @@ export interface StepVerification {
   status: 'confirmed' | 'not_confirmed' | 'inconclusive';
   evidenceRefs: string[];
   confidence: number;
+  deterministicStatus?: 'confirmed' | 'not_confirmed' | 'inconclusive';
+  semantic?: SemanticStepVerification | null;
+}
+
+export interface SemanticStepVerification {
+  status: 'confirmed' | 'not_confirmed' | 'inconclusive';
+  observed: string;
+  confirmedFacts: string[];
+  unknowns: string[];
+  evidenceRefs: string[];
+  confidence: number;
 }
 
 export interface StepEvidence {
@@ -876,6 +897,8 @@ export interface RunVersionMetadata {
   judgeModel: string;
   actorPromptVersion: string;
   judgePromptVersion: string;
+  verifierPromptVersion?: string;
+  reflectorPromptVersion?: string | null;
   toolSchemaVersion: string;
   timestamp: string;
 }

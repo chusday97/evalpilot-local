@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added per-action Semantic Step Verification, deterministic/semantic conflict handling, remote screenshot consent enforcement, and versioned verifier/reflector prompts.
+- Replaced fixed AI Agent delays with bounded target-text, route/DOM, loading-completion, field-value, scroll, and network-idle signals.
+- Added explicit Persona knowledge, patience, retry, privacy, and exit policies with read-only defaults for legacy cases; Reflector no longer derives patience from behavior text length.
+- Added five real-Chromium Phase 5 acceptance paths for ordinary forms, delayed loading, streaming output, no-feedback abandonment, and wrong-path recovery.
 - Changed the development version to `0.6.0-alpha.0` after the Phase 0–4 contracts, runtime, tests, and public documentation were aligned.
 - Added `test:ai-agent`, a Mock-Provider CI gate that runs real Chromium, DOM grounding, before/after screenshots, local Trace, Hybrid Judge, Finding, Badcase, Regression, and Challenge flows without a real OpenAI key.
 - Added browser acceptance cases for form PASS, dead click, blocked destructive action, malformed model output, Candidate Finding isolation, Candidate Challenge coverage isolation, missing-evidence Badcase prevention, and fixed-Badcase regression promotion.
