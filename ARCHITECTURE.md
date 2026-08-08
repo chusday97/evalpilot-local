@@ -23,6 +23,8 @@ Phase 5 在确定性步骤验证之后增加 Semantic Verifier，并用失败关
 
 Phase 6 Product Understanding 使用 Background、Blueprint 和有界的路由/可见页面/文档证据目录生成任务级 Product Model。输出中的证据引用、路由、任务—能力关系、规则关系和成功信号会再次本地校验；无效引用被过滤并触发人工审核。Oracle Builder 只把任务明确关联的成功信号转换为受支持的确定性断言，推断规则不会进入自动产品失败路径。Dashboard 默认继续本地确定性生成，只有用户勾选并配置 Provider 后才启用远程理解。
 
+Phase 7 Real Evaluator Benchmark 将 10 个独立本地 Web 应用与单独保存的 Ground Truth 配对。运行器先生成案例并执行生产链路 AI Test Agent → Evidence Gate → Hybrid Judge → Finding Triage，预测完成后才读取 Ground Truth 计算指标，避免把标准答案泄露给 Actor 或 Judge。每个应用使用新的浏览器上下文重复 3 次；首轮固定为确定性 Mock Actor，以隔离 Judge 与分级链路的准确率。安全门禁阻止的危险任务记为 Evaluator Inconclusive，不能生成 Product Badcase。
+
 Finding Triage 位于 Hybrid Judge 与 Badcase 之间。单次 Semantic Fail 默认只保存到 `findings/v1/`，运行结果保持 Inconclusive；只有确定性硬失败、双类型强证据、stable Case 的重复同类失败或人工明确确认，才能转为 `confirmed_product_failure`。Badcase Store 会重新读取已持久化 Finding 校验谱系，原始模型输出不能直接写入回归资产。
 
-设计取舍：Legacy 生成器继续使用证据驱动的确定性规则。Experimental Adaptive Evaluation 可在逐次授权后调用 Product Understanding 与 Oracle Builder，但模型输出必须经过本地 Schema、证据白名单和人工审核门禁；开放式 Rubric 仍不能替代独立证据或人工判断。
+设计取舍：Legacy 生成器继续使用证据驱动的确定性规则。Experimental Adaptive Evaluation 可在逐次授权后调用 Product Understanding 与 Oracle Builder，但模型输出必须经过本地 Schema、证据白名单和人工审核门禁；开放式 Rubric 仍不能替代独立证据或人工判断。Phase 7 的内部阈值只约束受控基准，真实模型、外部项目与独立审查未通过前不升级对外可靠性承诺。

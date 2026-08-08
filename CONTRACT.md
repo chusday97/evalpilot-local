@@ -312,6 +312,16 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - Product Understanding 或 Oracle Provider 失败时返回带警告的确定性兼容结果，不覆盖旧模型，不静默伪造增强结果。旧 Background、Blueprint、Product Model 和 Eval Case 继续原样读取。
 - `POST /api/projects/:projectId/eval-set/generate` 继续要求 `confirmed=true`；只有请求同时提供 `allowRemoteModel=true` 且本机已配置 Provider 时，才发送上述最小化证据并启用 Product Understanding/Oracle Builder。默认仍走本地确定性生成，响应返回真实 `generationMode` 与 `warnings`。
 
+### 10.5 Accuracy Sprint Phase 7 Real Evaluator Benchmark 契约
+
+- 现有 40 条 `BenchmarkFixture` 继续称为“规则单元基准”：它读取预计算 Observation，只证明规则实现，不得与真实浏览器准确率混用。
+- `RealBenchmarkGroundTruth` 与浏览器 App、Eval Case、Agent/Judge 输入分离；运行器只能在预测完成后读取 Ground Truth 计分，禁止把期望分类或失败来源注入 Actor、Judge 或 Triage。
+- 至少 10 个可运行 Chromium 夹具，每个使用全新 Browser Context 独立运行至少 3 次，生产链路固定为 Agent → Evidence Packet → Hybrid Judge → Finding Triage → Ground Truth comparison。第一轮使用确定性 Mock Actor 隔离 Judge；真实模型是需要用户凭证的可选第二基准。夹具协议最多 3 个动作、单步最长 1 秒，必须仍覆盖 900ms 延迟结果，不能用零等待制造假失败。
+- `RealBenchmarkReport` 必须保存逐次 `RealBenchmarkRunResult`、逐夹具一致性和九项指标：任务完成率、召回率、精确率、误报率、分类准确率、严重度准确率、失败来源准确率、无法判断率、运行一致性。
+- 内部门禁暂定 Recall ≥ 0.80、Precision ≥ 0.80、FPR ≤ 0.15、Failure Source Accuracy ≥ 0.85。任何一项未达标时 `reliabilityGate.met=false` 并列出原因；即使达标也只能记录为内部基准通过，不得自动修改营销文案或宣称“可靠自主评测”。
+- Ground Truth、预测、截图和 Trace 保持本地；基准不读取真实 OpenAI Key，不修改旧 Evaluation、Scenario、Issue、Coverage 或 40 条规则单元基准。
+- Agent 因安全策略阻止危险操作时，Adaptive Evaluation 必须返回 `inconclusive/evaluator`，不得把未达到危险结果转写为 Product Failure 或 Badcase。
+
 ## 11. EvalPilot Next Phase 3 Product Model 与 Baseline 契约
 
 - Product Model 由现有证据化 `ProjectBackground + EvalBlueprint` 生成；Capability 表示用户任务能力，不按路由数量机械拆分。每个 Capability 至少关联一个 `ProductTask`，推断任务必须保留 `needsHumanReview=true`。

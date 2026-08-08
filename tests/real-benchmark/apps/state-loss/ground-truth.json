@@ -1,0 +1,1 @@
+{"fixtureId":"state-loss","expectedIssues":[{"category":"state","severity":"P1"}],"expectedFailureSource":"product","forbiddenCategories":["api","auth"]}

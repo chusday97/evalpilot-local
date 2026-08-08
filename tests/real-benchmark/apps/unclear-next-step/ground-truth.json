@@ -1,0 +1,1 @@
+{"fixtureId":"unclear-next-step","expectedIssues":[{"category":"ux","severity":"P2"}],"expectedFailureSource":"product","forbiddenCategories":["api","auth"]}

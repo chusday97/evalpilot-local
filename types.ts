@@ -697,6 +697,60 @@ export interface BenchmarkReport {
   limitation: string;
 }
 
+export interface RealBenchmarkExpectedIssue {
+  category: BadcaseCategory;
+  severity: Severity;
+}
+
+export interface RealBenchmarkGroundTruth {
+  fixtureId: string;
+  expectedIssues: RealBenchmarkExpectedIssue[];
+  expectedFailureSource: 'product' | 'evaluator' | 'unknown' | null;
+  forbiddenCategories: BadcaseCategory[];
+}
+
+export interface RealBenchmarkRunResult {
+  fixtureId: string;
+  repetition: number;
+  runId: string;
+  agentStatus: AiTestAgentRun['status'];
+  verdict: EvalVerdict;
+  failureSource: 'product' | 'evaluator' | 'unknown' | null;
+  predictedIssues: BenchmarkIssue[];
+  taskCompleted: boolean;
+  inconclusive: boolean;
+}
+
+export interface RealBenchmarkFixtureResult {
+  groundTruth: RealBenchmarkGroundTruth;
+  runs: RealBenchmarkRunResult[];
+  consistent: boolean;
+}
+
+export interface RealBenchmarkMetrics {
+  fixtures: number;
+  runs: number;
+  taskCompletionRate: number;
+  bugDetectionRecall: number;
+  precision: number;
+  falsePositiveRate: number;
+  categoryAccuracy: number;
+  severityAccuracy: number;
+  failureSourceAccuracy: number;
+  inconclusiveRate: number;
+  runToRunConsistency: number;
+}
+
+export interface RealBenchmarkReport {
+  benchmarkVersion: string;
+  generatedAt: string;
+  protocol: { actorMode: 'deterministic_mock'; repetitions: number; browser: 'chromium' };
+  metrics: RealBenchmarkMetrics;
+  fixtureResults: RealBenchmarkFixtureResult[];
+  reliabilityGate: { met: boolean; internalOnly: true; reasons: string[] };
+  limitation: string;
+}
+
 export interface EvalSetSelection {
   depth: EvaluationDepth;
   selectedCapabilityIds: string[];

@@ -1,0 +1,1 @@
+{"fixtureId":"api-500","expectedIssues":[{"category":"api","severity":"P1"}],"expectedFailureSource":"product","forbiddenCategories":["auth"]}

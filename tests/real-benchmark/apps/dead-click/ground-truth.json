@@ -1,0 +1,1 @@
+{"fixtureId":"dead-click","expectedIssues":[{"category":"interaction","severity":"P1"}],"expectedFailureSource":"product","forbiddenCategories":["api","auth"]}

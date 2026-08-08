@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added a Phase 7 real-browser evaluator benchmark with 10 runnable local Web apps, isolated Ground Truth, three fresh-context repetitions per fixture, and persisted reviewable predictions.
+- Added task completion, Recall, Precision, false-positive, category, severity, failure-source, inconclusive, and run-to-run consistency metrics with internal-only reliability gates.
+- Added `test:real-benchmark` to Chromium CI while keeping the existing 40 precomputed fixtures explicitly scoped as a rule-level unit benchmark.
+- Changed safety-blocked adaptive runs to Evaluator Inconclusive so destructive tasks cannot be mislabeled as product failures or create Badcases.
+- Fixed Badcase classification so duplicate submissions and irrelevant AI output are distinguished from API failures.
 - Added evidence-bounded Product Understanding for task-level capabilities, object lifecycles, cross-page journeys, task-specific business rules, and observable success signals.
 - Added a schema-validated Oracle Builder that filters unsupported assertions, invented evidence, unrelated rules, and ungrounded expected outcomes before creating Baseline cases.
 - Added explicit Dashboard consent for AI task understanding, deterministic fallback messaging, and form/CRUD/AI-generation comparison fixtures; inferred rules always require human review.

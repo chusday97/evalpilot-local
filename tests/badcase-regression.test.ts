@@ -48,6 +48,15 @@ describe('Badcase and Regression lifecycle', () => {
     expect(() => badcaseFromProductFailure({ evalCase: sourceCase(), result: evaluatorFailure, finding: confirmedFinding('run-evaluator') })).toThrow(/不能创建 Product Badcase/);
   });
 
+  it('separates duplicate data and irrelevant AI output from generic API wording', () => {
+    const duplicate = result('fail', 'product', 'run-duplicate');
+    duplicate.semantic.summary = 'Duplicate data request occurred after one submit action.';
+    expect(classifyEvalFailure(sourceCase(), duplicate)).toMatchObject({ category: 'data' });
+    const irrelevant = result('fail', 'product', 'run-ai-output');
+    irrelevant.semantic.summary = 'AI output is irrelevant to the requested refund policy.';
+    expect(classifyEvalFailure(sourceCase(), irrelevant)).toMatchObject({ category: 'ai_output' });
+  });
+
   it('promotes a fixed Badcase only after the same case passes and preserves lineage', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-regression-'));
     const finding = await saveFinding(outputDir, confirmedFinding());

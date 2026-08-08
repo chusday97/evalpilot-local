@@ -271,3 +271,36 @@ export const benchmarkFixtureSchema = z.object({ groundTruth: benchmarkGroundTru
 export const benchmarkPredictionSchema = z.object({ fixtureId: storageIdSchema, issues: z.array(benchmarkIssueSchema), evaluatorFailure: z.boolean() }).strict();
 export const benchmarkMetricsSchema = z.object({ total: z.number().int().nonnegative(), knownFailures: z.number().int().nonnegative(), cleanBehaviors: z.number().int().nonnegative(), truePositives: z.number().int().nonnegative(), falsePositives: z.number().int().nonnegative(), falseNegatives: z.number().int().nonnegative(), trueNegatives: z.number().int().nonnegative(), bugDetectionRecall: z.number().min(0).max(1), precision: z.number().min(0).max(1), falsePositiveRate: z.number().min(0).max(1), classificationAccuracy: z.number().min(0).max(1), evaluatorFailureRate: z.number().min(0).max(1) }).strict();
 export const benchmarkReportSchema = z.object({ benchmarkVersion: z.string().min(1), generatedAt: z.iso.datetime(), metrics: benchmarkMetricsSchema, predictions: z.array(benchmarkPredictionSchema), limitation: z.string().min(1) }).strict();
+
+export const realBenchmarkExpectedIssueSchema = z.object({ category: benchmarkIssueSchema.shape.category, severity: benchmarkIssueSchema.shape.severity }).strict();
+export const realBenchmarkGroundTruthSchema = z.object({
+  fixtureId: storageIdSchema,
+  expectedIssues: z.array(realBenchmarkExpectedIssueSchema),
+  expectedFailureSource: z.enum(['product', 'evaluator', 'unknown']).nullable(),
+  forbiddenCategories: z.array(benchmarkIssueSchema.shape.category),
+}).strict();
+export const realBenchmarkRunResultSchema = z.object({
+  fixtureId: storageIdSchema,
+  repetition: z.number().int().positive(),
+  runId: storageIdSchema,
+  agentStatus: z.enum(['completed', 'abandoned', 'blocked_by_safety', 'inconclusive']),
+  verdict: evalVerdictSchema,
+  failureSource: z.enum(['product', 'evaluator', 'unknown']).nullable(),
+  predictedIssues: z.array(benchmarkIssueSchema),
+  taskCompleted: z.boolean(),
+  inconclusive: z.boolean(),
+}).strict();
+export const realBenchmarkFixtureResultSchema = z.object({ groundTruth: realBenchmarkGroundTruthSchema, runs: z.array(realBenchmarkRunResultSchema).min(3), consistent: z.boolean() }).strict();
+export const realBenchmarkMetricsSchema = z.object({
+  fixtures: z.number().int().positive(), runs: z.number().int().positive(),
+  taskCompletionRate: z.number().min(0).max(1), bugDetectionRecall: z.number().min(0).max(1), precision: z.number().min(0).max(1), falsePositiveRate: z.number().min(0).max(1),
+  categoryAccuracy: z.number().min(0).max(1), severityAccuracy: z.number().min(0).max(1), failureSourceAccuracy: z.number().min(0).max(1), inconclusiveRate: z.number().min(0).max(1), runToRunConsistency: z.number().min(0).max(1),
+}).strict();
+export const realBenchmarkReportSchema = z.object({
+  benchmarkVersion: z.string().min(1), generatedAt: z.iso.datetime(),
+  protocol: z.object({ actorMode: z.literal('deterministic_mock'), repetitions: z.number().int().min(3), browser: z.literal('chromium') }).strict(),
+  metrics: realBenchmarkMetricsSchema,
+  fixtureResults: z.array(realBenchmarkFixtureResultSchema).min(10),
+  reliabilityGate: z.object({ met: z.boolean(), internalOnly: z.literal(true), reasons: z.array(z.string().min(1)) }).strict(),
+  limitation: z.string().min(1),
+}).strict();

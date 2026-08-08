@@ -1,0 +1,1 @@
+{"fixtureId":"duplicate-submit","expectedIssues":[{"category":"data","severity":"P1"}],"expectedFailureSource":"product","forbiddenCategories":["auth"]}

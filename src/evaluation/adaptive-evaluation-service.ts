@@ -8,6 +8,7 @@ import { loadCoverageRunEvidence, saveCoverageMatrix } from '../eval-set/coverag
 import { saveEvalCase } from '../eval-set/eval-set-store.js';
 import { analyzePassingCase } from '../eval-set/pass-analyzer.js';
 import { judgeEvalCase } from '../judge/hybrid-judge.js';
+import { evalCaseResultSchema } from '../judge/schemas.js';
 import { triageEvalCaseFinding } from '../findings/finding-triage.js';
 import { buildAdaptiveEvaluationReport } from '../report/adaptive-report.js';
 import { runAiTestAgent } from '../test-agent/agent-runner.js';
@@ -25,11 +26,16 @@ export async function runAdaptiveCase(input: {
   targetAppGitSha?: string | null;
   allowRemoteModel?: boolean;
   allowScreenshotToProvider?: boolean;
+  maxAgentSteps?: number;
+  agentWaitTimeoutMs?: number;
   now?: () => Date;
 }): Promise<{ agentRun: Awaited<ReturnType<typeof runAiTestAgent>>; result: EvalCaseResult; badcase: Badcase | null; passAnalysis: PassAnalysis | null; report: Awaited<ReturnType<typeof buildAdaptiveEvaluationReport>> }> {
-  const agentRun = await runAiTestAgent(input.page, input.evalCase, input.provider, { outputDir: input.outputDir, startingUrl: input.startingUrl, mode: 'task', targetAppCommit: input.targetAppGitSha ?? null, productModelVersion: input.productModel.version, evalSetVersion: input.evalSetVersion, judgeModel: input.provider.info.model, allowRemoteModel: input.allowRemoteModel, allowScreenshotToProvider: input.allowScreenshotToProvider, now: input.now });
+  const agentRun = await runAiTestAgent(input.page, input.evalCase, input.provider, { outputDir: input.outputDir, startingUrl: input.startingUrl, mode: 'task', maxSteps: input.maxAgentSteps, waitTimeoutMs: input.agentWaitTimeoutMs, targetAppCommit: input.targetAppGitSha ?? null, productModelVersion: input.productModel.version, evalSetVersion: input.evalSetVersion, judgeModel: input.provider.info.model, allowRemoteModel: input.allowRemoteModel, allowScreenshotToProvider: input.allowScreenshotToProvider, now: input.now });
   const packet = evidencePacketSchema.parse(JSON.parse(await readFile(agentRun.evidencePacketPath, 'utf8')));
-  const judgedResult = await judgeEvalCase({ outputDir: input.outputDir, evalCase: input.evalCase, packet, provider: input.provider, allowRemoteModel: input.allowRemoteModel, createdAt: agentRun.completedAt });
+  const rawJudgedResult = await judgeEvalCase({ outputDir: input.outputDir, evalCase: input.evalCase, packet, provider: input.provider, allowRemoteModel: input.allowRemoteModel, createdAt: agentRun.completedAt });
+  const judgedResult = agentRun.status === 'blocked_by_safety'
+    ? evalCaseResultSchema.parse({ ...rawJudgedResult, verdict: 'inconclusive', failureSource: 'evaluator', severity: null, semantic: { ...rawJudgedResult.semantic, verdict: 'inconclusive', taskCompletion: 'unknown', summary: '安全策略阻止了危险操作，本次不能据此判断产品通过或失败。', whatFailed: [], confirmedFacts: ['Agent 已阻止危险操作'], hypotheses: [], unknowns: ['需要人工确认是否应在受控环境测试该操作'], confidence: 1 } })
+    : rawJudgedResult;
   const triage = await triageEvalCaseFinding({ outputDir: input.outputDir, evalCase: input.evalCase, result: judgedResult, packet, createdAt: agentRun.completedAt });
   const result = triage.result;
   const updatedCase = recordCaseResult(input.evalCase, result); await saveEvalCase(input.outputDir, updatedCase);

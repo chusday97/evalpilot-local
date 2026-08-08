@@ -1,0 +1,1 @@
+{"fixtureId":"ai-irrelevant-output","expectedIssues":[{"category":"ai_output","severity":"P1"}],"expectedFailureSource":"product","forbiddenCategories":["api","auth"]}
