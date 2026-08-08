@@ -268,6 +268,51 @@ export interface ProductTask {
   goal: string;
   preconditions: string[];
   successConditions: string[];
+  /** Optional only for legacy Product Model compatibility; new understood tasks persist this field. */
+  successSignals?: ProductSuccessSignal[];
+  /** Optional only for legacy Product Model compatibility; new understood tasks persist task-specific rules. */
+  businessRuleIds?: string[];
+  evidenceStatus: FactStatus;
+  evidence: EvidenceClaim[];
+  needsHumanReview: boolean;
+}
+
+export type ProductSuccessSignalKind = 'text_visible' | 'text_absent' | 'url_matches' | 'request_observed' | 'console_error_absent' | 'state_persisted' | 'semantic';
+
+export interface ProductSuccessSignal {
+  signalId: string;
+  kind: ProductSuccessSignalKind;
+  target: string;
+  description: string;
+  evidenceStatus: FactStatus;
+  evidence: EvidenceClaim[];
+  needsHumanReview: boolean;
+}
+
+export interface ProductObjectTransition {
+  transitionId: string;
+  fromState: string;
+  toState: string;
+  trigger: string;
+  successSignalIds: string[];
+}
+
+export interface ProductObjectLifecycle {
+  lifecycleId: string;
+  objectName: string;
+  states: string[];
+  transitions: ProductObjectTransition[];
+  evidenceStatus: FactStatus;
+  evidence: EvidenceClaim[];
+  needsHumanReview: boolean;
+}
+
+export interface ProductJourney {
+  journeyId: string;
+  name: string;
+  taskIds: string[];
+  routes: string[];
+  successConditions: string[];
   evidenceStatus: FactStatus;
   evidence: EvidenceClaim[];
   needsHumanReview: boolean;
@@ -307,6 +352,10 @@ export interface ProductModel {
   targetUsers: ProductUserType[];
   capabilities: ProductCapability[];
   userTasks: ProductTask[];
+  /** Optional only for legacy Product Model compatibility; new understood models persist this field. */
+  objectLifecycles?: ProductObjectLifecycle[];
+  /** Optional only for legacy Product Model compatibility; new understood models persist this field. */
+  crossPageJourneys?: ProductJourney[];
   businessRules: BusinessRule[];
   knownRisks: KnownRisk[];
   unknowns: ProductUnknown[];
@@ -750,7 +799,7 @@ export interface AiPrivacyPolicy {
 
 export interface AiStructuredRequest {
   requestId: string;
-  task: 'actor' | 'semantic_verifier' | 'semantic_reflector' | 'semantic_judge' | 'product_model' | 'challenge' | 'exploration';
+  task: 'actor' | 'semantic_verifier' | 'semantic_reflector' | 'semantic_judge' | 'product_model' | 'product_understanding' | 'oracle_builder' | 'challenge' | 'exploration';
   systemPrompt: string;
   userPrompt: string;
   schemaName: string;

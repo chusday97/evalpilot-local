@@ -67,6 +67,8 @@ EvalPilot 分开显示“通过、失败、阻塞、不适用”。如果项目�
 
 `0.6.0-alpha.0` 的 Phase 5 会在每个动作后组合确定性信号和语义步骤验证：执行失败优先，两个验证器冲突时显示“无法判断”，低置信度语义结果不能单独判定成功。等待依据目标文字、页面变化、加载完成和网络空闲，并始终有超时上限；Persona 的耐心和重试次数使用明确字段，不再从描述文案数量猜测。
 
+Phase 6 可在生成实验评测集时选择“让 AI 深入理解用户任务”。系统只发送路由、可见标题/导航/按钮/表单和文档摘要，用它们拆分任务、对象生命周期、跨页旅程和具体成功信号；源码、截图、Trace、密钥和完整页面正文不会进入该请求。默认仍关闭 AI 理解；Provider 不可用时会明确说明并保留本地确定性生成。任何推断业务规则都会让案例进入人工审核，不能自动生成 Product Badcase。
+
 ### 实验 AI Provider 与授权
 
 - 远程模型仅用于 Experimental Adaptive Evaluation。启动 Dashboard 前通过终端环境变量提供 `EVALPILOT_OPENAI_API_KEY`；可用 `EVALPILOT_OPENAI_MODEL` 选择模型。不要把密钥写进项目或提交到 Git。
@@ -119,6 +121,7 @@ npm test
 npm run build
 npm run test:ai-agent
 npm run test:semantic-verifier
+npm run test:product-understanding
 ```
 
 发布包还需通过：

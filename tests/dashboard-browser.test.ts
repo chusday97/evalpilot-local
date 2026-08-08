@@ -119,6 +119,12 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     }
     await page.locator('aside nav button').filter({ hasText: '评测集' }).click();
     await page.getByText('评测资产覆盖').waitFor({ state: 'visible' });
+    await page.getByRole('button', { name: '根据当前产品重新生成' }).click();
+    const understandingConsent = page.getByRole('checkbox', { name: /让 AI 深入理解用户任务/ });
+    expect(await understandingConsent.isVisible()).toBe(true);
+    expect(await understandingConsent.isChecked()).toBe(false);
+    expect(await page.getByText(/不发送源码、截图、Trace、密钥或完整页面正文/).isVisible()).toBe(true);
+    await page.getByRole('button', { name: '取消' }).click();
     expect(await page.getByText('评测资产覆盖').isVisible()).toBe(true);
     expect(await page.getByText('实际运行覆盖').isVisible()).toBe(true);
     expect(await page.getByText('已验证覆盖', { exact: true }).first().isVisible()).toBe(true);

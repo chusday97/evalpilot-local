@@ -18,7 +18,8 @@ describe('dashboard local data boundary', () => {
     expect(result.body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({
       status: 'ok',
       contractVersion: '0.6.0',
-      capabilities: expect.arrayContaining(['guidance', 'structured_evidence', 'not_applicable_runs', 'adaptive_eval_set', 'hybrid_judge_assets', 'finding_triage']),
+      capabilities: expect.arrayContaining(['guidance', 'structured_evidence', 'not_applicable_runs', 'adaptive_eval_set', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder']),
+      aiProductUnderstanding: expect.objectContaining({ configured: false, provider: 'openai', defaultEnabled: false, screenshotInput: false }),
     }) }));
   });
 
@@ -102,10 +103,12 @@ describe('dashboard local data boundary', () => {
       const summary = await dispatchDashboardApi(cwd, 'GET', '/api/projects/project-demo/eval-set', '', {});
       const runs = await dispatchDashboardApi(cwd, 'GET', '/api/projects/project-demo/adaptive-runs', '', {});
       const coverage = await dispatchDashboardApi(cwd, 'GET', '/api/projects/project-demo/coverage', '', {});
+      const aiFoundation = await dispatchDashboardApi(cwd, 'POST', '/api/projects/project-demo/eval-set/generate', '', { confirmed: true, allowRemoteModel: true });
       const agentRun = await dispatchDashboardApi(cwd, 'POST', '/api/eval-cases/missing/run', '?projectId=project-demo', { confirmed: true, allowRemoteModel: true });
       expect(summary.body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({ manifest: null, counts: { baseline: 0, regression: 0, challenge: 0, exploratory: 0 } }) }));
       expect(runs.body).toEqual({ success: true, data: [] });
       expect(coverage.body).toEqual({ success: true, data: null });
+      expect(aiFoundation.body).toEqual(expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'AI_PROVIDER_NOT_CONFIGURED', message: expect.stringContaining('本地确定性方式') }) }));
       expect(agentRun.body).toEqual(expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'AI_PROVIDER_NOT_CONFIGURED' }) }));
     } finally { delete process.env.EVALPILOT_DATA_DIR; }
   });

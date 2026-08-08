@@ -36,6 +36,18 @@ export const evalOracleSchema = z.object({
   aiOutputCriteria: z.array(z.object({ type: z.enum(['relevance', 'factuality', 'consistency', 'instruction_following', 'uncertainty_expression', 'citation_quality', 'hallucination', 'safety', 'format_correctness']), description: z.string().min(1), referenceAnswer: z.string().min(1).nullable(), humanReviewRequired: z.boolean() }).strict()).optional(),
 }).strict();
 
+export const oracleBuilderOutputSchema = z.object({
+  expectedOutcome: z.array(z.string().min(1)).min(1),
+  mustObserve: z.array(z.string().min(1)),
+  mustNotObserve: z.array(z.string().min(1)),
+  businessRules: z.array(z.string().min(1)),
+  semanticRubric: z.array(z.string().min(1)).min(1),
+  deterministicAssertions: z.array(deterministicAssertionSchema),
+  inconclusiveWhen: z.array(z.string().min(1)).min(1),
+  needsHumanReview: z.boolean(),
+  reviewReasons: z.array(z.string().min(1)),
+}).strict();
+
 export const evalCaseOriginSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('generated_from_product_model'), productModelVersion: z.number().int().positive() }).strict(),
   z.object({ type: z.literal('generated_from_coverage_gap'), sourceCaseIds: z.array(storageIdSchema), gapId: storageIdSchema }).strict(),

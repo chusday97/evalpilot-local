@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added evidence-bounded Product Understanding for task-level capabilities, object lifecycles, cross-page journeys, task-specific business rules, and observable success signals.
+- Added a schema-validated Oracle Builder that filters unsupported assertions, invented evidence, unrelated rules, and ungrounded expected outcomes before creating Baseline cases.
+- Added explicit Dashboard consent for AI task understanding, deterministic fallback messaging, and form/CRUD/AI-generation comparison fixtures; inferred rules always require human review.
 - Added per-action Semantic Step Verification, deterministic/semantic conflict handling, remote screenshot consent enforcement, and versioned verifier/reflector prompts.
 - Replaced fixed AI Agent delays with bounded target-text, route/DOM, loading-completion, field-value, scroll, and network-idle signals.
 - Added explicit Persona knowledge, patience, retry, privacy, and exit policies with read-only defaults for legacy cases; Reflector no longer derives patience from behavior text length.

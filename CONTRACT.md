@@ -303,6 +303,15 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - 固定 `50ms/300ms` 等待替换为有界信号等待：目标文本出现、DOM/URL 变化、加载标记消失或网络空闲；所有路径必须有明确超时，超时只表示当前步骤未确认，不能无限等待或伪造通过。
 - 新运行在版本矩阵中记录 `verifierPromptVersion`、可选 `reflectorPromptVersion` 和 `toolSchemaVersion=1.1.0`；旧 Evidence Packet 缺少这些字段时继续兼容读取，不补写原文件。
 
+### 10.4 Accuracy Sprint Phase 6 Product Task 与 Oracle 契约
+
+- Product Understanding 只接收已采集的 Background、Blueprint、路由、公开页面可见导航/标题/表单/主按钮、文档摘要和已有未知项。Prompt 使用有界证据目录；输出引用不存在的证据、路由或入口时必须过滤并标记人工审核，不能把模型补全包装成事实。
+- `ProductTask.successSignals` 保存任务级成功信号，`businessRuleIds` 只关联当前任务适用的规则；信号类型限定为 `text_visible / text_absent / url_matches / request_observed / console_error_absent / state_persisted / semantic`。`ProductModel.objectLifecycles` 与 `crossPageJourneys` 保存对象状态和跨页任务关系。以上字段对旧 Product Model 可选，新生成模型必须写入。
+- Oracle Builder 只允许从任务成功信号生成当前 Verifier 支持的确定性断言；不得生成选择器、隐藏状态或未提供证据支持的业务规则。具体预期、必须出现/禁止出现内容、语义评分和无法判断条件均需通过 Zod Schema。
+- 任何 `inferred/unknown` 业务规则、任务、成功信号、对象生命周期或跨页旅程进入案例时，`needsHumanReview=true`；此类案例继续受 Phase 3 门禁约束，不能通过 Semantic Gate B 自动创建 Product Badcase。
+- Product Understanding 或 Oracle Provider 失败时返回带警告的确定性兼容结果，不覆盖旧模型，不静默伪造增强结果。旧 Background、Blueprint、Product Model 和 Eval Case 继续原样读取。
+- `POST /api/projects/:projectId/eval-set/generate` 继续要求 `confirmed=true`；只有请求同时提供 `allowRemoteModel=true` 且本机已配置 Provider 时，才发送上述最小化证据并启用 Product Understanding/Oracle Builder。默认仍走本地确定性生成，响应返回真实 `generationMode` 与 `warnings`。
+
 ## 11. EvalPilot Next Phase 3 Product Model 与 Baseline 契约
 
 - Product Model 由现有证据化 `ProjectBackground + EvalBlueprint` 生成；Capability 表示用户任务能力，不按路由数量机械拆分。每个 Capability 至少关联一个 `ProductTask`，推断任务必须保留 `needsHumanReview=true`。

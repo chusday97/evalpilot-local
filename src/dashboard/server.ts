@@ -110,9 +110,10 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
         status: 'ok',
         packageVersion: runtime.packageVersion,
         contractVersion: runtime.contractVersion,
-        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'adaptive_eval_set', 'hybrid_judge_assets', 'finding_triage'],
+        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'adaptive_eval_set', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder'],
         runtime,
         aiTestAgent: { configured: Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim()), provider: 'openai', screenshotDefault: false },
+        aiProductUnderstanding: { configured: Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim()), provider: 'openai', defaultEnabled: false, screenshotInput: false },
       });
     }
     const safeLegacyPost = pathname === '/api/workspace-candidates' || pathname === '/api/system/pick-directory' || pathname === '/api/connect/check' || /^\/api\/agents\/(codex|claude_code|antigravity)\/check$/.test(pathname);
@@ -146,7 +147,14 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
       const resource = adaptiveProjectRoute[2];
       const config = await configForProject(cwd, projectId);
       if (method === 'POST' && resource === 'eval-set' && adaptiveProjectRoute[3] === '/generate') {
-        if (recordBody(body)?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '生成评测集前需要明确确认。');
+        const input = recordBody(body);
+        if (input?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '生成评测集前需要明确确认。');
+        if (input.allowRemoteModel === true) {
+          const apiKey = process.env.EVALPILOT_OPENAI_API_KEY?.trim();
+          if (!apiKey) return fail(409, 'AI_PROVIDER_NOT_CONFIGURED', '尚未配置 AI 产品理解能力。可以取消 AI 深度理解，先使用本地确定性方式生成。');
+          const provider = new OpenAiProvider({ apiKey, model: process.env.EVALPILOT_OPENAI_MODEL?.trim() || 'gpt-5-mini' });
+          return ok(await generateAdaptiveFoundation({ projectId, outputDir: config.outputDir, provider, allowRemoteModel: true }));
+        }
         return ok(await generateAdaptiveFoundation({ projectId, outputDir: config.outputDir }));
       }
       if (method !== 'GET' || adaptiveProjectRoute[3]) return fail(405, 'METHOD_NOT_ALLOWED', '该评测资产接口不支持这个操作。');

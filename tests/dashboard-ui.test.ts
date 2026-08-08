@@ -34,4 +34,13 @@ describe('dashboard UI contract', () => {
     expect(source).toContain('尚未定位到具体代码文件');
     for (const label of ['可以读取近期项目路径', '不读取会话文件，请使用 Mac 文件夹选择器']) expect(source).toContain(label);
   });
+
+  it('makes AI task understanding an explicit, privacy-described, recoverable choice', async () => {
+    const source = await readFile(new URL('../dashboard/src/AdaptivePages.tsx', import.meta.url), 'utf8');
+    expect(source).toContain('让 AI 深入理解用户任务（可选）');
+    expect(source).toContain('不发送源码、截图、Trace、密钥或完整页面正文');
+    expect(source).toContain('allowRemoteModel: useAiUnderstanding');
+    expect(source).toContain('disabled={generating}');
+    expect(source).toContain('AI 理解未完成，已安全使用本地规则生成评测集');
+  });
 });

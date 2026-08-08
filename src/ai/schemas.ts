@@ -9,7 +9,7 @@ export const aiPrivacyPolicySchema = z.object({
 
 export const aiStructuredRequestSchema = z.object({
   requestId: z.string().min(1),
-  task: z.enum(['actor', 'semantic_verifier', 'semantic_reflector', 'semantic_judge', 'product_model', 'challenge', 'exploration']),
+  task: z.enum(['actor', 'semantic_verifier', 'semantic_reflector', 'semantic_judge', 'product_model', 'product_understanding', 'oracle_builder', 'challenge', 'exploration']),
   systemPrompt: z.string().min(1),
   userPrompt: z.string().min(1),
   schemaName: z.string().min(1).max(64).regex(/^[A-Za-z0-9_-]+$/),
