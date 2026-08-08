@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import type { EvalPilotConfig } from '../types.js';
 import { loadDashboardOverview, validateDashboardHost } from '../src/dashboard/dashboard-data.js';
 import { dispatchDashboardApi } from '../src/dashboard/server.js';
+import { saveCoverageMatrix } from '../src/eval-set/coverage-store.js';
 
 describe('dashboard local data boundary', () => {
   it('reports the local contract version before the UI calls feature APIs', async () => {
@@ -105,6 +106,20 @@ describe('dashboard local data boundary', () => {
       expect(runs.body).toEqual({ success: true, data: [] });
       expect(coverage.body).toEqual({ success: true, data: null });
       expect(agentRun.body).toEqual(expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'AI_PROVIDER_NOT_CONFIGURED' }) }));
+    } finally { delete process.env.EVALPILOT_DATA_DIR; }
+  });
+
+  it('returns asset, execution, and verified coverage as separate API truths', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-coverage-api-'));
+    const dataDir = resolve(cwd, 'data'); const outputDir = resolve(dataDir, 'projects', 'project-demo');
+    await mkdir(outputDir, { recursive: true });
+    const now = new Date().toISOString();
+    await writeFile(resolve(dataDir, 'projects.json'), JSON.stringify({ version: 1, activeProjectId: 'project-demo', projects: [{ projectId: 'project-demo', name: 'Demo', projectRoot: cwd, targetUrl: 'http://127.0.0.1:3000', outputDir, browser: 'chromium', startCommand: null, status: 'ready', importSource: 'manual', preferredAgent: null, createdAt: now, updatedAt: now, lastOpenedAt: now }] }));
+    await saveCoverageMatrix(outputDir, { projectId: 'project-demo', generatedAt: now, dimensions: [{ dimension: 'capability', targetValues: ['cap-demo'], coveredValues: [], missingValues: ['cap-demo'], coverageRatio: 0 }], gaps: [{ gapId: 'gap-cap-demo', kind: 'not_executed', capabilityId: 'cap-demo', dimension: 'capability', missingValue: 'cap-demo', priority: 'critical', reason: '案例已定义但尚未执行。', candidateCaseIds: [] }], totalTargetCells: 1, assetCoveredCells: 1, executedCells: 0, verifiedCells: 0, coveredCells: 0, assetCoverageRatio: 1, executionCoverageRatio: 0, verifiedCoverageRatio: 0, cells: [{ cellId: 'cell-cap-demo', capabilityId: 'cap-demo', dimension: 'capability', value: 'cap-demo', assetStatus: 'stable', executionStatus: 'not_run', caseIds: ['case-demo'], latestRunId: null, latestResultAt: null, verified: false }], coverageRatio: 0 });
+    process.env.EVALPILOT_DATA_DIR = dataDir;
+    try {
+      const response = await dispatchDashboardApi(cwd, 'GET', '/api/projects/project-demo/coverage', '', {});
+      expect(response.body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({ assetCoverageRatio: 1, executionCoverageRatio: 0, verifiedCoverageRatio: 0, coverageRatio: 0 }) }));
     } finally { delete process.env.EVALPILOT_DATA_DIR; }
   });
 });

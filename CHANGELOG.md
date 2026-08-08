@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Changed adaptive coverage to report asset, execution, and verified ratios separately; only stable PASS results with valid evidence can increase Verified Coverage.
+- Added capability-scoped coverage cells and explicit missing-asset, not-executed, not-verified, inconclusive, and failed gaps so one feature cannot borrow another feature's evidence.
+- Preserved legacy coverage files as read-only asset history while preventing them from being promoted to verified coverage without run and evidence links.
+- Updated the Dashboard and adaptive report to lead with Verified Coverage and label unrun candidates as “已定义，未运行”.
 - Added the Phase 0 data foundation for Product Models, adaptive Eval Sets, Oracles, hybrid Judge results, Badcases, multidimensional coverage, and regression lineage.
 - Added schema-validated atomic JSON stores with project/path isolation and compatibility tests that leave existing Public Alpha evaluation history untouched.
 - Added an experimental grounded AI test agent, evidence-gated hybrid Judge, Product Model baseline generation, Badcase regression promotion, coverage analysis, and challenge-case candidates.

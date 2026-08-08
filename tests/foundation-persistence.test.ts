@@ -68,8 +68,10 @@ function coverage(): CoverageMatrix {
   return {
     projectId: 'project-demo', generatedAt: now,
     dimensions: [{ dimension: 'persona', targetValues: ['user-new', 'user-returning'], coveredValues: ['user-new'], missingValues: ['user-returning'], coverageRatio: 0.5 }],
-    gaps: [{ gapId: 'gap-persona', capabilityId: 'cap-create', dimension: 'persona', missingValue: 'user-returning', priority: 'high', reason: '尚未验证回访用户', candidateCaseIds: [] }],
-    totalTargetCells: 2, coveredCells: 1, coverageRatio: 0.5,
+    gaps: [{ gapId: 'gap-persona', kind: 'missing_asset', capabilityId: 'cap-create', dimension: 'persona', missingValue: 'user-returning', priority: 'high', reason: '尚未验证回访用户', candidateCaseIds: [] }],
+    totalTargetCells: 2, assetCoveredCells: 1, executedCells: 1, verifiedCells: 1, coveredCells: 1,
+    assetCoverageRatio: 0.5, executionCoverageRatio: 0.5, verifiedCoverageRatio: 0.5,
+    cells: [{ cellId: 'cell-persona-new', capabilityId: 'cap-create', dimension: 'persona', value: 'user-new', assetStatus: 'stable', executionStatus: 'pass', caseIds: ['case-create'], latestRunId: 'run-create', latestResultAt: now, verified: true }, { cellId: 'cell-persona-returning', capabilityId: 'cap-create', dimension: 'persona', value: 'user-returning', assetStatus: 'missing', executionStatus: 'not_run', caseIds: [], latestRunId: null, latestResultAt: null, verified: false }], coverageRatio: 0.5,
   };
 }
 

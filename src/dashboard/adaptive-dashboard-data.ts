@@ -80,7 +80,7 @@ export async function generateAdaptiveFoundation(input: { projectId: string; out
   const model = buildProductModel({ projectId: input.projectId, background, blueprint, version: (versions.at(-1) ?? 0) + 1, generatedAt });
   await saveProductModel(input.outputDir, model);
   const cases = await generateAndSaveBaseline(input.outputDir, model, generatedAt);
-  const coverage = analyzeCoverage(model, cases, generatedAt);
+  const coverage = analyzeCoverage({ model, cases, generatedAt });
   await saveCoverageMatrix(input.outputDir, coverage);
   return { productModel: model, cases, coverage, summary: await evalSetSummary(input.outputDir) };
 }

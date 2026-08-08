@@ -656,8 +656,26 @@ export interface CoverageDimensionSummary {
   coverageRatio: number;
 }
 
+export type CoverageAssetStatus = 'missing' | 'candidate' | 'stable';
+export type CoverageExecutionStatus = 'not_run' | 'pass' | 'fail' | 'inconclusive';
+export type CoverageGapKind = 'missing_asset' | 'not_executed' | 'not_verified' | 'inconclusive' | 'failed';
+
+export interface CoverageCell {
+  cellId: string;
+  capabilityId: string;
+  dimension: CoverageDimension;
+  value: string;
+  assetStatus: CoverageAssetStatus;
+  executionStatus: CoverageExecutionStatus;
+  caseIds: string[];
+  latestRunId: string | null;
+  latestResultAt: string | null;
+  verified: boolean;
+}
+
 export interface CoverageGap {
   gapId: string;
+  kind: CoverageGapKind;
   capabilityId: string;
   dimension: CoverageDimension;
   missingValue: string;
@@ -672,7 +690,15 @@ export interface CoverageMatrix {
   dimensions: CoverageDimensionSummary[];
   gaps: CoverageGap[];
   totalTargetCells: number;
+  assetCoveredCells: number;
+  executedCells: number;
+  verifiedCells: number;
   coveredCells: number;
+  assetCoverageRatio: number;
+  executionCoverageRatio: number;
+  verifiedCoverageRatio: number;
+  cells: CoverageCell[];
+  /** @deprecated Use verifiedCoverageRatio. */
   coverageRatio: number;
 }
 

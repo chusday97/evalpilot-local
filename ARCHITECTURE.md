@@ -15,4 +15,6 @@ CLI
 
 Dashboard 静态资源从 npm 安装包本身定位，不依赖启动目录。CLI、Dashboard `/api/health` 和 npm manifest 共用同一包版本；`RuntimeReadiness` 为 Node、Chromium、Git、数据目录和 Agent 能力的单一事实源。
 
+Adaptive Coverage 按 `capabilityId + dimension + value` 建立功能级单元，并分开计算评测资产、实际运行和已验证覆盖。只有 stable Case 的最新 PASS 结果与有效 Evidence Packet 同时存在时，单元才进入 Verified Coverage；旧覆盖文件仍可读取，但不会被补推为已验证。
+
 设计取舍：生成器在 MVP 使用证据驱动的确定性规则和模板，不接入模型供应商。这样能完成可测试闭环，并避免同一模型生成、执行和自评。开放式 Rubric 交给人工审核。

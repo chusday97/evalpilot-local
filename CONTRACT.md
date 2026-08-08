@@ -55,7 +55,7 @@ EvalPilot Local 读取本地 Web 项目及其测试网址，将可追溯证据�
 | `EvalSetManifest` | 项目、版本、时间和案例引用 | 四类 Eval Set 的索引，不复制案例正文 |
 | `EvalCaseResult` | 运行、案例、三态结论、失败来源、严重度、双 Judge 结果、证据路径和时间 | 运行结果；与案例资产生命周期严格分离 |
 | `Badcase` | 项目、案例、运行、分类、失败、用户影响、事实、原因假设、证据、修复状态和回归关联 | 已确认失败的长期资产 |
-| `CoverageMatrix` | 项目、时间、维度汇总、缺口和覆盖率 | 多维覆盖快照，不把单次 PASS 表述为功能已验证 |
+| `CoverageMatrix` | 项目、时间、功能级覆盖单元、资产/执行/验证覆盖率和缺口 | 多维覆盖快照，不把案例存在或单次执行表述为功能已验证 |
 | `RegressionMetadata` | Badcase/Issue、首次失败、修复时间、原始失败、来源运行和修复任务 | 回归案例的可追溯来源 |
 
 完整字段、联合类型和可选性以同版本 `types.ts` 为机器可读权威定义；Zod Schema 必须与其一致。
@@ -292,6 +292,16 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - `PassAnalysis` 返回本次确认条件、仍存在的 Coverage Gap 和候选 Challenge；候选默认只存在内存中，用户/流水线显式保存后才进入 Eval Set。
 - 第一版 Challenge 必须支持 boundary、journey mutation 和 persona mutation。每个候选保留来源案例和 Gap ID，继承 Oracle 并明确新的假设与覆盖维度。
 - Challenge 不得自动成为 permanent/stable；初始状态固定为 candidate。Repeated PASS 的稳定/退役策略在后续演进服务中执行。
+
+### 13.1 Truthful Coverage（v0.5 Accuracy Sprint）
+
+- 覆盖单元按 `capabilityId + dimension + value` 建立。一个功能的证据不能补足另一个功能的输入、状态、旅程或恢复覆盖。
+- `assetCoverageRatio` 只表示目标单元存在非退役案例；candidate/active 只记为候选资产，stable 记为稳定资产。
+- `executionCoverageRatio` 表示对应单元至少有一次 `pass/fail/inconclusive` 运行结果；失败属于已执行，不属于已验证。
+- `verifiedCoverageRatio` 仅在 stable Case 的最新结果为 PASS，且对应 Evidence Packet 通过当前 Evidence Gate 时增加。
+- `coverageRatio` 暂时保留为 `verifiedCoverageRatio` 的废弃别名；新增代码不得把它解释为案例资产覆盖。
+- 缺口必须区分 `missing_asset/not_executed/not_verified/inconclusive/failed`，并说明缺少案例、尚未运行、证据不足、无法判断或产品失败。
+- 旧 Coverage 文件继续兼容读取但不原地覆盖：旧 `coverageRatio` 只解释为历史资产覆盖；因缺少运行与 Evidence Packet 关联，其执行覆盖和已验证覆盖均为 0。
 
 ## 14. EvalPilot Next Phase 6 自由探索契约
 

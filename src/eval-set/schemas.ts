@@ -126,6 +126,7 @@ export const coverageDimensionSummarySchema = z.object({
 
 export const coverageGapSchema = z.object({
   gapId: storageIdSchema,
+  kind: z.enum(['missing_asset', 'not_executed', 'not_verified', 'inconclusive', 'failed']),
   capabilityId: storageIdSchema,
   dimension: coverageDimensionSchema,
   missingValue: z.string().min(1),
@@ -134,19 +135,75 @@ export const coverageGapSchema = z.object({
   candidateCaseIds: z.array(storageIdSchema),
 }).strict();
 
+export const coverageCellSchema = z.object({
+  cellId: storageIdSchema,
+  capabilityId: storageIdSchema,
+  dimension: coverageDimensionSchema,
+  value: z.string().min(1),
+  assetStatus: z.enum(['missing', 'candidate', 'stable']),
+  executionStatus: z.enum(['not_run', 'pass', 'fail', 'inconclusive']),
+  caseIds: z.array(storageIdSchema),
+  latestRunId: storageIdSchema.nullable(),
+  latestResultAt: z.iso.datetime().nullable(),
+  verified: z.boolean(),
+}).strict();
+
 export const coverageMatrixSchema = z.object({
   projectId: storageIdSchema,
   generatedAt: z.iso.datetime(),
   dimensions: z.array(coverageDimensionSummarySchema),
   gaps: z.array(coverageGapSchema),
   totalTargetCells: z.number().int().nonnegative(),
+  assetCoveredCells: z.number().int().nonnegative(),
+  executedCells: z.number().int().nonnegative(),
+  verifiedCells: z.number().int().nonnegative(),
   coveredCells: z.number().int().nonnegative(),
+  assetCoverageRatio: z.number().min(0).max(1),
+  executionCoverageRatio: z.number().min(0).max(1),
+  verifiedCoverageRatio: z.number().min(0).max(1),
+  cells: z.array(coverageCellSchema),
   coverageRatio: z.number().min(0).max(1),
 }).strict().superRefine((value, context) => {
-  if (value.coveredCells > value.totalTargetCells) {
-    context.addIssue({ code: 'custom', path: ['coveredCells'], message: '已覆盖单元不能超过目标单元。' });
+  for (const field of ['assetCoveredCells', 'executedCells', 'verifiedCells', 'coveredCells'] as const) {
+    if (value[field] > value.totalTargetCells) context.addIssue({ code: 'custom', path: [field], message: '覆盖单元不能超过目标单元。' });
+  }
+  if (value.coveredCells !== value.verifiedCells || value.coverageRatio !== value.verifiedCoverageRatio) context.addIssue({ code: 'custom', path: ['coverageRatio'], message: '废弃覆盖字段必须与已验证覆盖一致。' });
+  if (value.cells.length === 0) {
+    if (value.executedCells !== 0 || value.verifiedCells !== 0) context.addIssue({ code: 'custom', path: ['cells'], message: '没有功能级单元的兼容记录不能声明已执行或已验证覆盖。' });
+    return;
+  }
+  if (value.cells.length !== value.totalTargetCells) context.addIssue({ code: 'custom', path: ['cells'], message: '功能级覆盖单元数量必须等于目标单元数量。' });
+  const counts = {
+    assetCoveredCells: value.cells.filter((cell) => cell.assetStatus !== 'missing').length,
+    executedCells: value.cells.filter((cell) => cell.executionStatus !== 'not_run').length,
+    verifiedCells: value.cells.filter((cell) => cell.verified).length,
+  };
+  for (const field of ['assetCoveredCells', 'executedCells', 'verifiedCells'] as const) {
+    if (value[field] !== counts[field]) context.addIssue({ code: 'custom', path: [field], message: '覆盖计数必须与功能级单元一致。' });
+  }
+  const expectedRatio = (count: number) => value.totalTargetCells ? count / value.totalTargetCells : 1;
+  for (const [field, count] of [['assetCoverageRatio', counts.assetCoveredCells], ['executionCoverageRatio', counts.executedCells], ['verifiedCoverageRatio', counts.verifiedCells]] as const) {
+    if (Math.abs(value[field] - expectedRatio(count)) > Number.EPSILON) context.addIssue({ code: 'custom', path: [field], message: '覆盖率必须与功能级单元一致。' });
   }
 });
+
+export const legacyCoverageMatrixSchema = z.object({
+  projectId: storageIdSchema,
+  generatedAt: z.iso.datetime(),
+  dimensions: z.array(coverageDimensionSummarySchema),
+  gaps: z.array(z.object({
+    gapId: storageIdSchema,
+    capabilityId: storageIdSchema,
+    dimension: coverageDimensionSchema,
+    missingValue: z.string().min(1),
+    priority: z.enum(['critical', 'high', 'medium', 'low']),
+    reason: z.string().min(1),
+    candidateCaseIds: z.array(storageIdSchema),
+  }).strict()),
+  totalTargetCells: z.number().int().nonnegative(),
+  coveredCells: z.number().int().nonnegative(),
+  coverageRatio: z.number().min(0).max(1),
+}).strict();
 
 export const passAnalysisSchema = z.object({
   confirmedConditions: z.array(coverageDimensionValueSchema),

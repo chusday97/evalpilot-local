@@ -5,7 +5,7 @@ import type { Badcase, EvalCase, EvalCaseResult, PassAnalysis, ProductModel } fr
 import { createAndSaveBadcase } from '../badcase/badcase-service.js';
 import { recordCaseResult } from '../eval-set/case-lifecycle.js';
 import { analyzeCoverage } from '../eval-set/coverage-analyzer.js';
-import { saveCoverageMatrix } from '../eval-set/coverage-store.js';
+import { loadCoverageRunEvidence, saveCoverageMatrix } from '../eval-set/coverage-store.js';
 import { saveEvalCase } from '../eval-set/eval-set-store.js';
 import { analyzePassingCase } from '../eval-set/pass-analyzer.js';
 import { judgeEvalCase } from '../judge/hybrid-judge.js';
@@ -34,10 +34,12 @@ export async function runAdaptiveCase(input: {
   let badcase: Badcase | null = null; let passAnalysis: PassAnalysis | null = null;
   if (result.verdict === 'fail' && result.failureSource === 'product') badcase = await createAndSaveBadcase(input.outputDir, { evalCase: input.evalCase, result, createdAt: agentRun.completedAt });
   if (result.verdict === 'pass' && result.failureSource === null) {
-    passAnalysis = analyzePassingCase({ evalCase: updatedCase, result, model: input.productModel, existingCases: input.existingCases.map((item) => item.caseId === updatedCase.caseId ? updatedCase : item), generatedAt: agentRun.completedAt });
+    passAnalysis = analyzePassingCase({ evalCase: updatedCase, result, evidencePacket: packet, model: input.productModel, existingCases: input.existingCases.map((item) => item.caseId === updatedCase.caseId ? updatedCase : item), generatedAt: agentRun.completedAt });
     for (const candidate of passAnalysis.challengeCandidates) await saveEvalCase(input.outputDir, candidate);
   }
-  const coverage = analyzeCoverage(input.productModel, input.existingCases.map((item) => item.caseId === updatedCase.caseId ? updatedCase : item), agentRun.completedAt);
+  const runEvidence = await loadCoverageRunEvidence(input.outputDir);
+  const coverageCases = [...new Map([...input.existingCases.map((item) => item.caseId === updatedCase.caseId ? updatedCase : item), ...(passAnalysis?.challengeCandidates ?? [])].map((item) => [item.caseId, item])).values()];
+  const coverage = analyzeCoverage({ model: input.productModel, cases: coverageCases, ...runEvidence, generatedAt: agentRun.completedAt });
   if (passAnalysis) {
     coverage.gaps = coverage.gaps.map((gap) => ({
       ...gap,

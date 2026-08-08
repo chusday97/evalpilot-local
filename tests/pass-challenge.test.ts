@@ -37,7 +37,7 @@ function passResult(): EvalCaseResult {
 
 describe('PASS evolution and Challenge generation', () => {
   it('turns uncovered target values into explicit coverage gaps', () => {
-    const matrix = analyzeCoverage(model(), [baseline()], now);
+    const matrix = analyzeCoverage({ model: model(), cases: [baseline()], generatedAt: now });
     expect(matrix.coverageRatio).toBeLessThan(1);
     expect(matrix.gaps).toEqual(expect.arrayContaining([
       expect.objectContaining({ dimension: 'persona', missingValue: 'user-skilled' }),
