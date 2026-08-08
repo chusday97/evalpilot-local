@@ -22,6 +22,7 @@ export const groundedFieldSchema = groundedElementSchema.extend({
 }).strict();
 
 export const pageObservationSchema = z.object({
+  observationId: z.string().min(1),
   pageUrl: z.string().url(),
   pagePurpose: z.string(),
   visibleStateSummary: z.string(),
@@ -47,11 +48,33 @@ export const agentDecisionSchema = z.object({
 });
 
 export const stepVerificationSchema = z.object({
+  verificationId: z.string().min(1),
   expectation: z.string().min(1),
   observed: z.string().min(1),
   status: z.enum(['confirmed', 'not_confirmed', 'inconclusive']),
   evidenceRefs: z.array(z.string()),
   confidence: z.number().min(0).max(1),
+}).strict();
+
+export const stepEvidenceSchema = z.object({
+  stepIndex: z.number().int().positive(),
+  beforeObservationId: z.string().min(1),
+  afterObservationId: z.string().min(1),
+  beforeScreenshotPath: z.string().min(1),
+  afterScreenshotPath: z.string().min(1),
+  decisionId: z.string().min(1),
+  verificationId: z.string().min(1),
+  actionStatus: z.enum(['executed', 'blocked_by_safety', 'failed']),
+}).strict();
+
+export const evidenceCompletenessSchema = z.object({
+  complete: z.boolean(),
+  hasInitialObservation: z.boolean(),
+  hasFinalObservation: z.boolean(),
+  hasBeforeAfterScreenshots: z.boolean(),
+  hasStepVerifications: z.boolean(),
+  hasTrace: z.boolean(),
+  missing: z.array(z.string().min(1)),
 }).strict();
 
 export const reflectionDecisionSchema = z.object({
@@ -74,8 +97,31 @@ export const runVersionMetadataSchema = z.object({
   timestamp: z.iso.datetime(),
 }).strict();
 
-export const evidencePacketSchema = z.object({
+export const currentEvidencePacketSchema = z.object({
   runId: z.string().min(1), caseId: z.string().min(1), targetAppCommit: z.string().min(1).nullable(), actorModel: z.string().min(1), actorPromptVersion: z.string().min(1), startedAt: z.iso.datetime(), completedAt: z.iso.datetime(),
-  actions: z.array(interactionActionSchema), observations: z.array(pageObservationSchema), stepVerifications: z.array(stepVerificationSchema), screenshots: z.array(z.string()), tracePath: z.string().nullable(), consoleEvidence: z.array(z.string()), networkEvidence: z.array(z.string()),
+  actions: z.array(interactionActionSchema), observations: z.array(pageObservationSchema), stepVerifications: z.array(stepVerificationSchema), stepEvidence: z.array(stepEvidenceSchema), screenshots: z.array(z.string()), tracePath: z.string().nullable(), evidenceCompleteness: evidenceCompletenessSchema, consoleEvidence: z.array(z.string()), networkEvidence: z.array(z.string()),
   finalState: z.object({ url: z.string().min(1), visibleTextSummary: z.string() }).strict(), versions: runVersionMetadataSchema,
 }).strict();
+
+const legacyEvidencePacketSchema = z.object({
+  runId: z.string().min(1), caseId: z.string().min(1), targetAppCommit: z.string().min(1).nullable(), actorModel: z.string().min(1), actorPromptVersion: z.string().min(1), startedAt: z.iso.datetime(), completedAt: z.iso.datetime(),
+  actions: z.array(interactionActionSchema), observations: z.array(pageObservationSchema.omit({ observationId: true })), stepVerifications: z.array(stepVerificationSchema.omit({ verificationId: true })), screenshots: z.array(z.string()), tracePath: z.string().nullable(), consoleEvidence: z.array(z.string()), networkEvidence: z.array(z.string()),
+  finalState: z.object({ url: z.string().min(1), visibleTextSummary: z.string() }).strict(), versions: runVersionMetadataSchema.optional(),
+}).strict().transform((packet) => ({
+  ...packet,
+  versions: packet.versions ?? { targetAppGitSha: packet.targetAppCommit, productModelVersion: 1, evalSetVersion: 1, caseVersion: 1, evalPilotVersion: 'legacy-unknown', actorModel: packet.actorModel, judgeModel: 'legacy-unknown', actorPromptVersion: packet.actorPromptVersion, judgePromptVersion: 'legacy-unknown', toolSchemaVersion: 'legacy-unknown', timestamp: packet.startedAt },
+  observations: packet.observations.map((observation, index) => ({ ...observation, observationId: `legacy-observation-${String(index + 1).padStart(3, '0')}` })),
+  stepVerifications: packet.stepVerifications.map((verification, index) => ({ ...verification, verificationId: `legacy-verification-${String(index + 1).padStart(3, '0')}` })),
+  stepEvidence: [],
+  evidenceCompleteness: {
+    complete: false,
+    hasInitialObservation: packet.observations.length > 0,
+    hasFinalObservation: packet.observations.length > 0 && packet.finalState.url.length > 0 && packet.finalState.visibleTextSummary.length > 0,
+    hasBeforeAfterScreenshots: false,
+    hasStepVerifications: false,
+    hasTrace: false,
+    missing: ['旧记录缺少逐步前后证据，不能补推验证结论。'],
+  },
+}));
+
+export const evidencePacketSchema = z.union([currentEvidencePacketSchema, legacyEvidencePacketSchema]);

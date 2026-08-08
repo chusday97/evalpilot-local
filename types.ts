@@ -634,7 +634,7 @@ export interface AdaptiveEvaluationReport {
   notTestedCaseIds: string[];
   coverage: CoverageMatrix | null;
   caseResults: EvalCaseResult[];
-  journeys: Array<{ runId: string; caseId: string; actions: InteractionAction[]; finalState: string }>;
+  journeys: Array<{ runId: string; caseId: string; actions: InteractionAction[]; finalState: string; evidenceCompleteness: EvidenceCompleteness }>;
   failures: Array<{ caseId: string; summary: string; severity: Severity; evidenceRefs: string[] }>;
   inconclusiveCases: Array<{ caseId: string; summary: string; failureSource: string | null }>;
   confirmedFacts: string[];
@@ -749,6 +749,7 @@ export interface GroundedField extends GroundedElement {
 }
 
 export interface PageObservation {
+  observationId: string;
   pageUrl: string;
   pagePurpose: string;
   visibleStateSummary: string;
@@ -763,6 +764,7 @@ export interface PageObservation {
 export type AgentAction = 'click' | 'fill' | 'select' | 'scroll' | 'back' | 'wait' | 'retry' | 'finish' | 'abandon';
 
 export interface AgentDecision {
+  decisionId?: string;
   intentSummary: string;
   action: AgentAction;
   targetElementId: string | null;
@@ -787,11 +789,33 @@ export interface AgentActionResult {
 }
 
 export interface StepVerification {
+  verificationId: string;
   expectation: string;
   observed: string;
   status: 'confirmed' | 'not_confirmed' | 'inconclusive';
   evidenceRefs: string[];
   confidence: number;
+}
+
+export interface StepEvidence {
+  stepIndex: number;
+  beforeObservationId: string;
+  afterObservationId: string;
+  beforeScreenshotPath: string;
+  afterScreenshotPath: string;
+  decisionId: string;
+  verificationId: string;
+  actionStatus: AgentActionResult['status'];
+}
+
+export interface EvidenceCompleteness {
+  complete: boolean;
+  hasInitialObservation: boolean;
+  hasFinalObservation: boolean;
+  hasBeforeAfterScreenshots: boolean;
+  hasStepVerifications: boolean;
+  hasTrace: boolean;
+  missing: string[];
 }
 
 export interface ReflectionDecision {
@@ -811,8 +835,10 @@ export interface EvidencePacket {
   actions: InteractionAction[];
   observations: PageObservation[];
   stepVerifications: StepVerification[];
+  stepEvidence: StepEvidence[];
   screenshots: string[];
   tracePath: string | null;
+  evidenceCompleteness: EvidenceCompleteness;
   consoleEvidence: string[];
   networkEvidence: string[];
   finalState: { url: string; visibleTextSummary: string };

@@ -1,9 +1,9 @@
 import type { AgentActionResult, AgentDecision, PageObservation, StepVerification } from '../../types.js';
 import { stepVerificationSchema } from './schemas.js';
 
-export function verifyAgentStep(before: PageObservation, after: PageObservation, decision: AgentDecision, actionResult: AgentActionResult): StepVerification {
-  if (actionResult.status === 'blocked_by_safety') return stepVerificationSchema.parse({ expectation: decision.expectedResult, observed: actionResult.summary, status: 'inconclusive', evidenceRefs: after.evidenceRefs, confidence: 1 });
-  if (actionResult.status === 'failed') return stepVerificationSchema.parse({ expectation: decision.expectedResult, observed: actionResult.summary, status: 'not_confirmed', evidenceRefs: after.evidenceRefs, confidence: 0.95 });
+export function verifyAgentStep(before: PageObservation, after: PageObservation, decision: AgentDecision, actionResult: AgentActionResult, verificationId = 'verification-standalone'): StepVerification {
+  if (actionResult.status === 'blocked_by_safety') return stepVerificationSchema.parse({ verificationId, expectation: decision.expectedResult, observed: actionResult.summary, status: 'inconclusive', evidenceRefs: after.evidenceRefs, confidence: 1 });
+  if (actionResult.status === 'failed') return stepVerificationSchema.parse({ verificationId, expectation: decision.expectedResult, observed: actionResult.summary, status: 'not_confirmed', evidenceRefs: after.evidenceRefs, confidence: 0.95 });
   const routeChanged = before.pageUrl !== after.pageUrl;
   const stateChanged = before.visibleStateSummary !== after.visibleStateSummary;
   const meaningfulExpectedTokens = decision.expectedResult.toLowerCase().split(/\s+|[,，。]/).filter((item) => item.length > 2);
@@ -16,6 +16,7 @@ export function verifyAgentStep(before: PageObservation, after: PageObservation,
         ? 'inconclusive'
         : 'not_confirmed';
   return stepVerificationSchema.parse({
+    verificationId,
     expectation: decision.expectedResult,
     observed: routeChanged ? `页面进入 ${after.pageUrl}` : stateChanged ? '页面可见状态发生变化。' : '页面 URL 和可见状态没有变化。',
     status,

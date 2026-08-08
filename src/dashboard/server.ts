@@ -32,6 +32,7 @@ import { chromium } from 'playwright';
 import { OpenAiProvider } from '../ai/openai-provider.js';
 import { runAdaptiveCase } from '../evaluation/adaptive-evaluation-service.js';
 import { loadEvalSetManifest } from '../eval-set/eval-set-store.js';
+import { evidencePacketSchema } from '../test-agent/schemas.js';
 
 interface ApiResult { status: number; body: ApiResponse<unknown> }
 const execFileAsync = promisify(execFile);
@@ -212,7 +213,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
       }
       const path = resolve(config.outputDir, 'runs', runId, 'evidence-packet.json');
       const evidence = await readOptionalText(path);
-      return evidence ? ok(JSON.parse(evidence)) : fail(404, 'RUN_EVIDENCE_NOT_FOUND', `没有找到运行证据：${runId}`);
+      return evidence ? ok(evidencePacketSchema.parse(JSON.parse(evidence))) : fail(404, 'RUN_EVIDENCE_NOT_FOUND', `没有找到运行证据：${runId}`);
     }
     if (method === 'GET' && pathname === '/api/reports/history') return ok(await readRunHistory(config.outputDir));
     if (method === 'GET' && pathname === '/api/issues') { const evaluationId = query.get('evaluationId'); const issuesPath = evaluationId ? resolve(config.outputDir, 'evaluations', evaluationId, 'issues.jsonl') : resolve(config.outputDir, 'reports', 'ux-issues.jsonl'); const issues = await pathExists(issuesPath) ? await readJsonLinesFile<UxIssue>(issuesPath) : []; const dismissedPath = resolve(config.outputDir, 'reports', 'dismissed-issues.json'); const dismissed = await pathExists(dismissedPath) ? JSON.parse(await readOptionalText(dismissedPath) ?? '[]') as string[] : []; return ok(issues.map((item) => ({ ...presentIssue(item), dismissed: dismissed.includes(item.issueId) }))); }

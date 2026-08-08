@@ -255,16 +255,20 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - `PageObservation` 只包含当前 URL、可见状态摘要、可交互元素、表单字段、公开页面问题和证据引用。每次观察生成 `E001` 起的稳定元素 ID；Actor 只能引用这些 ID，不能生成 CSS/XPath 或坐标。
 - `AgentDecision` 每次只允许一个动作。`ActionExecutor` 必须重新校验元素是否存在、是否禁用及风险等级；删除、支付、发布、外部发送、凭证和其他高风险动作即使模型要求也返回 `blocked_by_safety`。
 - 安全输入按 `known_fixture | synthetic_generated` 记录来源；敏感或高风险字段返回 `blocked_by_safety`，不生成真实个人信息、凭证或秘密。
-- 每个动作必须保存前置 Observation、单步 Decision、执行结果和 `StepVerification`。模型输出损坏、DOM 目标消失、页面证据不足或工具失败时结果为 `inconclusive/evaluator_failure`，不能生成产品失败。
+- 每个动作必须保存带稳定 ID 的前后 `PageObservation`、独立的 before/after 截图、单步 Decision、执行结果和带稳定 ID 的 `StepVerification`；`StepEvidence` 按 `stepIndex` 连接这些引用。模型输出损坏、DOM 目标消失、页面证据不足或工具失败时结果为 `inconclusive/evaluator_failure`，不能生成产品失败。
 - 只保存简短 `intentSummary`、动作、期望、验证和置信度，不保存或请求隐藏 chain-of-thought。
-- Evidence Packet 位于 `runs/<run-id>/evidence-packet.json`；Observation、Decision、Verification 同时以 JSONL 保存。截图只保存在本地运行目录。
+- Evidence Packet 位于 `runs/<run-id>/evidence-packet.json`；Observation、Decision、Verification 同时以 JSONL 保存。每个执行动作保存 `step-NNN-before.png` 与 `step-NNN-after.png`；`finish/abandon` 也必须保存并关联最终截图。截图只保存在本地运行目录。
+- `EvidenceCompleteness` 分别记录初始观察、最终观察、前后截图、逐步验证和本地 Trace 是否齐全，并列出缺失项。所有引用必须能在当前 Evidence Packet 中解析；不能只相信历史记录自报的 `complete=true`。
+- Adaptive 报告的每条旅程携带同一份 `evidenceCompleteness`，导出报告与 Dashboard 必须用人话展示证据是否足够及缺失原因。
+- Adaptive AI 运行使用 Playwright Trace，固定 `screenshots=true`、`snapshots=true`、`sources=false`。Trace 仅保存在 `runs/<run-id>/trace.zip`，不得发送给远程模型；写入失败时运行记录仍可读取，但结论必须降级为 Evaluator Inconclusive。
 - Phase 1 实验入口必须显式启用；现有评测 API、Dashboard 导航和默认流水线保持兼容。
 
 ## 10. EvalPilot Next Phase 2 Hybrid Judge 契约
 
 - Deterministic Judge 只判断 Evidence Packet 中可直接观察的 URL、可见文本、网络、控制台和状态证据；无法从现有证据证明的断言必须返回 `inconclusive`。
 - Semantic Judge 只接收 Eval Case、Oracle、最小化 Evidence Packet 摘要和确定性结果；输出必须区分 `confirmedFacts`、带置信度的 `hypotheses` 和 `unknowns`。
-- Verdict Merger 的优先级为：证据完整性门禁 → 确定性硬失败 → 语义失败 → 任一无法判断 → 双方通过。缺少 Observation、逐步 Verification 或最终状态时禁止 PASS。
+- Verdict Merger 的优先级为：证据完整性门禁 → 确定性硬失败 → 语义失败 → 任一无法判断 → 双方通过。缺少初始/最终 Observation、任一步前后截图、逐步 Verification、有效证据引用、最终状态或本地 Trace 时，统一返回 `verdict=inconclusive, failureSource=evaluator`，禁止 PASS 和 Product FAIL。
+- 旧 Evidence Packet 继续兼容读取；缺少 Phase 2 字段时通过兼容转换生成不完整状态，不改写旧文件，也不得补推验证通过。
 - Provider/Schema/工具失败统一产生 `verdict=inconclusive, failureSource=evaluator, severity=null`，不得创建产品问题或 Product Regression。
 - 直接证据支持的产品失败为 `failureSource=product`；无法区分产品与评测器时使用 `unknown`，不得伪造根因。
 - Judge 产物写入 `runs/<run-id>/deterministic-judge.json`、`semantic-judge.json` 和 `result.json`，均先过 Schema 后原子落盘。

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added per-action before/after observations and screenshots, explicit `StepEvidence`, local Playwright Trace with source capture disabled, and a recomputed Evidence Completeness Gate.
+- Changed incomplete adaptive evidence to Evaluator Inconclusive so missing screenshots, verifications, references, final state, or Trace cannot produce PASS or Product FAIL.
+- Preserved legacy Evidence Packets through an in-memory compatibility view that marks them incomplete without rewriting historical files.
+- Updated adaptive run details and exported reports to explain whether evidence is sufficient and list missing evidence in user-readable language.
 - Changed adaptive coverage to report asset, execution, and verified ratios separately; only stable PASS results with valid evidence can increase Verified Coverage.
 - Added capability-scoped coverage cells and explicit missing-asset, not-executed, not-verified, inconclusive, and failed gaps so one feature cannot borrow another feature's evidence.
 - Preserved legacy coverage files as read-only asset history while preventing them from being promoted to verified coverage without run and evidence links.

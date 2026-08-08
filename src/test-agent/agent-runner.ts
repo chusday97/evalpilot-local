@@ -1,11 +1,11 @@
 import { resolve } from 'node:path';
 import type { Page } from 'playwright';
-import type { AgentActionResult, AgentDecision, AiTestAgentRun, EvalCase, EvidencePacket, InteractionAction, PageObservation, ReflectionDecision, StepVerification } from '../../types.js';
+import type { AgentActionResult, AgentDecision, AiTestAgentRun, EvalCase, EvidencePacket, InteractionAction, PageObservation, ReflectionDecision, StepEvidence, StepVerification } from '../../types.js';
 import type { AiProvider } from '../ai/provider.js';
-import { ensureDirectory, writeJsonAtomic } from '../utils/file-system.js';
+import { ensureDirectory, pathExists, writeJsonAtomic } from '../utils/file-system.js';
 import { chooseAgentAction } from './actor.js';
 import { executeAgentAction } from './action-executor.js';
-import { saveAgentEvidence } from './evidence-packet.js';
+import { calculateEvidenceCompleteness, saveAgentEvidence } from './evidence-packet.js';
 import { observePage } from './observer.js';
 import { reflectOnStep } from './reflector.js';
 import { generateSafeInput } from './safe-input-generator.js';
@@ -44,6 +44,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
   const actionResults: AgentActionResult[] = [];
   const observations: PageObservation[] = [];
   const verifications: StepVerification[] = [];
+  const stepEvidence: StepEvidence[] = [];
   const reflections: ReflectionDecision[] = [];
   const interactions: InteractionAction[] = [];
   const screenshots: string[] = [];
@@ -56,19 +57,32 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
   let status: AiTestAgentRun['status'] = 'inconclusive';
   let failureSource: AiTestAgentRun['failureSource'] = null;
   let error: string | null = null;
+  const expectedTracePath = resolve(runDirectory, 'trace.zip');
+  let tracePath: string | null = null;
+  let traceStarted = false;
+  let finalObservation: PageObservation | null = null;
+  try {
+    await page.context().tracing.start({ screenshots: true, snapshots: true, sources: false });
+    traceStarted = true;
+  } catch (traceError) {
+    error = `本地 Trace 无法启动：${traceError instanceof Error ? traceError.message : String(traceError)}`;
+  }
   try {
     if (page.url() !== options.startingUrl) await page.goto(options.startingUrl, { waitUntil: 'domcontentloaded' });
     for (let step = 0; step < (options.maxSteps ?? 8); step += 1) {
-      const screenshotPath = resolve(screenshotDirectory, `step-${String(step + 1).padStart(2, '0')}.png`);
-      const screenshot = await page.screenshot({ path: screenshotPath, fullPage: true });
-      screenshots.push(screenshotPath);
-      const before = await observePage(page, [screenshotPath]);
+      const stepIndex = step + 1;
+      const stepLabel = String(stepIndex).padStart(3, '0');
+      const beforeScreenshotPath = resolve(screenshotDirectory, `step-${stepLabel}-before.png`);
+      const afterScreenshotPath = resolve(screenshotDirectory, `step-${stepLabel}-after.png`);
+      const beforeBuffer = await page.screenshot({ path: beforeScreenshotPath, fullPage: true });
+      screenshots.push(beforeScreenshotPath);
+      const before = await observePage(page, [beforeScreenshotPath], `observation-${stepLabel}-before`);
       observations.push(before);
       let decision: AgentDecision;
       try {
         decision = await chooseAgentAction({
           provider, evalCase, observation: before, history: decisions, verifications,
-          screenshotDataUrl: `data:image/png;base64,${screenshot.toString('base64')}`,
+          screenshotDataUrl: `data:image/png;base64,${beforeBuffer.toString('base64')}`,
           allowRemoteModel: provider.info.remote ? Boolean(options.allowRemoteModel) : true,
           allowScreenshot: provider.info.remote ? Boolean(options.allowScreenshotToProvider) : true,
         });
@@ -78,52 +92,87 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
         status = 'inconclusive';
         break;
       }
+      decision = { ...decision, decisionId: `decision-${stepLabel}` };
+      let actionResult: AgentActionResult | null = null;
       if (decision.action === 'fill') {
         const field = before.formFields.find((item) => item.elementId === decision.targetElementId);
         if (!field) decision = { ...decision, value: null };
         else {
           const safeInput = generateSafeInput(field, evalCase.knownInformation, page.url());
           if (safeInput.status === 'blocked_by_safety') {
-            decisions.push({ ...decision, value: null });
-            const blocked: AgentActionResult = { status: 'blocked_by_safety', action: 'fill', targetElementId: decision.targetElementId, summary: safeInput.reason, evidenceRefs: before.evidenceRefs };
-            actionResults.push(blocked);
-            const verification = verifyAgentStep(before, before, decision, blocked); verifications.push(verification);
-            reflections.push(reflectOnStep({ evalCase, decision, result: blocked, verification, failedAttempts: 1 }));
-            status = 'blocked_by_safety';
-            break;
+            decision = { ...decision, value: null };
+            actionResult = { status: 'blocked_by_safety', action: 'fill', targetElementId: decision.targetElementId, summary: safeInput.reason, evidenceRefs: [beforeScreenshotPath] };
           }
-          decision = { ...decision, value: safeInput.value };
+          else decision = { ...decision, value: safeInput.value };
         }
       }
       decisions.push(decision);
-      const actionResult = await executeAgentAction(page, before, decision);
+      actionResult ??= await executeAgentAction(page, before, decision);
       actionResults.push(actionResult);
       interactions.push(interactionFor(decision, actionResult, interactions.length, performance.now() - monotonicStartedAt, before.pageUrl));
       await page.waitForTimeout(50);
-      const after = await observePage(page, before.evidenceRefs);
-      const verification = verifyAgentStep(before, after, decision, actionResult);
+      await page.screenshot({ path: afterScreenshotPath, fullPage: true });
+      screenshots.push(afterScreenshotPath);
+      const after = await observePage(page, [afterScreenshotPath], `observation-${stepLabel}-after`);
+      observations.push(after);
+      finalObservation = after;
+      actionResult = { ...actionResult, evidenceRefs: [beforeScreenshotPath, afterScreenshotPath] };
+      actionResults[actionResults.length - 1] = actionResult;
+      interactions[interactions.length - 1] = interactionFor(decision, actionResult, interactions.length - 1, performance.now() - monotonicStartedAt, before.pageUrl);
+      const verification = verifyAgentStep(before, after, decision, actionResult, `verification-${stepLabel}`);
       verifications.push(verification);
+      stepEvidence.push({
+        stepIndex,
+        beforeObservationId: before.observationId,
+        afterObservationId: after.observationId,
+        beforeScreenshotPath,
+        afterScreenshotPath,
+        decisionId: decision.decisionId!,
+        verificationId: verification.verificationId,
+        actionStatus: actionResult.status,
+      });
       const failedAttempts = verifications.filter((item) => item.status === 'not_confirmed').length;
       const reflection = reflectOnStep({ evalCase, decision, result: actionResult, verification, failedAttempts });
       reflections.push(reflection);
       if (actionResult.status === 'blocked_by_safety') { status = 'blocked_by_safety'; break; }
-      if (reflection.nextStep === 'finish') { status = 'completed'; observations.push(after); break; }
-      if (reflection.nextStep === 'abandon') { status = 'abandoned'; observations.push(after); break; }
-      if (step === (options.maxSteps ?? 8) - 1) observations.push(after);
+      if (reflection.nextStep === 'finish') { status = 'completed'; break; }
+      if (reflection.nextStep === 'abandon') { status = 'abandoned'; break; }
     }
   } catch (runError) {
     status = 'inconclusive'; failureSource = 'evaluator'; error = runError instanceof Error ? runError.message : String(runError);
-  } finally {
-    page.off('console', onConsole);
-    page.off('response', onResponse);
   }
+  if (!finalObservation) {
+    const finalScreenshotPath = resolve(screenshotDirectory, 'final.png');
+    try {
+      await page.screenshot({ path: finalScreenshotPath, fullPage: true });
+      screenshots.push(finalScreenshotPath);
+      finalObservation = await observePage(page, [finalScreenshotPath], 'observation-final');
+      observations.push(finalObservation);
+    } catch (finalEvidenceError) {
+      status = 'inconclusive'; failureSource = 'evaluator';
+      error = error ?? `最终证据无法保存：${finalEvidenceError instanceof Error ? finalEvidenceError.message : String(finalEvidenceError)}`;
+    }
+  }
+  if (traceStarted) {
+    try {
+      await page.context().tracing.stop({ path: expectedTracePath });
+      if (await pathExists(expectedTracePath)) tracePath = expectedTracePath;
+    } catch (traceError) {
+      error = error ?? `本地 Trace 无法保存：${traceError instanceof Error ? traceError.message : String(traceError)}`;
+    }
+  }
+  if (!tracePath) { status = 'inconclusive'; failureSource = 'evaluator'; }
+  page.off('console', onConsole);
+  page.off('response', onResponse);
   const completedAt = now().toISOString();
-  const finalObservation = observations.at(-1) ?? await observePage(page);
-  const packet: EvidencePacket = {
+  const resolvedFinalObservation = finalObservation ?? observations.at(-1) ?? {
+    observationId: 'observation-missing', pageUrl: page.url(), pagePurpose: '', visibleStateSummary: '', primaryAreas: [], visibleProblems: [], interactableElements: [], formFields: [], evidenceRefs: [], confidence: 0,
+  };
+  const packetWithoutCompleteness = {
     runId, caseId: evalCase.caseId, targetAppCommit: options.targetAppCommit ?? null,
     actorModel: provider.info.model, actorPromptVersion: '1.0.0', startedAt: started.toISOString(), completedAt,
-    actions: interactions, observations, stepVerifications: verifications, screenshots, tracePath: null,
-    consoleEvidence, networkEvidence, finalState: { url: page.url(), visibleTextSummary: finalObservation.visibleStateSummary.slice(0, 1_000) },
+    actions: interactions, observations, stepVerifications: verifications, stepEvidence, screenshots, tracePath,
+    consoleEvidence, networkEvidence, finalState: { url: page.url(), visibleTextSummary: resolvedFinalObservation.visibleStateSummary.slice(0, 1_000) },
     versions: {
       targetAppGitSha: options.targetAppCommit ?? null,
       productModelVersion: options.productModelVersion ?? (evalCase.origin.type === 'generated_from_product_model' ? evalCase.origin.productModelVersion : 1),
@@ -138,6 +187,8 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       timestamp: started.toISOString(),
     },
   };
+  const packet: EvidencePacket = { ...packetWithoutCompleteness, evidenceCompleteness: calculateEvidenceCompleteness(packetWithoutCompleteness as Omit<EvidencePacket, 'evidenceCompleteness'>) };
+  if (!packet.evidenceCompleteness.complete) { status = 'inconclusive'; failureSource = 'evaluator'; error = error ?? packet.evidenceCompleteness.missing.join(' '); }
   const evidencePacketPath = await saveAgentEvidence(options.outputDir, packet, decisions);
   const run: AiTestAgentRun = { runId, caseId: evalCase.caseId, mode: options.mode ?? 'task', status, failureSource, decisions, actionResults, reflections, evidencePacketPath, startedAt: started.toISOString(), completedAt, error };
   await writeJsonAtomic(resolve(runDirectory, 'agent-run.json'), run);

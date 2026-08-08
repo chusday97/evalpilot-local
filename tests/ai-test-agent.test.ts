@@ -101,6 +101,12 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
     expect(result.actionResults[0]).toMatchObject({ status: 'executed', targetElementId: 'E001' });
     expect(provider.requests.every((item) => item.imageDataUrls[0]?.startsWith('data:image/png;base64,'))).toBe(true);
     expect(provider.requests.every((item) => item.userPrompt.includes('interactableElements'))).toBe(true);
+    const packet = JSON.parse(await readFile(result.evidencePacketPath, 'utf8')) as { actions: unknown[]; stepEvidence: Array<{ beforeScreenshotPath: string; afterScreenshotPath: string }>; tracePath: string | null; evidenceCompleteness: { complete: boolean } };
+    expect(packet.evidenceCompleteness.complete).toBe(true);
+    expect(packet.stepEvidence).toHaveLength(packet.actions.length);
+    expect(packet.stepEvidence.at(-1)?.afterScreenshotPath).toMatch(/step-003-after\.png$/);
+    expect(packet.stepEvidence.every((step) => step.beforeScreenshotPath !== step.afterScreenshotPath)).toBe(true);
+    expect(packet.tracePath).toMatch(/trace\.zip$/);
     await browser.close();
   });
 

@@ -1,11 +1,9 @@
 import type { DeterministicJudgeResult, EvalCase, EvalCaseResult, EvidencePacket, SemanticJudgeResult } from '../../types.js';
 import { evalCaseResultSchema } from './schemas.js';
+import { calculateEvidenceCompleteness } from '../test-agent/evidence-packet.js';
 
 export function evidencePacketComplete(packet: EvidencePacket): boolean {
-  return packet.observations.length > 0
-    && packet.stepVerifications.length > 0
-    && packet.finalState.url.length > 0
-    && packet.finalState.visibleTextSummary.length > 0;
+  return calculateEvidenceCompleteness(packet).complete;
 }
 
 export function mergeJudgeVerdicts(input: {
@@ -16,7 +14,8 @@ export function mergeJudgeVerdicts(input: {
   semanticEvaluatorFailed: boolean;
   createdAt?: string;
 }): EvalCaseResult {
-  const complete = evidencePacketComplete(input.packet);
+  const completeness = calculateEvidenceCompleteness(input.packet);
+  const complete = completeness.complete;
   let verdict: EvalCaseResult['verdict'] = 'inconclusive';
   let failureSource: EvalCaseResult['failureSource'] = null;
   let severity: EvalCaseResult['severity'] = null;
@@ -29,6 +28,16 @@ export function mergeJudgeVerdicts(input: {
   } else if (input.deterministic.checks.every((item) => item.verdict === 'pass') && input.semantic.verdict === 'pass') {
     verdict = 'pass';
   }
+  const semantic = complete ? input.semantic : {
+    ...input.semantic,
+    verdict: 'inconclusive' as const,
+    taskCompletion: 'unknown' as const,
+    summary: `评测证据不完整，当前不能判断产品通过或失败：${completeness.missing.join(' ')}`,
+    confirmedFacts: [],
+    hypotheses: [],
+    unknowns: [...new Set([...input.semantic.unknowns, ...completeness.missing])],
+    confidence: 0,
+  };
   return evalCaseResultSchema.parse({
     runId: input.packet.runId,
     caseId: input.evalCase.caseId,
@@ -36,7 +45,7 @@ export function mergeJudgeVerdicts(input: {
     failureSource,
     severity,
     deterministic: input.deterministic,
-    semantic: input.semantic,
+    semantic,
     evidencePacketPath: `runs/${input.packet.runId}/evidence-packet.json`,
     createdAt: input.createdAt ?? new Date().toISOString(),
   });

@@ -45,8 +45,11 @@ function result(evalCaseValue: EvalCase, verdict: EvalVerdict): EvalCaseResult {
 function packet(run: EvalCaseResult): EvidencePacket {
   return {
     runId: run.runId, caseId: run.caseId, targetAppCommit: null, actorModel: 'mock', actorPromptVersion: '1', startedAt: now, completedAt: now,
-    actions: [], observations: [{ pageUrl: 'http://127.0.0.1', pagePurpose: 'fixture', visibleStateSummary: '完成', primaryAreas: [], visibleProblems: [], interactableElements: [], formFields: [], evidenceRefs: ['shot.png'], confidence: 1 }],
-    stepVerifications: [{ expectation: '完成', observed: '完成', status: 'confirmed', evidenceRefs: ['shot.png'], confidence: 1 }], screenshots: ['shot.png'], tracePath: null,
+    actions: [{ actionId: 'agent-action-001', type: 'navigation', timestampMs: 1, page: '/', target: null, inputField: null, inputLength: null, inputFingerprint: null, outcome: '完成', evidence: ['before.png', 'after.png'] }],
+    observations: [{ observationId: 'observation-001-before', pageUrl: 'http://127.0.0.1', pagePurpose: 'fixture', visibleStateSummary: '开始', primaryAreas: [], visibleProblems: [], interactableElements: [], formFields: [], evidenceRefs: ['before.png'], confidence: 1 }, { observationId: 'observation-001-after', pageUrl: 'http://127.0.0.1', pagePurpose: 'fixture', visibleStateSummary: '完成', primaryAreas: [], visibleProblems: [], interactableElements: [], formFields: [], evidenceRefs: ['after.png'], confidence: 1 }],
+    stepVerifications: [{ verificationId: 'verification-001', expectation: '完成', observed: '完成', status: 'confirmed', evidenceRefs: ['after.png'], confidence: 1 }],
+    stepEvidence: [{ stepIndex: 1, beforeObservationId: 'observation-001-before', afterObservationId: 'observation-001-after', beforeScreenshotPath: 'before.png', afterScreenshotPath: 'after.png', decisionId: 'decision-001', verificationId: 'verification-001', actionStatus: 'executed' }],
+    screenshots: ['before.png', 'after.png'], tracePath: 'trace.zip', evidenceCompleteness: { complete: true, hasInitialObservation: true, hasFinalObservation: true, hasBeforeAfterScreenshots: true, hasStepVerifications: true, hasTrace: true, missing: [] },
     consoleEvidence: [], networkEvidence: [], finalState: { url: 'http://127.0.0.1', visibleTextSummary: '完成' },
     versions: { targetAppGitSha: null, productModelVersion: 1, evalSetVersion: 1, caseVersion: 1, evalPilotVersion: '0.5.0-alpha.1', actorModel: 'mock', judgeModel: 'mock', actorPromptVersion: '1', judgePromptVersion: '1', toolSchemaVersion: '1', timestamp: now },
   };

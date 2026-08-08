@@ -4,13 +4,13 @@ import type { AdaptiveEvaluationReport, Badcase, CoverageMatrix, EvalCase, EvalC
 import { coverageGapSchema, coverageMatrixSchema, storageIdSchema } from '../eval-set/schemas.js';
 import { evalCaseResultSchema, rootCauseHypothesisSchema } from '../judge/schemas.js';
 import { interactionActionSchema } from '../schemas/ux-evaluation.js';
-import { runVersionMetadataSchema } from '../test-agent/schemas.js';
+import { evidenceCompletenessSchema, runVersionMetadataSchema } from '../test-agent/schemas.js';
 import { writeTextAtomic } from '../utils/file-system.js';
 import { writeSchemaJsonAtomic } from '../utils/schema-file.js';
 
 export const adaptiveEvaluationReportSchema = z.object({
   reportId: storageIdSchema, projectId: storageIdSchema, generatedAt: z.iso.datetime(), executiveVerdict: z.enum(['can_continue', 'needs_attention', 'insufficient_evidence']), testedCaseIds: z.array(storageIdSchema), notTestedCaseIds: z.array(storageIdSchema), coverage: coverageMatrixSchema.nullable(), caseResults: z.array(evalCaseResultSchema),
-  journeys: z.array(z.object({ runId: storageIdSchema, caseId: storageIdSchema, actions: z.array(interactionActionSchema), finalState: z.string() }).strict()),
+  journeys: z.array(z.object({ runId: storageIdSchema, caseId: storageIdSchema, actions: z.array(interactionActionSchema), finalState: z.string(), evidenceCompleteness: evidenceCompletenessSchema }).strict()),
   failures: z.array(z.object({ caseId: storageIdSchema, summary: z.string().min(1), severity: z.enum(['P0','P1','P2','P3']), evidenceRefs: z.array(z.string()) }).strict()),
   inconclusiveCases: z.array(z.object({ caseId: storageIdSchema, summary: z.string().min(1), failureSource: z.string().nullable() }).strict()), confirmedFacts: z.array(z.string().min(1)), rootCauseHypotheses: z.array(rootCauseHypothesisSchema), newBadcaseIds: z.array(storageIdSchema), newRegressionCaseIds: z.array(storageIdSchema), passingCoverageGaps: z.array(coverageGapSchema), newChallengeCaseIds: z.array(storageIdSchema), recommendedNextActions: z.array(z.string().min(1)), authenticityNotice: z.string().min(1), versionMetadata: z.array(runVersionMetadataSchema),
 }).strict();
@@ -22,7 +22,7 @@ export function renderAdaptiveReportMarkdown(report: AdaptiveEvaluationReport): 
     ? `评测资产覆盖 ${Math.round(report.coverage.assetCoverageRatio * 100)}%；实际运行覆盖 ${Math.round(report.coverage.executionCoverageRatio * 100)}%；已验证覆盖 ${Math.round(report.coverage.verifiedCoverageRatio * 100)}%。\n\n${report.coverage.gaps.map((gap) => `- ${gap.reason}`).join('\n') || '没有未验证覆盖缺口。'}`
     : '尚无覆盖矩阵';
   const results = report.caseResults.map((item) => `${item.caseId}: ${item.verdict.toUpperCase()} — ${item.semantic.summary}`);
-  const journeys = report.journeys.map((item) => `${item.caseId}: ${item.actions.map((action) => action.outcome).join(' → ')}；最终：${item.finalState}`);
+  const journeys = report.journeys.map((item) => `${item.caseId}: ${item.actions.map((action) => action.outcome).join(' → ')}；最终：${item.finalState}；证据门禁：${item.evidenceCompleteness.complete ? '完整' : `不足（${item.evidenceCompleteness.missing.join('；')}）`}`);
   return `# EvalPilot Adaptive Evaluation Report\n\n## 1. Executive verdict\n\n${report.executiveVerdict}\n\n## 2. What was tested\n\n${lines(report.testedCaseIds, '本轮没有可验证运行。')}\n\n## 3. What was not tested\n\n${lines(report.notTestedCaseIds, '本轮计划案例均有结果。')}\n\n## 4. Coverage matrix\n\n${coverage}\n\n## 5. Case results\n\n${lines(results, '没有案例结果。')}\n\n## 6. AI user journeys\n\n${lines(journeys, '没有可复核的动作旅程。')}\n\n## 7. Failures\n\n${lines(report.failures.map((item) => `${item.caseId} [${item.severity}]: ${item.summary}`), '没有确认的产品失败。')}\n\n## 8. Inconclusive cases\n\n${lines(report.inconclusiveCases.map((item) => `${item.caseId}: ${item.summary}`), '没有无法判断案例。')}\n\n## 9. Confirmed facts\n\n${lines(report.confirmedFacts, '没有新增确认事实。')}\n\n## 10. Root cause hypotheses\n\n${lines(report.rootCauseHypotheses.map((item) => `${item.hypothesis}（置信度 ${Math.round(item.confidence * 100)}%；验证：${item.howToVerify.join('；')}）`), '没有证据支持的根因假设。')}\n\n## 11. New badcases\n\n${lines(report.newBadcaseIds, '没有新增 Badcase。')}\n\n## 12. Regression additions\n\n${lines(report.newRegressionCaseIds, '没有新增 Regression。')}\n\n## 13. Passing-case coverage gaps\n\n${lines(report.passingCoverageGaps.map((item) => `${item.dimension}:${item.missingValue} — ${item.reason}`), '没有新增覆盖缺口。')}\n\n## 14. New challenge cases\n\n${lines(report.newChallengeCaseIds, '没有新增 Challenge 候选。')}\n\n## 15. Recommended next actions\n\n${lines(report.recommendedNextActions, '保持当前证据并在下一版本复跑。')}\n\n## 16. Authenticity / uncertainty notice\n\n${report.authenticityNotice}\n`;
 }
 
@@ -37,7 +37,7 @@ export async function buildAdaptiveEvaluationReport(input: { outputDir: string; 
   const report = adaptiveEvaluationReportSchema.parse({
     reportId: `adaptive-report-${generatedAt.replace(/[:.]/g, '-')}`, projectId: input.projectId, generatedAt, executiveVerdict,
     testedCaseIds: input.results.map((item) => item.caseId), notTestedCaseIds, coverage: input.coverage, caseResults: input.results,
-    journeys: input.results.map((result) => { const packet = packetByRun.get(result.runId); return packet ? { runId: packet.runId, caseId: packet.caseId, actions: packet.actions, finalState: packet.finalState.visibleTextSummary } : null; }).filter((item): item is NonNullable<typeof item> => item !== null),
+    journeys: input.results.map((result) => { const packet = packetByRun.get(result.runId); return packet ? { runId: packet.runId, caseId: packet.caseId, actions: packet.actions, finalState: packet.finalState.visibleTextSummary, evidenceCompleteness: packet.evidenceCompleteness } : null; }).filter((item): item is NonNullable<typeof item> => item !== null),
     failures, inconclusiveCases,
     confirmedFacts: [...new Set(input.results.flatMap((item) => item.semantic.confirmedFacts))], rootCauseHypotheses: input.results.flatMap((item) => item.semantic.hypotheses),
     newBadcaseIds: (input.badcases ?? []).map((item) => item.badcaseId), newRegressionCaseIds: (input.regressionCases ?? []).map((item) => item.caseId), passingCoverageGaps: input.coverage?.gaps ?? [], newChallengeCaseIds: (input.challengeCases ?? []).map((item) => item.caseId), recommendedNextActions,

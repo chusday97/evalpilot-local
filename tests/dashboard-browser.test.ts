@@ -129,6 +129,8 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.locator('aside nav button').filter({ hasText: '运行' }).click();
     await page.getByText('推荐已经出现，但用户找不到保存或继续操作。', { exact: true }).waitFor({ state: 'visible' });
     expect(await page.getByText('推荐已经出现，但用户找不到保存或继续操作。', { exact: true }).isVisible()).toBe(true);
+    expect(await page.getByText('证据不足，不能判断产品好坏').isVisible()).toBe(true);
+    expect(await page.getByText('旧记录缺少逐步前后证据，不能补推验证结论。').isVisible()).toBe(true);
     expect(await page.getByText('没有找到保存或继续入口').isVisible()).toBe(true);
     await page.locator('aside nav button').filter({ hasText: '发现' }).click();
     await page.getByText('已确认事实', { exact: true }).waitFor({ state: 'visible' });

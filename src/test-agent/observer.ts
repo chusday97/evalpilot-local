@@ -26,7 +26,7 @@ function riskFor(element: RawElement): GroundedElement['risk'] {
   return 'safe';
 }
 
-export async function observePage(page: Page, evidenceRefs: string[] = []): Promise<PageObservation> {
+export async function observePage(page: Page, evidenceRefs: string[] = [], observationId = 'observation-standalone'): Promise<PageObservation> {
   const title = await page.title().catch(() => '');
   const headings = await page.locator('h1,h2,h3').allInnerTexts().catch(() => []);
   const visibleText = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 4_000);
@@ -76,6 +76,7 @@ export async function observePage(page: Page, evidenceRefs: string[] = []): Prom
     options: item.options,
   }] : []);
   return pageObservationSchema.parse({
+    observationId,
     pageUrl: page.url(),
     pagePurpose: headings[0] ?? title,
     visibleStateSummary: visibleText,
