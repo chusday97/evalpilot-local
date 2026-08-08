@@ -20,8 +20,8 @@ export type GuidedStepStatus = 'completed' | 'current' | 'waiting' | 'attention'
 
 export interface AgentCapabilities { workspaceDiscovery: boolean; directFix: boolean; taskPackageHandoff: boolean }
 export interface RuntimeCheck { status: 'ready' | 'missing' | 'blocked'; label: string; detail: string; recoveryAction: string | null }
-export interface RuntimeReadiness { packageVersion: string; contractVersion: '0.5.0'; platform: NodeJS.Platform; nodeVersion: string; dataRoot: string; checks: { node: RuntimeCheck; chromium: RuntimeCheck; git: RuntimeCheck; aiProvider: RuntimeCheck }; agents: AgentConnection[]; blockingIssues: string[]; recoveryActions: string[]; checkedAt: string }
-export interface DashboardHealth { status: 'ok'; packageVersion: string; contractVersion: '0.5.0'; capabilities: string[]; runtime: RuntimeReadiness }
+export interface RuntimeReadiness { packageVersion: string; contractVersion: '0.6.0'; platform: NodeJS.Platform; nodeVersion: string; dataRoot: string; checks: { node: RuntimeCheck; chromium: RuntimeCheck; git: RuntimeCheck; aiProvider: RuntimeCheck }; agents: AgentConnection[]; blockingIssues: string[]; recoveryActions: string[]; checkedAt: string }
+export interface DashboardHealth { status: 'ok'; packageVersion: string; contractVersion: '0.6.0'; capabilities: string[]; runtime: RuntimeReadiness }
 export interface GuidedFlowStep { id: Exclude<GuidedStepId, 'complete'>; title: string; description: string; status: GuidedStepStatus; actionLabel: string | null; route: string; anchor: string | null }
 export interface GuidedFlowState { projectId: string | null; currentStep: GuidedStepId; steps: GuidedFlowStep[]; updatedAt: string }
 

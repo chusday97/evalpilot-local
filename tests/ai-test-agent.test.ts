@@ -13,6 +13,10 @@ import { agentDecisionSchema } from '../src/test-agent/schemas.js';
 import { runAdaptiveCase } from '../src/evaluation/adaptive-evaluation-service.js';
 import { loadEvalSetCases } from '../src/eval-set/eval-set-store.js';
 import { loadLatestCoverageMatrix } from '../src/eval-set/coverage-store.js';
+import { listFindings } from '../src/findings/finding-store.js';
+import { markBadcaseFixed } from '../src/badcase/badcase-service.js';
+import { promoteFixedBadcaseToRegression } from '../src/badcase/regression-promoter.js';
+import { loadRegressionCases } from '../src/eval-set/regression-store.js';
 
 const now = '2026-08-01T09:00:00.000Z';
 
@@ -148,23 +152,67 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
     const evolvedCases = await loadEvalSetCases(outputDir);
     expect(evolvedCases.filter((item) => item.setType === 'challenge')).toHaveLength(3);
     expect(evolvedCases.filter((item) => item.setType === 'challenge').every((item) => item.status === 'candidate')).toBe(true);
-    expect((await loadLatestCoverageMatrix(outputDir)).gaps.some((gap) => gap.candidateCaseIds.length > 0)).toBe(true);
+    const coverage = await loadLatestCoverageMatrix(outputDir);
+    expect(coverage.gaps.some((gap) => gap.candidateCaseIds.length > 0)).toBe(true);
+    const candidateOnlyCells = coverage.cells.filter((cell) => cell.assetStatus === 'candidate');
+    expect(candidateOnlyCells.length).toBeGreaterThan(0);
+    expect(candidateOnlyCells.every((cell) => !cell.verified)).toBe(true);
     const packet = JSON.parse(await readFile(outcome.agentRun.evidencePacketPath, 'utf8')) as { versions: Record<string, unknown> };
     expect(packet.versions).toMatchObject({ targetAppGitSha: 'abc123', productModelVersion: 2, evalSetVersion: 3, caseVersion: 1, actorModel: 'evalpilot-mock-v1', judgeModel: 'evalpilot-mock-v1' });
     const markdown = await readFile(join(outputDir, 'reports', 'latest-evaluation.md'), 'utf8'); expect(markdown).toContain('## 16. Authenticity / uncertainty notice');
     await browser.close();
   });
 
-  it('reports a real dead click with screenshots and creates a Product Badcase', async () => {
+  it('keeps a low-confidence semantic failure as a Candidate Finding without creating a Badcase', async () => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.setContent('<main><h1>Draft</h1><button>Save</button></main>');
+    const candidateCase: EvalCase = {
+      ...evalCase(),
+      caseId: 'case-candidate-dead-click',
+      title: '检查保存反馈',
+      goal: '确认保存操作是否有清晰反馈',
+      oracle: { ...evalCase().oracle, deterministicAssertions: [] },
+    };
+    const provider = new MockAiProvider((providerRequest) => providerRequest.task === 'semantic_judge'
+      ? { verdict: 'fail', taskCompletion: 'failed', summary: '保存按钮可能没有产生反馈。', whatWorked: ['按钮可见'], whatFailed: ['未观察到明确保存状态'], whyItMatters: ['用户可能不确定是否保存'], confirmedFacts: ['页面仍显示 Draft'], hypotheses: [], unknowns: ['按钮是否触发后台请求未知'], evidenceRefs: ['screenshots/step-001-after.png'], confidence: 0.55 }
+      : { intentSummary: '尝试保存', action: 'click', targetElementId: 'E001', value: null, expectedResult: '出现保存反馈', confidence: 0.9 });
+    const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-adaptive-candidate-'));
+    const outcome = await runAdaptiveCase({ page, provider, outputDir, evalCase: candidateCase, productModel: model, existingCases: [candidateCase], startingUrl: page.url(), evalSetVersion: 1, now: () => new Date(now) });
+    expect(outcome.result).toMatchObject({ verdict: 'inconclusive', failureSource: 'unknown' });
+    expect(outcome.badcase).toBeNull();
+    expect(await listFindings(outputDir)).toEqual([expect.objectContaining({ caseId: candidateCase.caseId, status: 'candidate' })]);
+    await browser.close();
+  });
+
+  it('reports a real dead click, creates a Product Badcase, and promotes a passing retest to Regression', async () => {
     const browser = await chromium.launch({ headless: true }); const page = await browser.newPage(); await page.setContent('<main><h1>Draft</h1><button>Save</button></main>');
     const failedCase: EvalCase = { ...evalCase(), caseId: 'case-dead-click', title: '保存草稿', goal: '保存草稿', hypothesis: '点击保存后显示 Saved', oracle: { ...evalCase().oracle, expectedOutcome: ['显示 Saved'], mustObserve: ['Saved'], deterministicAssertions: [{ assertionId: 'assert-saved', type: 'text_visible', target: 'Saved', expected: true, negated: false }] } };
     const provider = new MockAiProvider((providerRequest) => providerRequest.task === 'semantic_judge'
       ? { verdict: 'fail', taskCompletion: 'failed', summary: '保存按钮点击后没有反馈。', whatWorked: ['保存按钮可见'], whatFailed: ['连续点击没有任何稳定变化'], whyItMatters: ['用户无法确认草稿是否保存'], confirmedFacts: ['按钮点击前后页面文字和 URL 均未变化'], hypotheses: [{ hypothesis: '按钮未连接保存动作', confidence: 0.7, supportingEvidence: ['浏览器步骤截图'], contradictingEvidence: [], howToVerify: ['检查 Save 点击处理器'] }], unknowns: ['后端是否收到请求未知'], evidenceRefs: ['screenshots/step-02.png'], confidence: 0.9 }
       : { intentSummary: '尝试保存', action: 'click', targetElementId: 'E001', value: null, expectedResult: '显示 Saved', confidence: 1 });
-    const outcome = await runAdaptiveCase({ page, provider, outputDir: await mkdtemp(join(tmpdir(), 'evalpilot-adaptive-fail-')), evalCase: failedCase, productModel: model, existingCases: [failedCase], startingUrl: page.url(), evalSetVersion: 1, now: () => new Date(now) });
+    const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-adaptive-fail-'));
+    const outcome = await runAdaptiveCase({ page, provider, outputDir, evalCase: failedCase, productModel: model, existingCases: [failedCase], startingUrl: page.url(), evalSetVersion: 1, now: () => new Date(now) });
     expect(outcome.agentRun.status).toBe('abandoned'); expect(outcome.result).toMatchObject({ verdict: 'fail', failureSource: 'product', severity: 'P1' });
     expect(outcome.badcase).toMatchObject({ caseId: 'case-dead-click', category: 'interaction', confirmedFacts: ['按钮点击前后页面文字和 URL 均未变化'] });
     expect(outcome.report.failures[0]?.evidenceRefs).toContain('screenshots/step-02.png');
+
+    await page.setContent('<main><h1>Draft</h1><button onclick="document.querySelector(\'main\').innerHTML=\'<h1>Saved</h1><p>Draft saved.</p>\'">Save</button></main>');
+    const retestProvider = new MockAiProvider((providerRequest) => {
+      if (providerRequest.task === 'semantic_judge') return { verdict: 'pass', taskCompletion: 'complete', summary: '保存后显示 Saved。', whatWorked: ['Saved 可见'], whatFailed: [], whyItMatters: [], confirmedFacts: ['Saved 可见'], hypotheses: [], unknowns: [], evidenceRefs: [], confidence: 0.95 };
+      const context = JSON.parse(providerRequest.userPrompt) as { observation: { visibleStateSummary: string } };
+      return context.observation.visibleStateSummary.includes('Draft saved')
+        ? { intentSummary: '保存成功', action: 'finish', targetElementId: null, value: null, expectedResult: 'Saved 可见', confidence: 1 }
+        : { intentSummary: '保存草稿', action: 'click', targetElementId: 'E001', value: null, expectedResult: 'Saved 可见', confidence: 1 };
+    });
+    const fixedAt = '2026-08-01T09:10:00.000Z';
+    const retest = await runAdaptiveCase({ page, provider: retestProvider, outputDir, evalCase: failedCase, productModel: model, existingCases: [failedCase], startingUrl: page.url(), evalSetVersion: 1, now: () => new Date(fixedAt) });
+    expect(retest.result).toMatchObject({ verdict: 'pass', failureSource: null });
+    const fixedBadcase = await markBadcaseFixed(outputDir, outcome.badcase!, fixedAt);
+    const promoted = await promoteFixedBadcaseToRegression({ outputDir, badcase: fixedBadcase, sourceCase: failedCase, passingRetest: retest.result, fixedAt });
+    expect(promoted.regressionCase).toMatchObject({ setType: 'regression', status: 'stable', regressionMetadata: { sourceRunId: outcome.result.runId } });
+    expect(promoted.badcase).toMatchObject({ fixStatus: 'fixed', regressionCaseId: promoted.regressionCase.caseId });
+    expect(await loadRegressionCases(outputDir)).toEqual([expect.objectContaining({ caseId: promoted.regressionCase.caseId })]);
     await browser.close();
   });
 });

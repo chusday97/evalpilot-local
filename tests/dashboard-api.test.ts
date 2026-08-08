@@ -17,7 +17,7 @@ describe('dashboard local data boundary', () => {
     expect(result.status).toBe(200);
     expect(result.body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({
       status: 'ok',
-      contractVersion: '0.5.0',
+      contractVersion: '0.6.0',
       capabilities: expect.arrayContaining(['guidance', 'structured_evidence', 'not_applicable_runs', 'adaptive_eval_set', 'hybrid_judge_assets', 'finding_triage']),
     }) }));
   });

@@ -1,6 +1,6 @@
 {
   "name": "evalpilot-local",
-  "version": "0.5.0-alpha.1",
+  "version": "0.6.0-alpha.0",
   "description": "Local, evidence-first pre-release evaluation CLI for web products",
   "type": "module",
   "bin": {
@@ -15,6 +15,7 @@
     "test": "vitest run",
     "test:browser": "EVALPILOT_BROWSER_TEST=1 vitest run tests/browser-evidence.test.ts",
     "test:runner": "EVALPILOT_BROWSER_TEST=1 vitest run tests/runner-browser.test.ts",
+    "test:ai-agent": "EVALPILOT_BROWSER_TEST=1 vitest run tests/ai-test-agent.test.ts tests/evidence-gate.test.ts tests/hybrid-judge.test.ts",
     "test:dashboard": "EVALPILOT_DASHBOARD_TEST=1 vitest run tests/dashboard-browser.test.ts tests/project-workspace.test.ts",
     "test:public-example": "node scripts/verify-public-example.mjs",
     "test:watch": "vitest",

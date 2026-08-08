@@ -1,6 +1,6 @@
 # EvalPilot Local 数据契约
 
-版本：0.5.0 + Next Phase 0；来源：用户提供的 EvalPilot Local MVP/v0.2 规格、v0.3 四步工作台方案、v0.4.1 小白引导方案、2026-07-18 对 GitHub Public Alpha、npm CLI、MIT 许可和真实能力收口方案的确认，以及 2026-08-01 确认的自适应 Eval Set 基础方案。后续字段变化必须先更新本文件和 `types.ts`。
+版本：0.6.0-alpha.0；来源：用户提供的 EvalPilot Local MVP/v0.2 规格、v0.3 四步工作台方案、v0.4.1 小白引导方案、2026-07-18 对 GitHub Public Alpha、npm CLI、MIT 许可和真实能力收口方案的确认，以及 2026-08-01 确认的自适应 Eval Set 与 Evaluator Accuracy Sprint 方案。后续字段变化必须先更新本文件和 `types.ts`。
 
 ## 1. 项目描述与边界
 
@@ -286,6 +286,13 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - `needsHumanReview=true` 的案例只能生成 `needs_human_review` Finding，不能自动确认 Product Failure。Provider、Schema、Trace 或工具错误保存为 `evaluator_failure`，不得冒充候选产品问题。
 - `Badcase` 创建接口必须同时收到状态为 `confirmed_product_failure`、且 `projectId/caseId/runId` 与运行结果一致的 Finding。原始 Semantic Fail 或手工构造的 `fail/product` 结果不能绕过该门禁。
 - Finding 状态变更必须原子写入且要求请求体 `{ "confirmed": true }`。确认产品失败会创建对应 Badcase；标记评测器失败或忽略不会创建 Badcase。
+
+### 10.2 Accuracy Sprint Phase 4 AI Agent CI 契约
+
+- 标准 Chromium CI 必须在安装浏览器并完成构建后执行 `npm run test:ai-agent`；该命令固定启用真实 Chromium，并运行 Agent、Evidence Gate 与 Hybrid Judge 测试。
+- 标准 CI 只能使用 `MockAiProvider`，不得依赖或读取真实 `EVALPILOT_OPENAI_API_KEY`。Mock 只替代结构化模型输出；Playwright 浏览器、DOM grounding、动作执行、before/after 截图、本地 Trace、Hybrid Judge、Finding、Badcase、Regression 与 Challenge 均使用真实运行代码。
+- CI 至少覆盖：表单完成 PASS、死点击确认失败、危险动作阻止、模型输出损坏产生 Evaluator Failure、Candidate Challenge 不增加 Verified Coverage、证据缺失不生成 Product Badcase、修复后同案例 PASS 晋升 Regression、PASS 生成 Challenge candidates。
+- `test:ai-agent` 任一失败必须使 `chromium-smoke` 失败；不得使用 `continue-on-error`、空 catch 或缺少浏览器时静默跳过。
 
 ## 11. EvalPilot Next Phase 3 Product Model 与 Baseline 契约
 

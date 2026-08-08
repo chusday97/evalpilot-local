@@ -48,5 +48,5 @@ export async function inspectRuntime(cwd: string, dataDir?: string | null): Prom
   const checks = { node, chromium: chromiumResult, git, aiProvider };
   const blockingIssues = Object.values(checks).filter((item) => item.status === 'blocked').map((item) => item.detail);
   const recoveryActions = [...new Set(Object.values(checks).flatMap((item) => item.recoveryAction ? [item.recoveryAction] : []))];
-  return { packageVersion: packageVersion(), contractVersion: '0.5.0', platform: process.platform, nodeVersion: process.versions.node, dataRoot: resolveDataRoot(cwd, dataDir), checks, agents, blockingIssues, recoveryActions, checkedAt: new Date().toISOString() };
+  return { packageVersion: packageVersion(), contractVersion: '0.6.0', platform: process.platform, nodeVersion: process.versions.node, dataRoot: resolveDataRoot(cwd, dataDir), checks, agents, blockingIssues, recoveryActions, checkedAt: new Date().toISOString() };
 }

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Changed the development version to `0.6.0-alpha.0` after the Phase 0–4 contracts, runtime, tests, and public documentation were aligned.
+- Added `test:ai-agent`, a Mock-Provider CI gate that runs real Chromium, DOM grounding, before/after screenshots, local Trace, Hybrid Judge, Finding, Badcase, Regression, and Challenge flows without a real OpenAI key.
+- Added browser acceptance cases for form PASS, dead click, blocked destructive action, malformed model output, Candidate Finding isolation, Candidate Challenge coverage isolation, missing-evidence Badcase prevention, and fixed-Badcase regression promotion.
+- Documented the stable Legacy Evaluation and experimental Adaptive Evaluation paths, including remote-model consent, optional screenshot authorization, and local-only evidence boundaries.
 - Added versioned Candidate Finding storage, explicit product/evaluator/dismiss triage actions, and a novice-facing Findings view that separates suspicious observations from confirmed product failures.
 - Changed single Semantic Fail results to `inconclusive/unknown` unless they pass deterministic, multi-evidence, repeated-stable-run, or explicit human-confirmation gates.
 - Restricted Badcase creation to persisted `confirmed_product_failure` Findings so evaluator errors, low-confidence judgments, and review-required cases cannot pollute regression assets.

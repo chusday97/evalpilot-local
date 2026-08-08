@@ -2,7 +2,7 @@
 
 EvalPilot Local 在你的电脑上评测 Web 产品：连接一个本地项目，模拟用户完成关键任务，保存截图与操作轨迹，并把问题整理成可交给 AI 编码工具的修复任务。代码和评测证据默认不离开本机。
 
-> Public Alpha `0.5.0-alpha.1`。正式验证平台为 macOS；Linux 为实验性支持，Windows 暂未承诺。
+> 当前源码版本 `0.6.0-alpha.0`；npm 已发布版本仍为 `0.5.0-alpha.1`。正式验证平台为 macOS；Linux 为实验性支持，Windows 暂未承诺。
 
 ## 三步开始
 
@@ -56,6 +56,23 @@ EvalPilot 分开显示“通过、失败、阻塞、不适用”。如果项目�
 
 问题详情包含：发生页面、失败步骤、目标控件、实际与期望路径、截图/Trace/控制台/网络证据、可能原因、建议修改和复测标准。推测不会被包装成已确认根因。
 
+## 两条评测路径
+
+| 路径 | 当前定位 | 适合谁 | 结论边界 |
+|---|---|---|---|
+| Legacy Evaluation | Public Alpha 的默认稳定流程 | 想按“项目 → 评测 → 问题 → 修复”完成检查的用户 | 延续现有确定性浏览器评测和报告 |
+| Experimental Adaptive Evaluation | `0.6.0-alpha.0` 的实验能力 | 想验证 AI 用户、Evidence Gate、Finding 和自适应 Eval Set 的开发者 | 只有稳定案例 PASS 且证据完整才增加“已验证覆盖”；单次低置信度语义失败只生成候选发现 |
+
+实验路径不会替换默认流程，也不代表当前已达到“可靠自主评测”。达到真实浏览器基准的准确率门禁前，结果仍需结合证据人工复核。
+
+### 实验 AI Provider 与授权
+
+- 远程模型仅用于 Experimental Adaptive Evaluation。启动 Dashboard 前通过终端环境变量提供 `EVALPILOT_OPENAI_API_KEY`；可用 `EVALPILOT_OPENAI_MODEL` 选择模型。不要把密钥写进项目或提交到 Git。
+- 每次运行都必须由用户明确授权远程模型；未授权时不会静默发起请求。
+- 默认只发送完成任务所需的最小可见文本和受限 DOM 上下文。截图默认关闭，只有本次运行显式同意后才会发送。
+- before/after 截图、Evidence Packet 和 Playwright Trace 保存在本机数据目录；Trace 不发送给远程模型，且关闭源码采集。
+- 标准 GitHub CI 使用 Mock Provider，不读取真实 OpenAI Key；Mock 仅替代模型回复，Chromium、DOM grounding、截图、Trace、Judge 和 Finding/Badcase 流程仍真实运行。
+
 ## 数据与隐私
 
 - 默认数据目录：`~/.evalpilot-local`
@@ -98,6 +115,7 @@ npm ci
 npm run check
 npm test
 npm run build
+npm run test:ai-agent
 ```
 
 发布包还需通过：

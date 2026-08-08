@@ -1,20 +1,19 @@
 # Roadmap
 
-## Now — Public Alpha
+## Now — Evaluator Accuracy Sprint Phase 0–4
 
-- GitHub 源码与 `evalpilot-local@alpha` npm CLI。
-- 可移植 Dashboard、`doctor`、显式 Chromium 安装和用户级数据目录。
-- 多项目隔离、核心评测、语义化历史、结构化问题证据。
-- Codex、Claude Code、Antigravity 和其他 Agent 均可消费标准任务包；不自动修改目标项目。
-- 完成 5 名外部首次使用者的 15 分钟测试：独立完成率至少 80%、中位耗时不超过 15 分钟、P0 为 0。
-- 使用第二个真实项目验证项目数据隔离，并完成一个人工确认问题的 Agent 任务包、测试和 before/after。
+- `0.6.0-alpha.0` 已完成覆盖真值模型、Evidence Gate、Finding 分级和真实 Chromium AI Agent CI。
+- 区分资产覆盖、运行覆盖和已验证覆盖；候选案例和不完整证据不能增加已验证覆盖。
+- 单次语义失败默认进入 Candidate Finding；只有门禁或人工确认后才能生成 Product Badcase。
+- GitHub CI 通过 Mock Provider 运行真实 Chromium、DOM grounding、截图、Trace、Hybrid Judge、Finding、Badcase、Regression 与 Challenge 闭环，不读取真实模型密钥。
+- Legacy Evaluation 继续作为默认流程；Adaptive Evaluation 保持实验性，不对外宣称“可靠自主评测”。
 
-## Next
+## Next — Phase 5–7（尚未开始）
 
-- 修复外部测试发现的 P0/P1，完成稳定版发行门禁并发布 `0.5.0`。
-- Codex 真实 before/after 验收通过后再启用受控直接执行。
-- Claude Code 的受控直接执行适配。
-- Antigravity CLI 的安全能力检查与受控直接执行。
+- Phase 5：语义步骤验证、确定性与语义合并规则，以及有界等待策略。
+- Phase 6：任务级 Product Model 与 Oracle Builder，推断业务规则必须人工审核。
+- Phase 7：至少 10 个真实浏览器夹具、每个运行三次，测量 Recall、Precision、FPR、失败来源准确率与一致性。
+- 指标达到 Recall ≥ 0.80、Precision ≥ 0.80、FPR ≤ 0.15、失败来源准确率 ≥ 0.85 前，不宣称可靠自主评测。
 
 ## Later
 

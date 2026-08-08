@@ -25,7 +25,7 @@ describe('portable runtime paths', () => {
     const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-runtime-'));
     const data = resolve(cwd, 'external-data');
     expect(resolveDataRoot(cwd, data)).toBe(data);
-    expect(packageVersion()).toBe('0.5.0-alpha.1');
+    expect(packageVersion()).toBe('0.6.0-alpha.0');
   });
 
   it('does not select or write a legacy workspace unless the user explicitly requests it', async () => {
