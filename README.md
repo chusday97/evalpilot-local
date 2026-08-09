@@ -12,21 +12,21 @@ It is built for teams and individual builders who want to answer a practical que
 
 **At a glance:** Local-first · Playwright / Chromium · Evidence Gate · Findings & Badcases · Regression · Agent handoff · Optional semantic verification
 
-[Quick start](#quick-start) · [Evaluation model](#evidence-first-evaluation) · [Agent handoff](#agent-handoff) · [Benchmarks](#benchmark--claim-boundaries) · [Security](#ai-provider--api-key-safety)
+[Quick start](#quick-start) · [Evaluation model](#evidence-first-evaluation) · [Agent handoff](#agent-handoff) · [Benchmarks](#benchmark--claim-boundaries) · [Privacy](#privacy--local-first-design)
 
 ![EvalPilot Local Dashboard](https://raw.githubusercontent.com/chusday97/evalpilot-local/main/docs/assets/dashboard.png)
 
 ## Why EvalPilot Exists
 
-Vibe-coded and AI-assisted products often reach a state where the feature technically exists, but the experience is still unreliable:
+AI-assisted products often reach a state where the feature technically exists, but the user journey is still unreliable:
 
 - buttons work on the happy path but fail on edge cases;
 - onboarding or multi-step tasks break midway;
 - the UI and underlying product state disagree;
-- an AI evaluator makes a plausible diagnosis without enough evidence;
-- a fix is suggested, but nobody can reproduce the original failure or verify the regression.
+- an evaluator makes a plausible diagnosis without enough evidence;
+- a fix is suggested, but the original failure cannot be reproduced or retested.
 
-EvalPilot treats product evaluation as an evidence pipeline rather than a one-shot LLM judgment.
+EvalPilot treats product evaluation as an **evidence pipeline** rather than a one-shot judgment.
 
 ```mermaid
 flowchart LR
@@ -43,7 +43,7 @@ flowchart LR
 
 ## What It Evaluates
 
-EvalPilot can exercise and inspect product behavior such as:
+EvalPilot can exercise and inspect:
 
 - page and route transitions;
 - buttons, forms, dialogs, and other interactive controls;
@@ -87,7 +87,7 @@ For a guided first run, see the [Public Alpha 15-minute test guide](docs/04-vali
 
 ## Evidence-First Evaluation
 
-A Finding is not treated as trustworthy just because an AI model produced a convincing explanation.
+A Finding is not treated as trustworthy just because a model produced a convincing explanation.
 
 EvalPilot separates:
 
@@ -103,9 +103,7 @@ Low-confidence semantic output cannot independently turn a case into a confirmed
 
 ### Legacy Evaluation
 
-The default Public Alpha workflow.
-
-Best for builders who want a stable path from:
+The default Public Alpha workflow:
 
 ```text
 Project → Evaluation → Findings → Evidence → Repair Task → Retest
@@ -128,52 +126,13 @@ This path does **not** imply that EvalPilot has reached reliable autonomous prod
 
 ## Product Understanding
 
-When explicitly enabled, EvalPilot can use a remote model to better understand the product's visible task structure.
+When explicitly enabled, EvalPilot can use model-assisted analysis to better understand the product's visible task structure.
 
-The request is intentionally restricted to task-relevant context such as:
-
-- routes;
-- visible titles and navigation;
-- buttons and forms;
-- limited visible DOM context;
-- documentation summaries.
-
-It does not intentionally send source code, local secrets, full Playwright Trace archives, or complete project contents as part of that understanding step.
-
-Any inferred business rule must remain reviewable rather than silently becoming ground truth.
-
-## AI Provider & API Key Safety
-
-Remote-model features are **optional** and used only when the user explicitly authorizes them for an experimental run.
-
-Provide credentials through your shell environment:
-
-```bash
-export EVALPILOT_OPENAI_API_KEY="<your-api-key>"
-export EVALPILOT_OPENAI_MODEL="<model-name>"
-```
-
-Never commit a real key to the repository.
-
-The repository ignores local `.env*` files (except an optional `.env.example`) and common private-key formats. Standard GitHub CI uses a Mock Provider and does not require a real OpenAI credential.
-
-### Data sent to a remote model
-
-By default, EvalPilot minimizes remote context. Screenshots remain opt-in for a specific run. Trace archives stay local.
-
-### Data kept local
-
-- source code;
-- local project files;
-- screenshots unless explicitly authorized for the relevant model step;
-- Playwright Trace archives;
-- Evidence Packets;
-- local evaluation data;
-- credentials and tokens.
+The analysis is restricted to task-relevant context such as routes, visible titles, navigation, controls, limited visible DOM context, and documentation summaries. Any inferred business rule remains reviewable rather than silently becoming ground truth.
 
 ## Agent Handoff
 
-EvalPilot is designed to produce repair context that an AI coding tool can act on without forcing the evaluator itself to become an autonomous code-changing agent.
+EvalPilot produces repair context that an AI coding tool can act on without forcing the evaluator itself to become an autonomous code-changing agent.
 
 A repair task can include:
 
@@ -181,12 +140,12 @@ A repair task can include:
 - exact failed step;
 - target control or route;
 - expected vs. actual behavior;
-- screenshots / Trace / console / network evidence references;
-- likely cause, clearly separated from confirmed evidence;
+- screenshot / Trace / console / network evidence references;
+- likely cause, separated from confirmed evidence;
 - suggested change area;
 - retest acceptance criteria.
 
-Public Alpha defaults to **task-package handoff** for Codex, Claude Code, Antigravity, and other coding agents. Automatic merge is not the default behavior.
+Public Alpha defaults to **task-package handoff** for coding agents. Automatic merge is not the default behavior.
 
 ## Benchmark & Claim Boundaries
 
@@ -204,7 +163,7 @@ The repository includes real-Chromium benchmark fixtures and tracks metrics such
 
 Current deterministic Mock Actor benchmarks validate evaluator orchestration and judge behavior. They **do not represent real-model accuracy**.
 
-Before claiming reliable autonomous evaluation, the roadmap requires external real-model validation to meet explicit quality gates, including Recall, Precision, false-positive rate, and failure-source accuracy thresholds.
+Before claiming reliable autonomous evaluation, the roadmap requires external real-model validation to meet explicit quality gates.
 
 See [ROADMAP.md](ROADMAP.md) for the current validation boundary.
 
@@ -212,13 +171,9 @@ See [ROADMAP.md](ROADMAP.md) for the current validation boundary.
 
 - Default data directory: `~/.evalpilot-local`
 - Custom directory: `evalpilot --data-dir /path/to/data dashboard`
-- Environment variable: `EVALPILOT_DATA_DIR=/path/to/data`
-- EvalPilot does not intentionally read `.env` files, credentials, tokens, Agent conversations, or Claude session JSONL.
 - Evaluation artifacts are not automatically uploaded.
 - Browser exploration avoids destructive actions such as delete, payment, send, or publish by default.
 - Share reports only after reviewing screenshots and visible page text for sensitive information.
-
-See [SECURITY.md](SECURITY.md) for the full security boundary.
 
 ## Architecture at a Glance
 
@@ -234,8 +189,6 @@ flowchart TB
   Findings --> Tasks[Repair Task Packages]
   Findings --> Regression[Regression Cases]
 ```
-
-The product is intentionally local-first: the browser, evidence store, reports, and task artifacts are designed to live on the user's machine unless a specific remote-model step is explicitly authorized.
 
 ## Common Commands
 
@@ -274,13 +227,6 @@ npm run test:product-understanding
 npm run test:real-benchmark
 ```
 
-Before publishing:
-
-```bash
-npm run audit:package
-npm run test:consumer
-```
-
 ## Current Status & Limitations
 
 EvalPilot Local is currently **Public Alpha**. Repository source version: `0.6.0-alpha.0`.
@@ -297,7 +243,6 @@ Current boundaries include:
 ## Documentation
 
 - [Public Alpha Test Guide](docs/04-validation/PUBLIC_ALPHA_TEST_GUIDE.md)
-- [Security](SECURITY.md)
 - [Roadmap](ROADMAP.md)
 - [Contributing](CONTRIBUTING.md)
 - [Support](SUPPORT.md)
