@@ -1,12 +1,65 @@
-# EvalPilot Local
+# EvalPilot Local — Evidence-First AI Product Evaluation for Web Apps
 
-EvalPilot Local 在你的电脑上评测 Web 产品：连接一个本地项目，模拟用户完成关键任务，保存截图与操作轨迹，并把问题整理成可交给 AI 编码工具的修复任务。代码和评测证据默认不离开本机。
+EvalPilot Local is a **local-first pre-release evaluation tool for web products**. It runs browser-based user tasks against a local app, captures reproducible evidence, classifies failures, and turns findings into repair-ready tasks for AI coding agents.
 
-> 当前源码版本 `0.6.0-alpha.0`；npm 已发布版本仍为 `0.5.0-alpha.1`。正式验证平台为 macOS；Linux 为实验性支持，Windows 暂未承诺。
+It is built for teams and individual builders who want to answer a practical question before shipping:
 
-## 三步开始
+> **Can a user actually complete the important task — and if not, what evidence shows where it broke?**
 
-需要 Node.js 20.19.0 或更高版本。
+**Core principles:** local-first, evidence before inference, deterministic signals before semantic judgment, and explicit boundaries around what AI is allowed to conclude.
+
+> 本地运行 Web 产品评测，模拟用户完成关键任务，保存截图 / Trace / 控制台 / 网络证据，并将问题整理成可复测、可交给 AI 编码工具的修复任务。
+
+**At a glance:** Local-first · Playwright / Chromium · Evidence Gate · Findings & Badcases · Regression · Agent handoff · Optional semantic verification
+
+[Quick start](#quick-start) · [Evaluation model](#evidence-first-evaluation) · [Agent handoff](#agent-handoff) · [Benchmarks](#benchmark--claim-boundaries) · [Privacy](#privacy--local-first-design)
+
+![EvalPilot Local Dashboard](https://raw.githubusercontent.com/chusday97/evalpilot-local/main/docs/assets/dashboard.png)
+
+## Why EvalPilot Exists
+
+AI-assisted products often reach a state where the feature technically exists, but the user journey is still unreliable:
+
+- buttons work on the happy path but fail on edge cases;
+- onboarding or multi-step tasks break midway;
+- the UI and underlying product state disagree;
+- an evaluator makes a plausible diagnosis without enough evidence;
+- a fix is suggested, but the original failure cannot be reproduced or retested.
+
+EvalPilot treats product evaluation as an **evidence pipeline** rather than a one-shot judgment.
+
+```mermaid
+flowchart LR
+  A[Local Web Product] --> B[User Task / Eval Case]
+  B --> C[Chromium Execution]
+  C --> D[Deterministic Signals]
+  C --> E[Optional Semantic Verification]
+  D --> F[Evidence Gate]
+  E --> F
+  F --> G[Finding]
+  G --> H[Badcase / Repair Task]
+  H --> I[Retest / Regression]
+```
+
+## What It Evaluates
+
+EvalPilot can exercise and inspect:
+
+- page and route transitions;
+- buttons, forms, dialogs, and other interactive controls;
+- multi-step user journeys;
+- expected vs. actual navigation paths;
+- browser console and network failures;
+- screenshots and Playwright Trace evidence;
+- deterministic success signals;
+- optional semantic verification for ambiguous UI states;
+- regression of previously identified badcases.
+
+Results distinguish **PASS**, **FAIL**, **BLOCKED**, and **NOT_APPLICABLE** instead of treating every missing capability as a product failure.
+
+## Quick Start
+
+Requires **Node.js 20.19.0+**.
 
 ```bash
 npm install --global evalpilot-local@alpha
@@ -14,84 +67,130 @@ evalpilot doctor
 evalpilot dashboard
 ```
 
-如果 `doctor` 显示 Chromium 缺失，在确认会下载浏览器后运行：
+If Chromium is missing:
 
 ```bash
 evalpilot setup --install-chromium --confirmed
 ```
 
-Dashboard 打开后，按照首页唯一高亮的下一步操作：
+Then follow the Dashboard flow:
 
 ```mermaid
 flowchart LR
-  A["1. 添加项目"] --> B["2. 运行核心评测"]
-  B --> C["3. 查看问题与证据"]
-  C --> D["4. 选择 AI 修复"]
-  D --> E["测试并复测后决定是否应用"]
+  A[Add project] --> B[Run evaluation]
+  B --> C[Inspect findings + evidence]
+  C --> D[Export repair task]
+  D --> E[Retest after changes]
 ```
 
-第一次使用时，你需要准备：被测项目文件夹、可访问的本地测试网址，以及该项目的启动命令。目标是在 15 分钟内打开第一份报告。
+For a guided first run, see the [Public Alpha 15-minute test guide](docs/04-validation/PUBLIC_ALPHA_TEST_GUIDE.md).
 
-如果你是首次使用者，可以按 [Public Alpha 15 分钟测试指南](https://github.com/chusday97/evalpilot-local/blob/main/docs/04-validation/PUBLIC_ALPHA_TEST_GUIDE.md) 完成一次不需要了解内部术语的验收。反馈前请先脱敏，不要上传源码、Trace、密钥或完整评测目录。
+## Evidence-First Evaluation
 
-## Dashboard
+A Finding is not treated as trustworthy just because a model produced a convincing explanation.
 
-![EvalPilot Local Dashboard](https://raw.githubusercontent.com/chusday97/evalpilot-local/main/docs/assets/dashboard.png)
+EvalPilot separates:
 
-首页用四步流程说明当前进度，右侧显示最近一次评测；评测完成后会自动进入对应报告，不需要识别内部运行编号。
+1. **Execution evidence** — what the browser actually did;
+2. **Deterministic signals** — route, DOM, control state, console/network evidence and explicit success conditions;
+3. **Semantic interpretation** — optional model-assisted judgment when the state cannot be resolved deterministically;
+4. **Evidence Gate** — whether the available evidence is strong enough to promote a candidate issue;
+5. **Finding / Badcase** — the reusable failure description and regression target.
 
-## Public Alpha 支持范围
+Low-confidence semantic output cannot independently turn a case into a confirmed product failure. When deterministic and semantic signals conflict, the system can report uncertainty rather than forcing a binary answer.
 
-| 能力 | Codex | Claude Code | Antigravity | 其他 Agent |
-|---|---|---|---|---|
-| 发现近期工作区 | 支持安全路径元数据 | 不读取会话文件，手动选文件夹 | 检测到公开工作区元数据时支持 | 手动选文件夹 |
-| 直接修改 | 暂不支持 | 暂不支持 | 暂不支持 | 暂不支持 |
-| 导出修复任务包 | 支持 | 支持 | 支持 | 支持 |
+## Two Evaluation Paths
 
-Public Alpha 尚未完成真实 Codex before/after 验收，因此所有 Agent 都只提供任务包交接，不会自动修改或合并代码。Claude Code 和 Antigravity 不会被静默转交给 Codex。未实现的竞品搜索不会显示在当前 Dashboard 或正式 API 中。
+### Legacy Evaluation
 
-## 评测结果是什么
+The default Public Alpha workflow:
 
-EvalPilot 分开显示“通过、失败、阻塞、不适用”。如果项目没有业务 API，API 异常案例会标记为“不适用”，页面、按钮、表单和用户路径评测仍会继续；“不适用”不计为产品失败。
+```text
+Project → Evaluation → Findings → Evidence → Repair Task → Retest
+```
 
-问题详情包含：发生页面、失败步骤、目标控件、实际与期望路径、截图/Trace/控制台/网络证据、可能原因、建议修改和复测标准。推测不会被包装成已确认根因。
+It focuses on deterministic browser evaluation and evidence-rich reporting.
 
-## 两条评测路径
+### Experimental Adaptive Evaluation
 
-| 路径 | 当前定位 | 适合谁 | 结论边界 |
-|---|---|---|---|
-| Legacy Evaluation | Public Alpha 的默认稳定流程 | 想按“项目 → 评测 → 问题 → 修复”完成检查的用户 | 延续现有确定性浏览器评测和报告 |
-| Experimental Adaptive Evaluation | `0.6.0-alpha.0` 的实验能力 | 想验证 AI 用户、Evidence Gate、Finding 和自适应 Eval Set 的开发者 | 只有稳定案例 PASS 且证据完整才增加“已验证覆盖”；单次低置信度语义失败只生成候选发现 |
+An experimental path for testing:
 
-实验路径不会替换默认流程，也不代表当前已达到“可靠自主评测”。达到真实浏览器基准的准确率门禁前，结果仍需结合证据人工复核。
+- AI-user style task execution;
+- Evidence Gate behavior;
+- adaptive Eval Set generation;
+- semantic step verification;
+- Product Understanding / Oracle generation;
+- Finding → Badcase → Regression workflows.
 
-`0.6.0-alpha.0` 的 Phase 5 会在每个动作后组合确定性信号和语义步骤验证：执行失败优先，两个验证器冲突时显示“无法判断”，低置信度语义结果不能单独判定成功。等待依据目标文字、页面变化、加载完成和网络空闲，并始终有超时上限；Persona 的耐心和重试次数使用明确字段，不再从描述文案数量猜测。
+This path does **not** imply that EvalPilot has reached reliable autonomous product evaluation. Candidate cases, incomplete evidence, or single low-confidence semantic failures do not increase verified coverage.
 
-Phase 6 可在生成实验评测集时选择“让 AI 深入理解用户任务”。系统只发送路由、可见标题/导航/按钮/表单和文档摘要，用它们拆分任务、对象生命周期、跨页旅程和具体成功信号；源码、截图、Trace、密钥和完整页面正文不会进入该请求。默认仍关闭 AI 理解；Provider 不可用时会明确说明并保留本地确定性生成。任何推断业务规则都会让案例进入人工审核，不能自动生成 Product Badcase。
+## Product Understanding
 
-Phase 7 增加 10 个可运行的本地 Web 应用基准，每个用真实 Chromium 重复 3 次，并分别统计任务完成率、Recall、Precision、误报率、问题分类、严重度、失败来源、不确定率和一致性。当前通过结果来自确定性 Mock Actor，用于验证评测器编排与 Judge，不代表真实模型已达到相同准确率，也不构成“可靠自主评测”声明。
+When explicitly enabled, EvalPilot can use model-assisted analysis to better understand the product's visible task structure.
 
-### 实验 AI Provider 与授权
+The analysis is restricted to task-relevant context such as routes, visible titles, navigation, controls, limited visible DOM context, and documentation summaries. Any inferred business rule remains reviewable rather than silently becoming ground truth.
 
-- 远程模型仅用于 Experimental Adaptive Evaluation。启动 Dashboard 前通过终端环境变量提供 `EVALPILOT_OPENAI_API_KEY`；可用 `EVALPILOT_OPENAI_MODEL` 选择模型。不要把密钥写进项目或提交到 Git。
-- 每次运行都必须由用户明确授权远程模型；未授权时不会静默发起请求。
-- 默认只发送完成任务所需的最小可见文本和受限 DOM 上下文。截图默认关闭，只有本次运行显式同意后才会发送。
-- before/after 截图、Evidence Packet 和 Playwright Trace 保存在本机数据目录；Trace 不发送给远程模型，且关闭源码采集。
-- 标准 GitHub CI 使用 Mock Provider，不读取真实 OpenAI Key；Mock 仅替代模型回复，Chromium、DOM grounding、截图、Trace、Judge 和 Finding/Badcase 流程仍真实运行。
+## Agent Handoff
 
-## 数据与隐私
+EvalPilot produces repair context that an AI coding tool can act on without forcing the evaluator itself to become an autonomous code-changing agent.
 
-- 默认数据目录：`~/.evalpilot-local`
-- 临时指定目录：`evalpilot --data-dir /path/to/data dashboard`
-- 环境变量：`EVALPILOT_DATA_DIR=/path/to/data`
-- 默认启动不会选择或写入旧项目内 `.evalpilot`。只读查看时可显式传入 `--data-dir .evalpilot`；迁移请在旧项目目录运行 `evalpilot migrate --confirmed`，原目录不会被覆盖。
-- 不读取 `.env`、密钥、Token、Agent 对话或 Claude 会话 JSONL。
-- 不自动上传代码、截图、Trace、日志或报告。
-- 浏览器探索默认不执行删除、支付、发送、发布等不可逆操作。
+A repair task can include:
 
-分享报告或任务包前，请检查页面文本和截图是否包含业务或个人信息。
+- failing user task;
+- exact failed step;
+- target control or route;
+- expected vs. actual behavior;
+- screenshot / Trace / console / network evidence references;
+- likely cause, separated from confirmed evidence;
+- suggested change area;
+- retest acceptance criteria.
 
-## 常用命令
+Public Alpha defaults to **task-package handoff** for coding agents. Automatic merge is not the default behavior.
+
+## Benchmark & Claim Boundaries
+
+The repository includes real-Chromium benchmark fixtures and tracks metrics such as:
+
+- task completion rate;
+- Recall;
+- Precision;
+- false-positive rate;
+- issue classification;
+- severity;
+- failure source;
+- uncertainty rate;
+- repeated-run consistency.
+
+Current deterministic Mock Actor benchmarks validate evaluator orchestration and judge behavior. They **do not represent real-model accuracy**.
+
+Before claiming reliable autonomous evaluation, the roadmap requires external real-model validation to meet explicit quality gates.
+
+See [ROADMAP.md](ROADMAP.md) for the current validation boundary.
+
+## Privacy & Local-First Design
+
+- Default data directory: `~/.evalpilot-local`
+- Custom directory: `evalpilot --data-dir /path/to/data dashboard`
+- Evaluation artifacts are not automatically uploaded.
+- Browser exploration avoids destructive actions such as delete, payment, send, or publish by default.
+- Share reports only after reviewing screenshots and visible page text for sensitive information.
+
+## Architecture at a Glance
+
+```mermaid
+flowchart TB
+  CLI[EvalPilot CLI] --> Dashboard[Local Dashboard]
+  CLI --> Runner[Evaluation Runner]
+  Runner --> Browser[Playwright / Chromium]
+  Browser --> Evidence[Evidence Collection]
+  Evidence --> Judge[Deterministic + Optional Semantic Judge]
+  Judge --> Gate[Evidence Gate]
+  Gate --> Findings[Findings / Badcases]
+  Findings --> Tasks[Repair Task Packages]
+  Findings --> Regression[Regression Cases]
+```
+
+## Common Commands
 
 ```bash
 evalpilot --version
@@ -102,17 +201,13 @@ evalpilot dashboard --port 4180
 evalpilot --data-dir /path/to/data dashboard
 ```
 
-底层分步 CLI（`init`、`scan`、`generate-background`、`generate-blueprint`、`generate-cases`、`run`、`report`）仍保留给需要调试流水线的开发者。
+Lower-level CLI steps remain available for debugging the evaluation pipeline:
 
-## 已知限制
+```text
+init → scan → generate-background → generate-blueprint → generate-cases → run → report
+```
 
-- Public Alpha 仍需要具备 Node.js 环境的开发者协助安装。
-- 只正式验证 macOS + Chromium。
-- Codex、Claude Code、Antigravity 当前只提供任务包交接，不会自动执行或自动合并。
-- 不提供云端账号、数据库、遥测或自动证据上传。
-- AI 模拟与工程证据不等于真实用户满意度或业务指标。
-
-## 从源码开发
+## Development
 
 ```bash
 git clone https://github.com/chusday97/evalpilot-local.git
@@ -121,20 +216,36 @@ npm ci
 npm run check
 npm test
 npm run build
+```
+
+Useful evaluation-specific tests:
+
+```bash
 npm run test:ai-agent
 npm run test:semantic-verifier
 npm run test:product-understanding
 npm run test:real-benchmark
 ```
 
-发布包还需通过：
+## Current Status & Limitations
 
-```bash
-npm run audit:package
-npm run test:consumer
-```
+EvalPilot Local is currently **Public Alpha**. Repository source version: `0.6.0-alpha.0`.
 
-参见 [贡献指南](CONTRIBUTING.md)、[安全说明](SECURITY.md)、[支持说明](SUPPORT.md) 和 [路线图](ROADMAP.md)。
+Current boundaries include:
+
+- macOS + Chromium is the formally validated environment;
+- Linux support remains experimental;
+- Windows is not yet a supported target;
+- external real-model benchmark coverage is still incomplete;
+- AI simulation and engineering evidence are not substitutes for real-user satisfaction or business metrics;
+- adaptive evaluation remains experimental and should be reviewed alongside its evidence.
+
+## Documentation
+
+- [Public Alpha Test Guide](docs/04-validation/PUBLIC_ALPHA_TEST_GUIDE.md)
+- [Roadmap](ROADMAP.md)
+- [Contributing](CONTRIBUTING.md)
+- [Support](SUPPORT.md)
 
 ## License
 
