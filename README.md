@@ -10,6 +10,10 @@ It is built for teams and individual builders who want to answer a practical que
 
 > 本地运行 Web 产品评测，模拟用户完成关键任务，保存截图 / Trace / 控制台 / 网络证据，并将问题整理成可复测、可交给 AI 编码工具的修复任务。
 
+**At a glance:** Local-first · Playwright / Chromium · Evidence Gate · Findings & Badcases · Regression · Agent handoff · Optional semantic verification
+
+[Quick start](#quick-start) · [Evaluation model](#evidence-first-evaluation) · [Agent handoff](#agent-handoff) · [Benchmarks](#benchmark--claim-boundaries) · [Security](#ai-provider--api-key-safety)
+
 ![EvalPilot Local Dashboard](https://raw.githubusercontent.com/chusday97/evalpilot-local/main/docs/assets/dashboard.png)
 
 ## Why EvalPilot Exists
