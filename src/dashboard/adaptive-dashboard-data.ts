@@ -1,19 +1,15 @@
 import { readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { AdaptiveRunSummary, Badcase, CandidateFinding, CoverageMatrix, DocumentEvidence, EvalCase, EvalSetDashboardSummary, EvalSetType, PageEvidence, ProductModel, RouteEvidence } from '../../types.js';
+import type { AdaptiveRunSummary, Badcase, CandidateFinding, CoverageMatrix, EvalCase, EvalSetDashboardSummary, EvalSetType, ProductModel } from '../../types.js';
 import type { AiProvider } from '../ai/provider.js';
-import { buildProductModel } from '../product-model/product-model-builder.js';
-import { understandProductTasks } from '../product-model/product-understanding-agent.js';
-import { listProductModelVersions, loadProductModel, saveProductModel } from '../product-model/product-model-store.js';
-import { generateAndSaveBaseline, generateAndSaveBaselineWithOracleBuilder } from '../eval-set/eval-set-generator.js';
-import { analyzeCoverage } from '../eval-set/coverage-analyzer.js';
-import { loadLatestCoverageMatrix, saveCoverageMatrix } from '../eval-set/coverage-store.js';
+import { listProductModelVersions, loadProductModel } from '../product-model/product-model-store.js';
+import { loadLatestCoverageMatrix } from '../eval-set/coverage-store.js';
 import { evalSetManifestPath, loadEvalCase, loadEvalSetCases, loadEvalSetManifest } from '../eval-set/eval-set-store.js';
 import { listBadcases, loadBadcase } from '../badcase/badcase-store.js';
 import { loadEvalCaseResult } from '../judge/eval-result-store.js';
 import { listFindings, loadFinding } from '../findings/finding-store.js';
-import { pathExists, readJsonFile, readYamlFile } from '../utils/file-system.js';
-import type { EvalBlueprint, ProjectBackground } from '../../types.js';
+import { pathExists } from '../utils/file-system.js';
+import { generateEvaluationFoundation } from '../evaluation/evaluation-foundation.js';
 
 const emptyCounts: Record<EvalSetType, number> = { baseline: 0, regression: 0, challenge: 0, exploratory: 0 };
 
@@ -82,37 +78,6 @@ export async function listAdaptiveRuns(outputDir: string): Promise<AdaptiveRunSu
 }
 
 export async function generateAdaptiveFoundation(input: { projectId: string; outputDir: string; provider?: AiProvider; allowRemoteModel?: boolean; generatedAt?: string }) {
-  const [background, blueprint, versions] = await Promise.all([
-    readYamlFile<ProjectBackground>(resolve(input.outputDir, 'project-background.yaml')),
-    readYamlFile<EvalBlueprint>(resolve(input.outputDir, 'eval-blueprint.yaml')),
-    listProductModelVersions(input.outputDir),
-  ]);
-  const generatedAt = input.generatedAt ?? new Date().toISOString();
-  const version = (versions.at(-1) ?? 0) + 1;
-  let model: ProductModel;
-  let generationMode: 'ai' | 'deterministic' | 'deterministic_fallback' = 'deterministic';
-  let warnings: string[] = [];
-  if (input.provider && input.allowRemoteModel === true) {
-    const evidenceDir = resolve(input.outputDir, 'evidence');
-    const [routes, pages, documents] = await Promise.all([
-      readJsonFile<RouteEvidence>(resolve(evidenceDir, 'routes.json')),
-      readJsonFile<PageEvidence[]>(resolve(evidenceDir, 'pages.json')),
-      readJsonFile<DocumentEvidence>(resolve(evidenceDir, 'documents.json')),
-    ]);
-    const understanding = await understandProductTasks({ projectId: input.projectId, background, blueprint, routes, pages, documents, provider: input.provider, existingUnknowns: background.unknowns, version, generatedAt, allowRemoteModel: true });
-    model = understanding.model;
-    generationMode = understanding.mode;
-    warnings = understanding.warnings;
-  } else {
-    model = buildProductModel({ projectId: input.projectId, background, blueprint, version, generatedAt });
-  }
-  await saveProductModel(input.outputDir, model);
-  const generated = input.provider && input.allowRemoteModel === true
-    ? await generateAndSaveBaselineWithOracleBuilder(input.outputDir, model, input.provider, { generatedAt, allowRemoteModel: true })
-    : { cases: await generateAndSaveBaseline(input.outputDir, model, generatedAt), oracleResults: [] };
-  const cases = generated.cases;
-  warnings = [...warnings, ...generated.oracleResults.flatMap((result) => result.warnings)];
-  const coverage = analyzeCoverage({ model, cases, generatedAt });
-  await saveCoverageMatrix(input.outputDir, coverage);
-  return { productModel: model, cases, coverage, summary: await evalSetSummary(input.outputDir), generationMode, warnings };
+  const foundation = await generateEvaluationFoundation(input);
+  return { ...foundation, summary: await evalSetSummary(input.outputDir) };
 }

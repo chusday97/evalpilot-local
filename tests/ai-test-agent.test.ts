@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
@@ -158,6 +158,9 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
     expect(candidateOnlyCells.length).toBeGreaterThan(0);
     expect(candidateOnlyCells.every((cell) => !cell.verified)).toBe(true);
     const packet = JSON.parse(await readFile(outcome.agentRun.evidencePacketPath, 'utf8')) as { versions: Record<string, unknown> };
+    const runDirectory = join(outputDir, 'runs', outcome.result.runId);
+    await expect(stat(join(runDirectory, 'agent-run.json'))).resolves.toBeTruthy();
+    await expect(stat(join(runDirectory, 'trace.zip'))).resolves.toBeTruthy();
     expect(packet.versions).toMatchObject({
       targetAppGitSha: 'abc123',
       productModelVersion: 2,

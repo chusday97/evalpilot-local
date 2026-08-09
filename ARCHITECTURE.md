@@ -25,6 +25,8 @@ Phase 6 Product Understanding 使用 Background、Blueprint 和有界的路由/�
 
 Phase 7 Real Evaluator Benchmark 将 10 个独立本地 Web 应用与单独保存的 Ground Truth 配对。运行器先生成案例并执行生产链路 AI Test Agent → Evidence Gate → Hybrid Judge → Finding Triage，预测完成后才读取 Ground Truth 计算指标，避免把标准答案泄露给 Actor 或 Judge。每个应用使用新的浏览器上下文重复 3 次；首轮固定为确定性 Mock Actor，以隔离 Judge 与分级链路的准确率。安全门禁阻止的危险任务记为 Evaluator Inconclusive，不能生成 Product Badcase。
 
+普通 Dashboard 的 `/evaluate` 现由 Evaluation Orchestrator 统一编排：复用扫描、Background 与 Blueprint，按需建立或读取 Product Model/Eval Set，依据 Quick/Core/Full 和所选功能选择案例，再顺序执行 AI Test Agent → Hybrid Judge → Finding Triage。每个 Evaluation Session 保存 selected Case、真实 run、Finding、Badcase、Coverage Matrix 与评测报告快照；没有配置 Provider 或没有逐次远程模型授权时，在创建 Session 前返回可恢复错误，不调用 Legacy Explorer。Legacy runtime 仅保留给旧记录、CLI 兼容和内部诊断。
+
 Finding Triage 位于 Hybrid Judge 与 Badcase 之间。单次 Semantic Fail 默认只保存到 `findings/v1/`，运行结果保持 Inconclusive；只有确定性硬失败、双类型强证据、stable Case 的重复同类失败或人工明确确认，才能转为 `confirmed_product_failure`。Badcase Store 会重新读取已持久化 Finding 校验谱系，原始模型输出不能直接写入回归资产。
 
 设计取舍：Legacy 生成器继续使用证据驱动的确定性规则。Experimental Adaptive Evaluation 可在逐次授权后调用 Product Understanding 与 Oracle Builder，但模型输出必须经过本地 Schema、证据白名单和人工审核门禁；开放式 Rubric 仍不能替代独立证据或人工判断。Phase 7 的内部阈值只约束受控基准，真实模型、外部项目与独立审查未通过前不升级对外可靠性承诺。

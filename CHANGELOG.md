@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+- Changed the normal Dashboard evaluation path to use Product Model → Eval Set selection → AI Test Agent → Hybrid Judge → Finding Triage instead of the Legacy Explorer.
+- Added a schema-validated Evaluation Orchestrator, Product Model-aware Quick/Core/Full selection, per-session Adaptive run/Finding/Badcase lineage, and immutable evaluation report snapshots.
+- Added an explicit AI Provider setup gate and per-run remote-model consent; missing configuration no longer silently falls back to Legacy or produces a substitute result.
+- Preserved old Evaluation Sessions through read-only `runtime=legacy` compatibility while new sessions persist `runtime=adaptive`, selected cases, coverage, authorization, and evidence lineage.
+- Added a local source-evidence fingerprint so Product Model/Eval Set assets are reused while evidence is unchanged and rebuilt after scan evidence changes.
+- Updated guided-flow routing to send completed Adaptive evaluations to real run/Finding evidence instead of the empty Legacy issue snapshot.
+- Fixed multi-case Adaptive evaluations so final Coverage is recomputed from every selected result and Evidence Packet instead of retaining only the last case's run evidence.
+- Serialized per-project Evaluation Session persistence so an immediate retry or concurrent progress update cannot collide on the atomic JSONL temporary file.
 - Added a Phase 7 real-browser evaluator benchmark with 10 runnable local Web apps, isolated Ground Truth, three fresh-context repetitions per fixture, and persisted reviewable predictions.
 - Added task completion, Recall, Precision, false-positive, category, severity, failure-source, inconclusive, and run-to-run consistency metrics with internal-only reliability gates.
 - Added `test:real-benchmark` to Chromium CI while keeping the existing 40 precomputed fixtures explicitly scoped as a rule-level unit benchmark.

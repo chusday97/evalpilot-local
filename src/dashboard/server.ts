@@ -110,7 +110,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
         status: 'ok',
         packageVersion: runtime.packageVersion,
         contractVersion: runtime.contractVersion,
-        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'adaptive_eval_set', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder'],
+        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'adaptive_eval_set', 'adaptive_default_evaluation', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder'],
         runtime,
         aiTestAgent: { configured: Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim()), provider: 'openai', screenshotDefault: false },
         aiProductUnderstanding: { configured: Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim()), provider: 'openai', defaultEnabled: false, screenshotInput: false },

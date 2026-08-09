@@ -18,7 +18,8 @@ describe('dashboard UI contract', () => {
     expect(source).toContain('选择 AI 修复');
     expect(source).toContain('应用这次已验证修复');
     expect(source).toContain('卡片名称、时间和结果会一起切换');
-    expect(source).toContain('项目没有业务 API 时，相关异常检查会标为“不适用”并继续');
+    expect(source).toContain('EvalPilot 不会偷偷退回旧评测，也不会生成假的完成结果');
+    expect(source).toContain('我同意本次使用已配置 AI 模型');
     expect(source).toContain('帮我找到最近项目');
     expect(source).toContain('打开 Mac 文件夹选择器');
     expect(source).toContain('已选择项目');

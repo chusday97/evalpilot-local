@@ -29,7 +29,7 @@ export async function runAdaptiveCase(input: {
   maxAgentSteps?: number;
   agentWaitTimeoutMs?: number;
   now?: () => Date;
-}): Promise<{ agentRun: Awaited<ReturnType<typeof runAiTestAgent>>; result: EvalCaseResult; badcase: Badcase | null; passAnalysis: PassAnalysis | null; report: Awaited<ReturnType<typeof buildAdaptiveEvaluationReport>> }> {
+}): Promise<{ agentRun: Awaited<ReturnType<typeof runAiTestAgent>>; result: EvalCaseResult; finding: Awaited<ReturnType<typeof triageEvalCaseFinding>>['finding']; badcase: Badcase | null; passAnalysis: PassAnalysis | null; report: Awaited<ReturnType<typeof buildAdaptiveEvaluationReport>> }> {
   const agentRun = await runAiTestAgent(input.page, input.evalCase, input.provider, { outputDir: input.outputDir, startingUrl: input.startingUrl, mode: 'task', maxSteps: input.maxAgentSteps, waitTimeoutMs: input.agentWaitTimeoutMs, targetAppCommit: input.targetAppGitSha ?? null, productModelVersion: input.productModel.version, evalSetVersion: input.evalSetVersion, judgeModel: input.provider.info.model, allowRemoteModel: input.allowRemoteModel, allowScreenshotToProvider: input.allowScreenshotToProvider, now: input.now });
   const packet = evidencePacketSchema.parse(JSON.parse(await readFile(agentRun.evidencePacketPath, 'utf8')));
   const rawJudgedResult = await judgeEvalCase({ outputDir: input.outputDir, evalCase: input.evalCase, packet, provider: input.provider, allowRemoteModel: input.allowRemoteModel, createdAt: agentRun.completedAt });
@@ -57,5 +57,5 @@ export async function runAdaptiveCase(input: {
   }
   await saveCoverageMatrix(input.outputDir, coverage);
   const report = await buildAdaptiveEvaluationReport({ outputDir: input.outputDir, projectId: input.evalCase.projectId, selectedCases: [input.evalCase], results: [result], packets: [packet], coverage, badcases: badcase ? [badcase] : [], challengeCases: passAnalysis?.challengeCandidates ?? [], generatedAt: agentRun.completedAt });
-  return { agentRun, result, badcase, passAnalysis, report };
+  return { agentRun, result, finding: triage.finding, badcase, passAnalysis, report };
 }

@@ -1,6 +1,6 @@
 # EvalPilot Local 数据契约
 
-版本：0.6.0-alpha.0；来源：用户提供的 EvalPilot Local MVP/v0.2 规格、v0.3 四步工作台方案、v0.4.1 小白引导方案、2026-07-18 对 GitHub Public Alpha、npm CLI、MIT 许可和真实能力收口方案的确认，以及 2026-08-01 确认的自适应 Eval Set 与 Evaluator Accuracy Sprint 方案。后续字段变化必须先更新本文件和 `types.ts`。
+版本：0.6.0-alpha.0；来源：用户提供的 EvalPilot Local MVP/v0.2 规格、v0.3 四步工作台方案、v0.4.1 小白引导方案、2026-07-18 对 GitHub Public Alpha、npm CLI、MIT 许可和真实能力收口方案的确认、2026-08-01 确认的自适应 Eval Set 与 Evaluator Accuracy Sprint 方案，以及 2026-08-09 确认的 One Evaluation Path Reset。后续字段变化必须先更新本文件和 `types.ts`。
 
 ## 1. 项目描述与边界
 
@@ -123,7 +123,7 @@ Dashboard 不得直接读写 YAML/JSONL；所有写操作经 Core 校验并原�
 | POST | `/api/projects/:id/activate` | `{ confirmed: true }` | `ProjectProfile` |
 | POST | `/api/projects/:id/start` | `{ confirmed: true, command? }` | `ProjectReadiness` |
 | GET | `/api/projects/:id/readiness` | 无 | `ProjectReadiness` |
-| POST/GET | `/api/evaluations` | `{ projectId, depth, capabilityIds }` | `EvaluationSession / EvaluationSession[]` |
+| POST/GET | `/api/evaluations` | POST `{ projectId, depth, capabilityIds, allowRemoteModel: true, allowScreenshot?: false }`；GET 按项目读取 | `EvaluationSession / EvaluationSession[]`；未配置 Provider 返回 `AI_PROVIDER_NOT_CONFIGURED`，不得静默回退 Legacy |
 | POST | `/api/evaluations/:id/retry` | `{ confirmed: true }` | 从失败阶段恢复的 `EvaluationSession` |
 | GET | `/api/evaluations/:id/events` | 无 | SSE `EvaluationEvent` |
 | GET | `/api/issues` | `projectId/evaluationId` query | `UxIssue[]` |
@@ -184,7 +184,10 @@ Dashboard 不得直接读写 YAML/JSONL；所有写操作经 Core 校验并原�
 - `ProjectRegistry`：`version, activeProjectId, projects`，位于 `.evalpilot/projects.json`。
 - `ProjectProfile`：项目身份、源码路径、目标 URL、输出目录、启动命令、状态和最近打开时间。项目列表另返回 `ProjectCardSummary`，包含最近评测时间/状态和 P0/P1 问题数。
 - `ProjectReadiness`：路径/URL/Git/脏工作区事实、启动建议、端口、目标服务指纹是否匹配、阻塞原因和可评测状态。`urlReachable` 只说明端口有响应，`targetVerified` 才说明响应与所选项目匹配。
-- `EvaluationSession`：深度、请求能力范围、计划能力、实际执行能力、四层覆盖摘要、流水线阶段、运行 ID、状态、错误和时间。旧记录缺少覆盖字段时只标记证据不完整，不根据名称反推已执行。
+- `EvaluationSession`：增加 `runtime`、`selectedCaseIds`、`coverageMatrix`、`findingIds`、`badcaseIds`、远程模型授权和截图授权；深度、请求/计划/实际执行能力、兼容覆盖摘要、流水线阶段、运行 ID、状态、错误和时间继续保留。旧记录缺少新字段时只按 `runtime=legacy` 兼容读取，不改写、不根据名称反推 Adaptive 证据。
+- `EvaluationOrchestratorInput`：`projectId`、`evaluationId`、`depth`、`capabilityIds`、`allowRemoteModel=true`、`allowScreenshot`；内部 `legacyFallback` 默认 `false`，普通 Dashboard 不可设置。
+- `EvaluationOrchestratorResult`：`evaluationId`、`selectedCaseIds`、`runIds`、真实 `EvalCaseResult[]`、`CandidateFinding[]`、`Badcase[]` 和 `CoverageMatrix`。默认路径固定为 Product Model → Eval Set → AI Test Agent → Hybrid Judge → Finding Triage；不得调用 Legacy Explorer。
+- `EvaluationFoundationState`：本地保存 `sourceFingerprint`、Product Model/Eval Set 版本和生成时间。扫描证据未变化时复用最新资产；指纹变化时才重新生成，不上传指纹或原始本地文件。
 - `EvaluationCapabilityCoverage`：每个功能保存入口、是否静态发现、是否有浏览器到达证据、执行状态、关联运行 ID 和未覆盖原因。
 - `EvaluationCoverageSummary`：汇总发现、计划、浏览器到达、已执行、通过、失败、阻塞、不适用和未运行数量；只有计划功能全部产生可信执行结果时 `complete=true`。
 - `capabilityNames` 是实际执行功能名称的兼容快照；`plannedCapabilityNames` 表示本轮原计划。评测名称、历史卡片和上线判断不得用计划范围冒充实际范围。

@@ -3,6 +3,7 @@ import type { EvalCase, EvalSetSelection, EvalSetType, EvaluationDepth } from '.
 const riskRank = { P0: 0, P1: 1, P2: 2, P3: 3 } as const;
 const typeRank: Record<EvalSetType, number> = { regression: 0, baseline: 1, challenge: 2, exploratory: 3 };
 
+/** @deprecated Normal Dashboard evaluations use evaluation-selector with Product Model importance. Kept for experimental API compatibility. */
 export function selectEvalSetCases(input: { cases: EvalCase[]; depth: EvaluationDepth; capabilityIds: string[]; challengeBudget?: number }): EvalSetSelection {
   const selectedIds = new Set(input.capabilityIds);
   const scoped = input.cases.filter((item) => item.status !== 'retired' && (selectedIds.size === 0 || selectedIds.has(item.capabilityId)));

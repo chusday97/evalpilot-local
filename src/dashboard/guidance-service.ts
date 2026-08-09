@@ -3,7 +3,7 @@ import type { GuidedFlowState, GuidedFlowStep, UxIssue } from '../../types.js';
 import { listFixTasks } from '../agents/fix-service.js';
 import { loadProjectRegistry } from '../projects/project-registry.js';
 import { pathExists, readJsonLinesFile } from '../utils/file-system.js';
-import { listEvaluationRecords } from './evaluation-manager.js';
+import { listEvaluationRecords, listEvaluations } from './evaluation-manager.js';
 
 function step(id: GuidedFlowStep['id'], title: string, description: string, route: string, anchor: string | null): GuidedFlowStep {
   return { id, title, description, status: 'waiting', actionLabel: null, route, anchor };
@@ -39,6 +39,26 @@ export async function buildGuidedFlow(cwd: string, requestedProjectId?: string):
   }
 
   steps[1] = { ...steps[1]!, status: 'completed', actionLabel: null };
+  const latestSession = (await listEvaluations(cwd, project.projectId)).find((item) => item.evaluationId === latest.evaluationId) ?? null;
+  if (latestSession?.runtime === 'adaptive') {
+    const firstRunId = latestSession.runIds[0];
+    steps[2] = {
+      ...steps[2]!,
+      title: '查看运行与发现',
+      description: '先看 AI 用户实际做了什么，再处理候选发现或已确认问题。',
+      route: firstRunId ? `/runs?runId=${encodeURIComponent(firstRunId)}` : '/runs',
+      anchor: null,
+      status: latest.issueCount > 0 ? 'current' : 'completed',
+      actionLabel: latest.issueCount > 0 ? '查看本次运行和发现' : null,
+    };
+    if (latest.issueCount === 0) {
+      steps[3] = { ...steps[3]!, status: 'completed', description: '本轮没有形成需要修复的确认问题；仍可继续补足覆盖。' };
+      return { projectId: project.projectId, currentStep: 'complete', steps, updatedAt: new Date().toISOString() };
+    }
+    steps[3] = { ...steps[3]!, route: '/findings', description: '先在“发现”中确认问题性质，再生成修复任务。' };
+    return { projectId: project.projectId, currentStep: 'issues', steps, updatedAt: new Date().toISOString() };
+  }
+
   const issuePath = resolve(project.outputDir, 'evaluations', latest.evaluationId, 'issues.jsonl');
   const issues = await pathExists(issuePath) ? await readJsonLinesFile<UxIssue>(issuePath) : [];
   const visibleIssues = issues.filter((issue) => issue.severity === 'P0' || issue.severity === 'P1');

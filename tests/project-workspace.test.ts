@@ -12,13 +12,21 @@ import { evaluationDepthOptions, evaluationSnapshot, listEvaluationRecords, rena
 
 const closers: Array<() => Promise<void>> = [];
 const exec = promisify(execFile);
-afterEach(async () => { delete process.env.EVALPILOT_DATA_DIR; while (closers.length) await closers.pop()?.(); });
+afterEach(async () => { delete process.env.EVALPILOT_DATA_DIR; delete process.env.EVALPILOT_OPENAI_API_KEY; while (closers.length) await closers.pop()?.(); });
 
 function useFixtureDataDir(cwd: string): void {
   process.env.EVALPILOT_DATA_DIR = resolve(cwd, '.evalpilot-data');
 }
 
 describe('multi-project workspace', () => {
+  it('does not create a default evaluation without a configured AI provider', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-provider-required-')); const target = resolve(cwd, 'target'); await mkdir(target);
+    useFixtureDataDir(cwd);
+    await writeFile(resolve(target, 'package.json'), JSON.stringify({ name: 'provider-fixture' }));
+    const project = await registerProject(cwd, { projectRoot: target, targetUrl: 'http://127.0.0.1:9' });
+    await expect(startEvaluation(cwd, { projectId: project.projectId, depth: 'core', capabilityIds: [], allowRemoteModel: true, allowScreenshot: false })).rejects.toMatchObject({ code: 'AI_PROVIDER_NOT_CONFIGURED' });
+  });
+
   it('registers two projects with isolated output directories and switches active project', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-workspace-'));
     useFixtureDataDir(cwd);
@@ -78,7 +86,8 @@ describe('multi-project workspace', () => {
     useFixtureDataDir(cwd);
     await writeFile(resolve(target, 'package.json'), JSON.stringify({ name: 'retry-fixture', scripts: { dev: 'vite' } }));
     const project = await registerProject(cwd, { projectRoot: target, targetUrl: 'http://127.0.0.1:9' });
-    const started = await startEvaluation(cwd, { projectId: project.projectId, depth: 'core', capabilityIds: [] });
+    process.env.EVALPILOT_OPENAI_API_KEY = 'test-only-key';
+    const started = await startEvaluation(cwd, { projectId: project.projectId, depth: 'core', capabilityIds: [], allowRemoteModel: true, allowScreenshot: false });
     for (let index = 0; index < 40 && evaluationSnapshot(started.evaluationId)?.session.status !== 'failed'; index += 1) await new Promise((wait) => setTimeout(wait, 25));
     expect(evaluationSnapshot(started.evaluationId)?.session.currentStage).toBe('readiness');
     expect(evaluationSnapshot(started.evaluationId)?.session.status).toBe('failed');
@@ -86,6 +95,18 @@ describe('multi-project workspace', () => {
     expect(['queued', 'running']).toContain(resumed.status);
     for (let index = 0; index < 40 && evaluationSnapshot(started.evaluationId)?.session.status !== 'failed'; index += 1) await new Promise((wait) => setTimeout(wait, 25));
     expect(evaluationSnapshot(started.evaluationId)?.session.error).toContain('测试网址尚未启动');
+  });
+
+  it('keeps failed Legacy evaluations read-only instead of retrying without current AI consent', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-legacy-retry-')); const target = resolve(cwd, 'target'); await mkdir(target);
+    useFixtureDataDir(cwd);
+    await writeFile(resolve(target, 'package.json'), JSON.stringify({ name: 'legacy-retry-fixture' }));
+    const project = await registerProject(cwd, { projectRoot: target, targetUrl: 'http://127.0.0.1:9' });
+    await mkdir(resolve(project.outputDir, 'evaluations'), { recursive: true });
+    const legacySession = { evaluationId: 'evaluation-legacy-failed', projectId: project.projectId, sequenceNumber: 1, depth: 'core', capabilityIds: [], capabilityNames: [], customName: null, competitorSnapshotIds: [], issueIds: [], status: 'failed', currentStage: 'run', stages: [{ name: 'run', status: 'failed', message: 'legacy failed' }], runIds: [], startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), error: 'legacy failed' };
+    await writeFile(resolve(project.outputDir, 'evaluations', 'sessions.jsonl'), `${JSON.stringify(legacySession)}\n`);
+
+    await expect(retryEvaluation(cwd, legacySession.evaluationId)).rejects.toMatchObject({ code: 'LEGACY_EVALUATION_READ_ONLY' });
   });
 
   it('returns understandable depth options and semantic evaluation records', async () => {
