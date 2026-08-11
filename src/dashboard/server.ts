@@ -19,7 +19,7 @@ import { loadDashboardOverview, readOptionalText, validateDashboardHost } from '
 import { getDashboardRun, pauseDashboardRun, resumeDashboardRun, startDashboardRun, stopDashboardRun, subscribeDashboardRun, type ManagedRunEvent } from './run-manager.js';
 import { evaluationDepthOptions, evaluationSnapshot, listEvaluationRecords, listEvaluations, renameEvaluation, retryEvaluation, startEvaluation, subscribeEvaluation } from './evaluation-manager.js';
 import { agentSnapshot, applyFix, createFixTask, listAgentRuns, listFixTasks, startAgent, subscribeAgent } from '../agents/fix-service.js';
-import { detectAgentConnections, discoverWorkspaceCandidates } from '../agents/agent-discovery.js';
+import { detectAgentConnections, discoverWorkspaceCandidates, PUBLIC_ALPHA_DIRECT_FIX_ENABLED } from '../agents/agent-discovery.js';
 import { workspaceCandidateRequestSchema } from '../schemas/workspace.js';
 import { buildGuidedFlow } from './guidance-service.js';
 import { presentIssue } from './issue-presenter.js';
@@ -120,7 +120,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
     const safeLegacyPost = pathname === '/api/workspace-candidates' || pathname === '/api/system/pick-directory' || pathname === '/api/connect/check' || /^\/api\/agents\/(codex|claude_code|antigravity)\/check$/.test(pathname);
     if (isLegacyDataRoot(cwd) && method !== 'GET' && !safeLegacyPost) return fail(409, 'LEGACY_DATA_READ_ONLY', '旧 .evalpilot 当前只能查看；请先运行 evalpilot migrate --confirmed。');
     if (method === 'GET' && pathname === '/api/guidance') { const query = new URLSearchParams(search); return ok(await buildGuidedFlow(cwd, query.get('projectId') ?? undefined)); }
-    if (method === 'GET' && pathname === '/api/agents') return ok(await detectAgentConnections(false));
+    if (method === 'GET' && pathname === '/api/agents') return ok(await detectAgentConnections(PUBLIC_ALPHA_DIRECT_FIX_ENABLED));
     const agentCheck = pathname.match(/^\/api\/agents\/(codex|claude_code|antigravity)\/check$/);
     if (method === 'POST' && agentCheck) {
       if (recordBody(body)?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '检查 Agent 登录状态前需要确认。');

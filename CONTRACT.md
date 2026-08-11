@@ -344,6 +344,15 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - 技术枚举、Session/Run ID、失败来源与严重度仅在默认折叠的“技术详情”中展示。证据区使用人话动作、实际结果和证据完整性说明，且 Trace 继续声明为仅本机保存。
 - 评测完成入口与 Guidance 必须跳转到 `/runs?evaluationId=<id>`；独立单案例运行可使用 `runId` 兼容查看，但不得冒充完整 Evaluation Session 结论。
 
+### 10.7 One Evaluation Path Phase 8 Codex 修复交接契约
+
+- 未启用直接修复时，问题页的唯一修复入口固定命名为“生成 Codex 修复任务”；确认弹窗必须说明只生成 `task.md` 与 `task.json`，不会自动修改代码。
+- 修复任务创建成功后必须进入携带精确 `fixTaskId` 的修复页，并聚焦该任务的交接说明；不得只显示短暂 Toast，也不得退化为泛化的最新任务。
+- 交接说明固定展示“修复任务已准备好”“EvalPilot 当前不会自动修改你的代码”，以及打开当前项目、使用任务、由 Codex 修改并测试、返回 EvalPilot、复测修复结果五个步骤。
+- Dashboard 只以 `GET /api/agents` 返回的 Codex `capabilities.directFix` 作为直修能力依据。该字段由服务端同时校验 `PUBLIC_ALPHA_DIRECT_FIX_ENABLED === true`、Codex 已安装且认证可用后生成。
+- “让 Codex 直接修复”只在上述 `directFix` 为 `true` 时显示；不可用时不得渲染禁用或诱导性按钮。Codex 任务交接继续使用既有 `POST /api/fix-tasks/:id/run`，其 `executionMode` 必须是 `handoff` 且不得修改目标项目。
+- Phase 8 不新增持久化实体或请求字段；`FixTask`、`AgentRun`、`AgentConnection` 及其 Zod Schema 保持不变。
+
 ### 10.4 Accuracy Sprint Phase 5 Semantic Verifier 契约
 
 - `EvalPersonaRef` 新增显式 Agent Policy：知识水平、耐心动作数、允许重试次数、隐私敏感度和退出条件。新案例必须写入全部字段；旧案例只在兼容读取时使用 `medium / 3 / 1 / medium / 证据不足时退出`，不得覆盖原文件。

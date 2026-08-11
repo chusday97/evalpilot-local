@@ -15,7 +15,11 @@ describe('dashboard UI contract', () => {
     expect(source).toContain('EmptyState');
     expect(source).toContain('ErrorPanel');
     expect(source).toContain('不代表真实用户满意度');
-    expect(source).toContain('选择 AI 修复');
+    expect(source).toContain('生成 Codex 修复任务');
+    expect(source).toContain('EvalPilot 当前不会自动修改你的代码');
+    expect(source).toContain('准备 Codex 交接');
+    expect(source).toContain('复测修复结果');
+    expect(source).toContain("codex?.capabilities?.directFix === true");
     expect(source).toContain('应用这次已验证修复');
     expect(source).toContain('卡片名称、时间和结果会一起切换');
     expect(source).toContain('EvalPilot 不会偷偷退回旧评测，也不会生成假的完成结果');

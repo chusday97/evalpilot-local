@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Clarified the Codex repair handoff: task creation now opens an object-specific five-step handoff screen, explicitly states that EvalPilot will not edit code, and hides direct repair unless the server confirms the guarded Codex capability.
 - Added automatically rebuilt, human-readable Eval Set, Product Badcase, and Evaluator Badcase documents while keeping schema-validated JSON as the sole source of truth.
 - Documented the separate Product and Evaluator badcase lifecycles and the rule that runtime evidence remains local and never enters GitHub or the npm package.
 - Fixed DOM-grounded actions so hidden elements cannot shift the visible element index, and preserved evidence-complete deterministic Product failures when the missing next action is itself the defect.

@@ -49,7 +49,7 @@ export async function detectAgentConnections(checkAuth = false, home = homedir()
     const blockers: string[] = [];
     if (provider === 'claude_code') blockers.push('Public Alpha 不读取 Claude 会话文件；请手动选择项目，修复使用任务包交接。');
     if (provider === 'antigravity') blockers.push('Public Alpha 尚未提供可证明安全范围的 Antigravity 直接修复；使用任务包交接。');
-    if (provider === 'codex') blockers.push('Public Alpha 尚未完成真实修复前后对比验收；当前只提供任务包交接。');
+    if (provider === 'codex' && !directFix) blockers.push('Public Alpha 尚未完成真实修复前后对比验收；当前只提供任务包交接。');
     if (!installed && !desktopInstalled) blockers.push(`没有检测到 ${labels[provider]}。`);
     return { provider, displayName: labels[provider], installed, desktopInstalled, version: command ? await commandVersion(command) : null, authStatus: checkedAuth, executionMode, capabilities: { workspaceDiscovery, directFix, taskPackageHandoff: true }, blockers, checkedAt };
   }));

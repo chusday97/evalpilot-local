@@ -69,7 +69,7 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     const homeSession = { evaluationId: 'evaluation-home', projectId: 'dashboard-fixture', sequenceNumber: 2, depth: 'core', capabilityIds: ['cap-recommend'], capabilityNames: ['首次推荐'], plannedCapabilityIds: ['cap-recommend'], plannedCapabilityNames: ['首次推荐'], executedCapabilityIds: ['cap-recommend'], executedCapabilityNames: ['首次推荐'], coverage, customName: null, competitorSnapshotIds: [], issueIds: ['ux-home-1'], status: 'completed', currentStage: 'report', stages: completedStages, runIds: ['run-home'], startedAt, completedAt, error: null };
     const resultSession = { evaluationId: 'evaluation-adaptive-result', projectId: 'dashboard-fixture', sequenceNumber: 1, runtime: 'adaptive', depth: 'core', capabilityIds: ['cap-recommend'], capabilityNames: ['首次推荐'], plannedCapabilityIds: ['cap-recommend'], plannedCapabilityNames: ['首次推荐'], executedCapabilityIds: ['cap-recommend'], executedCapabilityNames: ['首次推荐'], selectedCaseIds: [adaptiveCase.caseId], coverage: null, coverageMatrix: null, customName: null, competitorSnapshotIds: [], issueIds: [], findingIds: [], badcaseIds: [badcase.badcaseId], remoteModelAuthorized: true, screenshotAuthorized: false, status: 'completed', currentStage: 'report', stages: completedStages, runIds: [adaptiveResult.runId], startedAt: new Date(new Date(startedAt).getTime() - 60_000).toISOString(), completedAt, error: null };
     await writeFile(resolve(outputDir, 'evaluations', 'sessions.jsonl'), `${JSON.stringify(homeSession)}\n${JSON.stringify(resultSession)}\n`);
-    await writeFile(resolve(outputDir, 'evaluations', 'evaluation-home', 'issues.jsonl'), `${JSON.stringify({ issueId: 'ux-home-1', type: 'interaction_feedback_issue', severity: 'P1', featureId: '首次推荐', personaId: 'persona-new-user', caseId: 'case-home', userGoal: '获得推荐结果', idealPath: ['开始', '看到结果'], actualPath: ['开始', '没有反馈'], shortestReasonablePath: ['开始', '看到结果'], failureOrAbandonmentPoint: '提交后没有结果反馈，用户无法确认任务是否完成。', metrics: {}, evidence: ['trace.zip'], recommendation: '补充明确结果反馈', protectedSafetySteps: [], confidence: 'high', needsHumanReview: true, addedToRegression: false })}\n`);
+    await writeFile(resolve(outputDir, 'evaluations', 'evaluation-home', 'issues.jsonl'), `${JSON.stringify({ issueId: 'ux-home-1', type: 'interaction_feedback_issue', severity: 'P1', featureId: '首次推荐', personaId: 'persona-new-user', caseId: 'case-home', userGoal: '获得推荐结果', idealPath: ['开始', '看到结果'], actualPath: ['开始', '没有反馈'], shortestReasonablePath: ['开始', '看到结果'], failureOrAbandonmentPoint: '提交后没有结果反馈，用户无法确认任务是否完成。', metrics: { metricType: 'simulated_user_run', timeToFirstActionMs: 1, timeToFindEntryMs: 1, timeToFirstMeaningfulActionMs: 1, timeToCompleteMs: null, totalActions: 1, requiredActions: 2, redundantActions: 0, clickCount: 1, inputCount: 0, pageTransitions: 0, backtrackCount: 0, retryCount: 0, repeatedInputCount: 0, deadClickCount: 0, clarificationCount: 0, deadEndCount: 1, errorCount: 0, recoveryAttempts: 0, recoverySuccess: false, taskCompleted: false, fullLoopCompleted: false, abandoned: true, abandonmentReason: '没有结果反馈', finalConfidence: 'high' }, evidence: ['trace.zip'], recommendation: '补充明确结果反馈', protectedSafetySteps: [], confidence: 'high', needsHumanReview: true, addedToRegression: false, location: { page: '/recommend', stepIndex: 1, stepLabel: '提交推荐', target: '结果反馈区域', sourceFile: null }, evidenceItems: [], causeHypothesis: null, resolutionSteps: ['补充明确结果反馈'], verificationSteps: ['提交后显示结果或明确错误'] })}\n`);
     process.env.EVALPILOT_DATA_DIR = outputDir;
     const server = await startDashboardServer(cwd, 0, resolve(process.cwd(), 'dist-dashboard'));
     close = server.close;
@@ -99,7 +99,7 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.getByRole('button', { name: /添加项目/ }).first().click();
     expect(await page.getByRole('dialog', { name: '添加本地项目' }).isVisible()).toBe(true);
     await page.getByRole('button', { name: '取消' }).click();
-    for (const [path, heading] of [['/evaluate', '系统已经替你选好评测方案'], ['/issues', '评测发现了什么'], ['/fixes', '生成任务包，再交给 AI 修复']] as const) {
+    for (const [path, heading] of [['/evaluate', '系统已经替你选好评测方案'], ['/issues', '评测发现了什么'], ['/fixes', '把修复任务交给 Codex']] as const) {
       await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
       const title = page.getByRole('heading', { name: heading, exact: true });
       await title.waitFor({ state: 'visible' });
@@ -113,9 +113,19 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     expect(await page.getByRole('heading', { name: '实际运行 1 / 1 个计划功能' }).isVisible()).toBe(true);
     expect(await page.getByText('计划 1 · 实际运行 1').isVisible()).toBe(true);
     await page.getByRole('button', { name: '查看分步证据和解决方法' }).click();
-    expect(await page.getByText('这是一条旧记录，现有证据不能可靠定位到具体步骤。').isVisible()).toBe(true);
+    expect(await page.getByText('问题发生在这里').isVisible()).toBe(true);
     expect(await page.getByText('尚未定位到具体代码文件').isVisible()).toBe(true);
     await page.getByRole('button', { name: '返回问题列表' }).last().click();
+    await page.getByRole('button', { name: '生成 Codex 修复任务' }).first().click();
+    expect(await page.getByRole('dialog', { name: '生成 Codex 修复任务？' }).isVisible()).toBe(true);
+    expect(await page.getByText(/当前不会自动修改你的代码/).isVisible()).toBe(true);
+    await page.getByRole('button', { name: '确认生成任务' }).click();
+    await page.waitForTimeout(1_000);
+    if (!/\/fixes\?fixTaskId=.+#fix-handoff$/.test(page.url())) throw new Error((await page.locator('body').innerText()).slice(0, 2_000));
+    expect(await page.getByRole('heading', { name: '修复任务已准备好' }).isVisible()).toBe(true);
+    for (const step of ['在 Codex 中打开当前项目', '使用生成的修复任务', '让 Codex 修改并运行测试', '完成后返回 EvalPilot', '点击“复测修复结果”']) expect(await page.getByText(step, { exact: true }).isVisible()).toBe(true);
+    expect(await page.getByRole('button', { name: '让 Codex 直接修复' }).count()).toBe(0);
+    const handoffUrl = page.url();
     for (const [label, heading] of [['评测集', '评测集 v2'], ['运行', '已确认 1 个产品问题，需要处理后复测。'], ['发现', '问题发现'], ['回归', '回归与评测集演进']] as const) {
       await page.locator('aside nav button').filter({ hasText: label }).click();
       await page.getByRole('heading', { name: heading, exact: true }).first().waitFor({ state: 'visible' });
@@ -168,7 +178,7 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${baseUrl}/home`, { waitUntil: 'networkidle' });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    for (const path of ['/eval-set', '/runs?evaluationId=evaluation-adaptive-result', '/findings', '/regression']) {
+    for (const path of ['/eval-set', '/runs?evaluationId=evaluation-adaptive-result', '/findings', '/regression', new URL(handoffUrl).pathname + new URL(handoffUrl).search + new URL(handoffUrl).hash]) {
       await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
       expect(await page.evaluate(() => ({ root: document.documentElement.scrollWidth, viewport: window.innerWidth, buttons: [...document.querySelectorAll('main button')].filter((button) => { const rect = button.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && (rect.right > window.innerWidth + 1 || rect.left < -1); }).length }))).toEqual({ root: 390, viewport: 390, buttons: 0 });
     }
