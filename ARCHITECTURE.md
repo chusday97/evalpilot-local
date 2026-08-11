@@ -35,6 +35,8 @@ Phase 7 Real Evaluator Benchmark 将 10 个独立本地 Web 应用与单独保�
 
 Finding Triage 位于 Hybrid Judge 与 Badcase 之间。单次 Semantic Fail 默认只保存到 `findings/<findingId>.json`，运行结果保持 Inconclusive；旧 `findings/v1/` 只读兼容。只有确定性硬失败、双类型强证据、stable Case 的重复同类失败或人工明确确认，才能转为 `confirmed_product_failure`。Badcase Store 会重新读取已持久化 Finding 校验谱系，原始模型输出不能直接写入回归资产。
 
+Eval Set、Product Badcase 和 Evaluator Badcase Store 在完成 Schema 校验与 JSON 原子写入后，会分别重建 `EVAL_SET.md`、`BADCASES.md` 和 `EVALUATOR_BADCASES.md`。这些 Markdown 只提供人类可读视图，不是第二事实源；Product 与 Evaluator 谱系保持物理和语义隔离。运行时文档属于本地项目数据，不进入公开源码或 npm 包。
+
 One Evaluation Path Phase 5 将问题列表与修复服务统一到同一来源身份。Legacy 问题必须通过 `evaluationId + issueId` 从该次评测快照解析；Adaptive 路径使用已确认 Finding 或 Badcase。创建任务时完整来源会原子保存到任务目录的 `source-snapshot.json`，之后任务包、Agent 分支和复测都只使用这份快照。全局最新报告仅保留旧界面兼容，不能再改变已经创建的修复目标；缺少快照的旧任务会停止并要求从原评测重新创建。
 
 One Evaluation Path Phase 6 增加纯函数 Next Action Engine。它只接收指定 Evaluation Session 的 Case、Result、Evidence Packet、Finding、Badcase 和 FixTask 谱系，并按照“运行中 → 已确认失败的修复生命周期 → 人工判断 → 评测器重跑 → 未运行案例 → 无动作”的固定优先级返回 exactly one `EvaluationNextAction`。报告快照保存当时的推荐，`GET /api/evaluations/:id/next-action` 则按指定评测实时重算；零个 confirmed Product Failure 时，决策引擎不会推荐创建修复、复测修复或加入回归。

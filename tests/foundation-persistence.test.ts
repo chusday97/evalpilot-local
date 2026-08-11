@@ -12,6 +12,7 @@ import type {
 } from '../types.js';
 import { loadBadcase, listBadcases, saveBadcase } from '../src/badcase/badcase-store.js';
 import { badcaseSchema } from '../src/badcase/schemas.js';
+import { evalSetDocumentPath, productBadcaseDocumentPath } from '../src/documentation/asset-documents.js';
 import { loadLatestCoverageMatrix, saveCoverageMatrix } from '../src/eval-set/coverage-store.js';
 import { loadEvalCase, loadEvalSetCases, loadEvalSetManifest, saveEvalCase } from '../src/eval-set/eval-set-store.js';
 import { coverageMatrixSchema, evalCaseSchema } from '../src/eval-set/schemas.js';
@@ -108,6 +109,10 @@ describe('EvalPilot Next Phase 0 persistence', () => {
     expect(await loadEvalCaseResult(outputDir, 'run-create')).toEqual(evalResult());
     expect(await loadBadcase(outputDir, 'badcase-create')).toEqual(badcase());
     expect(await listBadcases(outputDir)).toEqual([badcase()]);
+    expect(await readFile(evalSetDocumentPath(outputDir), 'utf8')).toContain('新用户完成首次创建');
+    expect(await readFile(evalSetDocumentPath(outputDir), 'utf8')).toContain('基础案例');
+    expect(await readFile(productBadcaseDocumentPath(outputDir), 'utf8')).toContain('提交后没有结果');
+    expect(await readFile(productBadcaseDocumentPath(outputDir), 'utf8')).toContain('Candidate Finding 和 Evaluator Failure 不会进入本清单');
     expect(await loadLatestCoverageMatrix(outputDir)).toEqual(coverage());
     expect((await readdir(resolve(outputDir, 'coverage', 'history'))).filter((name) => name.endsWith('.json'))).toHaveLength(1);
   });

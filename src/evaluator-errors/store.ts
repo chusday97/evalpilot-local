@@ -5,6 +5,7 @@ import { storageIdSchema } from '../eval-set/schemas.js';
 import { pathExists } from '../utils/file-system.js';
 import { readSchemaJson, writeSchemaJsonAtomic } from '../utils/schema-file.js';
 import { evaluatorBadcaseSchema } from './schemas.js';
+import { writeEvaluatorBadcaseDocument } from '../documentation/asset-documents.js';
 
 const STORAGE_VERSION = 'v1';
 
@@ -13,7 +14,9 @@ export function evaluatorBadcasePath(outputDir: string, evaluatorBadcaseId: stri
 }
 
 export async function saveEvaluatorBadcase(outputDir: string, badcase: EvaluatorBadcase): Promise<EvaluatorBadcase> {
-  return writeSchemaJsonAtomic(evaluatorBadcasePath(outputDir, badcase.evaluatorBadcaseId), badcase, evaluatorBadcaseSchema);
+  const saved = await writeSchemaJsonAtomic(evaluatorBadcasePath(outputDir, badcase.evaluatorBadcaseId), badcase, evaluatorBadcaseSchema);
+  await writeEvaluatorBadcaseDocument(outputDir, await listEvaluatorBadcases(outputDir));
+  return saved;
 }
 
 export async function loadEvaluatorBadcase(outputDir: string, evaluatorBadcaseId: string): Promise<EvaluatorBadcase> {

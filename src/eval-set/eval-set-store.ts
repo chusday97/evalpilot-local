@@ -3,6 +3,7 @@ import type { EvalCase, EvalSetManifest, EvalSetType } from '../../types.js';
 import { pathExists } from '../utils/file-system.js';
 import { readSchemaJson, writeSchemaJsonAtomic } from '../utils/schema-file.js';
 import { evalCaseSchema, evalSetManifestSchema, evalSetTypeSchema, storageIdSchema } from './schemas.js';
+import { writeEvalSetDocument } from '../documentation/asset-documents.js';
 
 export function evalSetManifestPath(outputDir: string): string {
   return resolve(outputDir, 'eval-sets', 'manifest.json');
@@ -40,13 +41,14 @@ export async function saveEvalCase(outputDir: string, evalCase: EvalCase): Promi
     version: savedCase.version,
     updatedAt: savedCase.updatedAt,
   }].sort((left, right) => left.caseId.localeCompare(right.caseId));
-  await saveEvalSetManifest(outputDir, {
+  const manifest = await saveEvalSetManifest(outputDir, {
     projectId: savedCase.projectId,
     version: (existing?.version ?? 0) + 1,
     generatedAt: existing?.generatedAt ?? now,
     updatedAt: now,
     cases,
   });
+  await writeEvalSetDocument(outputDir, manifest, await loadEvalSetCases(outputDir));
   return savedCase;
 }
 

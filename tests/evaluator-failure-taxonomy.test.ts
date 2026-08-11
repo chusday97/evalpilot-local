@@ -1,4 +1,4 @@
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,6 +6,7 @@ import type { AiTestAgentRun, EvalCase, EvalCaseResult, EvaluatorFailureCategory
 import { classifyEvaluatorFailure, EVALUATOR_FAILURE_POSSIBLE_REASONS, EVALUATOR_FAILURE_USER_SUMMARY, evaluatorBadcaseFrom, evaluatorFailureResult } from '../src/evaluator-errors/classifier.js';
 import { evaluatorBadcaseSchema } from '../src/evaluator-errors/schemas.js';
 import { listEvaluatorBadcases, loadEvaluatorBadcase, saveEvaluatorBadcase } from '../src/evaluator-errors/store.js';
+import { evaluatorBadcaseDocumentPath } from '../src/documentation/asset-documents.js';
 import { triageEvalCaseFinding } from '../src/findings/finding-triage.js';
 
 const now = '2026-08-11T08:00:00.000Z';
@@ -77,5 +78,8 @@ describe('Evaluator Failure taxonomy', () => {
     await saveEvaluatorBadcase(outputDir, badcase);
     expect(await loadEvaluatorBadcase(outputDir, badcase.evaluatorBadcaseId)).toEqual(badcase);
     expect(await listEvaluatorBadcases(outputDir)).toEqual([badcase]);
+    const document = await readFile(evaluatorBadcaseDocumentPath(outputDir), 'utf8');
+    expect(document).toContain(badcase.evaluatorBadcaseId);
+    expect(document).toContain('它们不属于产品问题');
   });
 });

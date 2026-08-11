@@ -5,13 +5,16 @@ import { pathExists } from '../utils/file-system.js';
 import { readSchemaJson, writeSchemaJsonAtomic } from '../utils/schema-file.js';
 import { badcaseSchema } from './schemas.js';
 import { storageIdSchema } from '../eval-set/schemas.js';
+import { writeProductBadcaseDocument } from '../documentation/asset-documents.js';
 
 export function badcasePath(outputDir: string, badcaseId: string): string {
   return resolve(outputDir, 'badcases', `${storageIdSchema.parse(badcaseId)}.json`);
 }
 
 export async function saveBadcase(outputDir: string, badcase: Badcase): Promise<Badcase> {
-  return writeSchemaJsonAtomic(badcasePath(outputDir, badcase.badcaseId), badcase, badcaseSchema);
+  const saved = await writeSchemaJsonAtomic(badcasePath(outputDir, badcase.badcaseId), badcase, badcaseSchema);
+  await writeProductBadcaseDocument(outputDir, await listBadcases(outputDir));
+  return saved;
 }
 
 export async function loadBadcase(outputDir: string, badcaseId: string): Promise<Badcase> {

@@ -463,3 +463,12 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - `AdaptiveEvaluationReport` 固定保存 16 个语义区块：执行结论、已测、未测、覆盖矩阵、案例结果、AI 用户旅程、失败、无法判断、已确认事实、根因假设、新 Badcase、新 Regression、PASS 后缺口、新 Challenge、建议下一步、真实性/不确定性声明。
 - `executiveVerdict` 只有在没有产品失败、没有无法判断、没有未运行且没有高优先级 Coverage Gap 时才可为 `can_continue`；否则分别使用 `needs_attention` 或 `insufficient_evidence`。
 - JSON 与 Markdown 同源生成并原子保存到 `reports/latest-evaluation.json|md`；版本元数据从每个 Evidence Packet 复制，不重新推断。
+
+## 20. Eval Set 与 Badcase 可读文档契约
+
+- Eval Set、Product Badcase 与 Evaluator Badcase 的 JSON 仍是机器可读事实源；Markdown 只是可随时重建的只读派生产物，不增加或反向修改业务数据。
+- 每次成功保存 `EvalCase` 后，必须同步重建 `eval-sets/EVAL_SET.md`；内容至少包含集合、状态、风险、用户目标、Oracle 通过标准、无法判断条件、覆盖维度和 Regression 来源。
+- 每次成功保存已确认的 Product `Badcase` 后，必须同步重建 `badcases/BADCASES.md`。Candidate Finding、Evaluator Failure 和未确认语义失败不得进入该文档。
+- 每次保存 `EvaluatorBadcase` 后，必须同步重建 `evaluator-badcases/EVALUATOR_BADCASES.md`；该文档必须明确这些记录属于评测器自身问题，不是产品 Bug，也不进入 Product Regression。
+- 派生文档写入失败必须向调用方返回错误，不能静默吞掉；已经完成原子写入的 JSON 事实源保持可恢复，下一次保存可重新生成文档。
+- 上述运行时文档保存在项目独立的本地数据目录，受 `.evalpilot` / 用户数据目录边界保护，不进入 npm 包或 GitHub。公开仓库只保存文档规则、脱敏测试夹具和可复现验证方法。

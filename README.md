@@ -69,6 +69,8 @@ EvalPilot 分开显示“通过、失败、阻塞、不适用”。如果项目�
 
 Phase 6 可在生成实验评测集时选择“让 AI 深入理解用户任务”。系统只发送路由、可见标题/导航/按钮/表单和文档摘要，用它们拆分任务、对象生命周期、跨页旅程和具体成功信号；源码、截图、Trace、密钥和完整页面正文不会进入该请求。默认仍关闭 AI 理解；Provider 不可用时会明确说明并保留本地确定性生成。任何推断业务规则都会让案例进入人工审核，不能自动生成 Product Badcase。
 
+评测运行会持续维护本地 Eval Set、已确认 Product Badcase 和 Evaluator Badcase，并自动生成对应的可读 Markdown。两类 Badcase 永不混用，运行证据也不会上传到仓库。维护边界和检查方法见 [Eval Set 与 Badcase 维护规则](docs/EVAL_SET_AND_BADCASES.md)。
+
 Phase 7 增加 10 个可运行的本地 Web 应用基准，每个用真实 Chromium 重复 3 次，并分别统计任务完成率、Recall、Precision、误报率、问题分类、严重度、失败来源、不确定率和一致性。当前通过结果来自确定性 Mock Actor，用于验证评测器编排与 Judge，不代表真实模型已达到相同准确率，也不构成“可靠自主评测”声明。
 
 ### 实验 AI Provider 与授权
