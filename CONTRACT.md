@@ -128,7 +128,7 @@ Dashboard 不得直接读写 YAML/JSONL；所有写操作经 Core 校验并原�
 | GET | `/api/evaluations/:id/events` | 无 | SSE `EvaluationEvent` |
 | GET | `/api/issues` | `projectId/evaluationId` query | `UxIssue[]` |
 | POST | `/api/issues/:id/dismiss` | `{ confirmed: true }` | `UxIssue` |
-| POST/GET | `/api/fix-tasks` | `{ projectId, issueId, confirmed: true }` | `FixTask / FixTask[]` |
+| POST/GET | `/api/fix-tasks` | Legacy 问题 `{ projectId, evaluationId, issueId, confirmed: true }`；Adaptive Finding `{ projectId, findingId, confirmed: true }`；Badcase `{ projectId, badcaseId, confirmed: true }` | `FixTask / FixTask[]` |
 | POST | `/api/fix-tasks/:id/run` | `{ confirmed: true, adapter }` | `AgentRun` |
 | GET | `/api/fix-tasks/:id/agent-runs` | 无 | `AgentRun[]` |
 | GET | `/api/agent-runs/:id/events` | 无 | SSE `AgentEvent` |
@@ -191,7 +191,8 @@ Dashboard 不得直接读写 YAML/JSONL；所有写操作经 Core 校验并原�
 - `EvaluationCapabilityCoverage`：每个功能保存入口、是否静态发现、是否有浏览器到达证据、执行状态、关联运行 ID 和未覆盖原因。
 - `EvaluationCoverageSummary`：汇总发现、计划、浏览器到达、已执行、通过、失败、阻塞、不适用和未运行数量；只有计划功能全部产生可信执行结果时 `complete=true`。
 - `capabilityNames` 是实际执行功能名称的兼容快照；`plannedCapabilityNames` 表示本轮原计划。评测名称、历史卡片和上线判断不得用计划范围冒充实际范围。
-- `FixTask`：问题、任务包、基线提交、允许范围、验收命令和复测案例；旧分支/worktree/verification 字段仅兼容读取。
+- `FixSourceSnapshot`：创建修复任务时从 `evaluations/<evaluationId>/issues.jsonl`、已确认 Finding 或 Badcase 捕获的不可变来源；保存来源类型、精确身份、捕获时间和完整原始载荷。
+- `FixTask`：不可变来源快照路径、问题身份、任务包、基线提交、允许范围、验收命令和复测案例；创建后不得重新解析全局 `reports/ux-issues.jsonl`。旧分支/worktree/verification 字段仅兼容读取。
 - `AgentRun`：Agent 适配器、独立分支/worktree、状态、日志、修改文件、验证、退出码和错误。
 - `FixVerification`：测试结果、before/after、安全约束、应用门禁和阻塞项。
 
@@ -235,7 +236,7 @@ product-model/product-model.v<version>.json
 eval-sets/manifest.json
 eval-sets/<baseline|regression|challenge|exploratory>/<case-id>.json
 runs/<run-id>/result.json
-findings/v1/<finding-id>.json
+findings/<finding-id>.json
 badcases/<badcase-id>.json
 coverage/latest.json
 coverage/history/<timestamp>.json
@@ -286,7 +287,7 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 
 ### 10.1 Accuracy Sprint Phase 3 Finding Triage 契约
 
-- `CandidateFinding.status` 固定为 `candidate | confirmed_product_failure | evaluator_failure | dismissed | needs_human_review`。每个项目在 `findings/v1/` 下保存版本化本地记录；旧 Badcase 继续兼容读取，不反向伪造 Finding。
+- `CandidateFinding.status` 固定为 `candidate | confirmed_product_failure | evaluator_failure | dismissed | needs_human_review`。每个项目的新记录保存在 `findings/<findingId>.json`；旧 `findings/v1/` 继续兼容读取且不原地覆盖，旧 Badcase 不反向伪造 Finding。
 - Product Failure 只允许由以下任一门禁确认：
   1. Evidence Gate 完整且 Deterministic Judge 存在硬失败；
   2. Semantic Fail 置信度不低于 `0.80`、至少两个有效证据引用且来自至少两类独立证据、案例不要求人工审核、Actor/Judge 没有评测器错误；
@@ -312,6 +313,14 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - 每次分类后的 Evaluator Failure 保存为 `evaluator-badcases/v1/<evaluatorBadcaseId>.json`，内容必须通过 Zod Schema 后原子写入。`observedState`、`attemptedActions` 和 `evidenceRefs` 只能来自当前运行证据，不得补写推测事实。
 - `EvaluatorBadcase` 与 Product `Badcase`、Product Regression 使用独立目录和类型；它不得创建 Product Badcase、不得进入 Product Regression，也不得增加 Verified Coverage。
 - 旧运行记录保持只读；Phase 4 不根据旧文案反向补建 Evaluator Badcase。
+
+### 10.4 One Evaluation Path Phase 5 不可变修复来源契约
+
+- Legacy 问题修复请求必须包含 `{ projectId, evaluationId, issueId, confirmed: true }`；不再接受只包含 `issueId` 的模糊请求。Adaptive 路径使用 `{ projectId, findingId, confirmed: true }`；内部 Badcase 路径使用 `{ projectId, badcaseId, confirmed: true }`。
+- `FixSourceSnapshot` 固定包含 `sourceType`、`evaluationId`、`issueId`、`findingId`、`badcaseId`、`capturedAt` 和完整 `payload`，并在任务创建时原子保存为 `fix-tasks/<fixTaskId>/source-snapshot.json`。
+- Legacy 问题只从 `evaluations/<evaluationId>/issues.jsonl` 精确解析；Adaptive Finding 必须已经是 `confirmed_product_failure`；Badcase 必须属于当前项目。任一身份或项目不匹配都必须停止。
+- `task.json`、`task.md`、Agent 分支命名和后续复测只使用不可变快照，不得重新解析全局 `reports/ux-issues.jsonl`。旧修复任务仍可列出，但缺少快照时必须要求从原评测重新创建，不能猜测来源。
+- Canonical 来源固定为 `evaluations/<evaluationId>/issues.jsonl`、`findings/<findingId>.json` 和 `badcases/<badcaseId>.json`。`reports/ux-issues.jsonl` 与 `findings/v1/` 仅作旧数据兼容读取，不再作为新修复任务的来源。
 
 ### 10.4 Accuracy Sprint Phase 5 Semantic Verifier 契约
 

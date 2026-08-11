@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { httpUrlSchema } from '../config/schema.js';
+import { storageIdSchema } from '../eval-set/schemas.js';
 
 const agentProviderSchema = z.enum(['codex', 'claude_code', 'antigravity']);
 export const agentCapabilitiesSchema = z.object({ workspaceDiscovery: z.boolean(), directFix: z.boolean(), taskPackageHandoff: z.boolean() });
@@ -13,7 +14,10 @@ export const createProjectInputSchema = z.object({ name: z.string().min(1).optio
 export const evaluationRequestSchema = z.object({ projectId: z.string().min(1), depth: z.enum(['quick', 'core', 'full']).default('core'), capabilityIds: z.array(z.string()).default([]), competitorSnapshotIds: z.array(z.string()).max(3).default([]), allowRemoteModel: z.literal(true), allowScreenshot: z.boolean().default(false) });
 export const evaluationCapabilityCoverageSchema = z.object({ capabilityId: z.string().min(1), capabilityName: z.string().min(1), entryPoint: z.string().nullable(), discovered: z.boolean(), browserVisited: z.boolean(), executionStatus: z.enum(['passed', 'failed', 'blocked', 'not_applicable', 'not_run']), runIds: z.array(z.string()), reason: z.string().nullable() }).strict();
 export const evaluationCoverageSummarySchema = z.object({ discoveredCount: z.number().int().nonnegative(), plannedCount: z.number().int().nonnegative(), browserVisitedCount: z.number().int().nonnegative(), executedCount: z.number().int().nonnegative(), passedCount: z.number().int().nonnegative(), failedCount: z.number().int().nonnegative(), blockedCount: z.number().int().nonnegative(), notApplicableCount: z.number().int().nonnegative(), notRunCount: z.number().int().nonnegative(), complete: z.boolean(), capabilities: z.array(evaluationCapabilityCoverageSchema) }).strict();
-export const fixTaskRequestSchema = z.object({ projectId: z.string().min(1), issueId: z.string().min(1), confirmed: z.literal(true) });
+const evaluationIssueFixTaskRequestSchema = z.object({ projectId: storageIdSchema, evaluationId: storageIdSchema, issueId: storageIdSchema, confirmed: z.literal(true) }).strict();
+const findingFixTaskRequestSchema = z.object({ projectId: storageIdSchema, findingId: storageIdSchema, confirmed: z.literal(true) }).strict();
+const badcaseFixTaskRequestSchema = z.object({ projectId: storageIdSchema, badcaseId: storageIdSchema, confirmed: z.literal(true) }).strict();
+export const fixTaskRequestSchema = z.union([evaluationIssueFixTaskRequestSchema, findingFixTaskRequestSchema, badcaseFixTaskRequestSchema]);
 export const agentRunRequestSchema = z.object({ confirmed: z.literal(true), adapter: z.enum(['codex', 'claude_code', 'antigravity', 'task_package']).default('codex') });
 export const applyFixRequestSchema = z.object({ confirmed: z.literal(true), agentRunId: z.string().min(1) });
 export const workspaceCandidateRequestSchema = z.object({ confirmed: z.literal(true), providers: z.array(agentProviderSchema).default(['codex', 'claude_code', 'antigravity']) });

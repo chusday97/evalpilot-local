@@ -6,7 +6,7 @@ Phase 3 implements Candidate Finding triage and the Product Failure Gate only. A
 
 ## Contract and runtime behavior
 
-- Findings are stored as schema-validated atomic JSON under `findings/v1/`.
+- Findings created after One Evaluation Path Phase 5 are stored as schema-validated atomic JSON under `findings/<findingId>.json`; existing `findings/v1/` records remain readable without being rewritten.
 - A single Semantic Fail defaults to `verdict=inconclusive` and `failureSource=unknown`.
 - Complete deterministic hard failures may become confirmed Product Failures.
 - Strong semantic confirmation requires confidence of at least 0.80, at least two valid references, at least two independent evidence types, no evaluator failure, and a Case that does not require human review.

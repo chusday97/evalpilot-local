@@ -9,6 +9,7 @@ import { loadProjectRegistry } from '../src/projects/project-registry.js';
 import { registerProject } from '../src/projects/project-service.js';
 import { startDashboardServer } from '../src/dashboard/server.js';
 import { evaluationDepthOptions, evaluationSnapshot, listEvaluationRecords, renameEvaluation, retryEvaluation, startEvaluation } from '../src/dashboard/evaluation-manager.js';
+import { saveFinding } from '../src/findings/finding-store.js';
 
 const closers: Array<() => Promise<void>> = [];
 const exec = promisify(execFile);
@@ -16,6 +17,15 @@ afterEach(async () => { delete process.env.EVALPILOT_DATA_DIR; delete process.en
 
 function useFixtureDataDir(cwd: string): void {
   process.env.EVALPILOT_DATA_DIR = resolve(cwd, '.evalpilot-data');
+}
+
+function uxIssue(issueId: string, userGoal: string, failure: string) {
+  return {
+    issueId, type: 'journey_breakpoint', severity: 'P1', featureId: 'cap-1', personaId: 'persona-1', caseId: 'case-1', userGoal,
+    idealPath: ['进入', '完成'], actualPath: ['进入', failure], shortestReasonablePath: ['进入', '完成'], failureOrAbandonmentPoint: failure,
+    metrics: { metricType: 'simulated_user_run', timeToFirstActionMs: 1, timeToFindEntryMs: 1, timeToFirstMeaningfulActionMs: 1, timeToCompleteMs: null, totalActions: 1, requiredActions: 2, redundantActions: 0, clickCount: 1, inputCount: 0, pageTransitions: 0, backtrackCount: 0, retryCount: 0, repeatedInputCount: 0, deadClickCount: 0, clarificationCount: 0, deadEndCount: 1, errorCount: 0, recoveryAttempts: 0, recoverySuccess: false, taskCompleted: false, fullLoopCompleted: false, abandoned: true, abandonmentReason: failure, finalConfidence: 'high' },
+    evidence: [], recommendation: '补充结果反馈', protectedSafetySteps: [], confidence: 'high', needsHumanReview: true, addedToRegression: false,
+  };
 }
 
 describe('multi-project workspace', () => {
@@ -62,9 +72,9 @@ describe('multi-project workspace', () => {
     await exec('git', ['add', '.'], { cwd: target });
     await exec('git', ['-c', 'user.name=EvalPilot Test', '-c', 'user.email=evalpilot@example.invalid', 'commit', '-m', 'fixture'], { cwd: target });
     const project = await registerProject(cwd, { projectRoot: target, targetUrl: 'http://localhost:3999' });
-    await mkdir(resolve(project.outputDir, 'reports'), { recursive: true });
-    await writeFile(resolve(project.outputDir, 'reports', 'ux-issues.jsonl'), `${JSON.stringify({ issueId: 'ux-fix-1', type: 'journey_breakpoint', severity: 'P1', featureId: 'cap-1', personaId: 'persona-1', caseId: 'case-1', userGoal: '完成核心任务', idealPath: ['进入', '完成'], actualPath: ['进入', '卡住'], shortestReasonablePath: ['进入', '完成'], failureOrAbandonmentPoint: '提交后没有结果', metrics: {}, evidence: [], recommendation: '补充结果反馈', protectedSafetySteps: [], confidence: 'high', needsHumanReview: true, addedToRegression: false })}\n`);
-    const task = await createFixTask(cwd, { projectId: project.projectId, issueId: 'ux-fix-1', confirmed: true });
+    await mkdir(resolve(project.outputDir, 'evaluations', 'evaluation-fix'), { recursive: true });
+    await writeFile(resolve(project.outputDir, 'evaluations', 'evaluation-fix', 'issues.jsonl'), `${JSON.stringify(uxIssue('ux-fix-1', '完成核心任务', '提交后没有结果'))}\n`);
+    const task = await createFixTask(cwd, { projectId: project.projectId, evaluationId: 'evaluation-fix', issueId: 'ux-fix-1', confirmed: true });
     const run = await startAgent(cwd, task.fixTaskId, { confirmed: true, adapter: 'task_package' });
     const codexRun = await startAgent(cwd, task.fixTaskId, { confirmed: true, adapter: 'codex' });
     expect(run.status).toBe('completed');
@@ -77,8 +87,45 @@ describe('multi-project workspace', () => {
     await expect(applyFix(cwd, task.fixTaskId, { confirmed: true })).rejects.toMatchObject({ code: 'FIX_APPLY_INVALID' });
     await expect(readFile(resolve(task.taskDirectory, 'task.md'), 'utf8')).resolves.toContain('完成核心任务');
     await expect(readFile(resolve(task.taskDirectory, 'task.json'), 'utf8')).resolves.toContain('baselineCommit');
+    await expect(readFile(resolve(task.taskDirectory, 'source-snapshot.json'), 'utf8')).resolves.toContain('evaluation-fix');
     await expect(readFile(run.logFile.replace(/\.log$/, '.json'), 'utf8')).resolves.toContain('task_package');
     expect((await exec('git', ['status', '--short'], { cwd: target })).stdout.trim()).toBe('');
+  });
+
+  it('keeps a fix task bound to the issue snapshot from the selected evaluation', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-fix-snapshot-')); useFixtureDataDir(cwd);
+    const target = resolve(cwd, 'target'); await mkdir(target); await writeFile(resolve(target, 'package.json'), JSON.stringify({ name: 'snapshot-target' }));
+    const project = await registerProject(cwd, { projectRoot: target, targetUrl: 'http://localhost:3997' });
+    const evaluationA = resolve(project.outputDir, 'evaluations', 'evaluation-a'); const evaluationB = resolve(project.outputDir, 'evaluations', 'evaluation-b'); const reports = resolve(project.outputDir, 'reports');
+    await mkdir(evaluationA, { recursive: true }); await mkdir(evaluationB, { recursive: true }); await mkdir(reports, { recursive: true });
+    const issueA = uxIssue('shared-issue', '提交评测 A 的表单', '评测 A 提交后没有结果'); const issueB = uxIssue('shared-issue', '提交评测 B 的表单', '评测 B 的按钮被禁用');
+    await writeFile(resolve(evaluationA, 'issues.jsonl'), `${JSON.stringify(issueA)}\n`); await writeFile(resolve(evaluationB, 'issues.jsonl'), `${JSON.stringify(issueB)}\n`); await writeFile(resolve(reports, 'ux-issues.jsonl'), `${JSON.stringify(issueB)}\n`);
+
+    await expect(createFixTask(cwd, { projectId: project.projectId, issueId: 'shared-issue', confirmed: true })).rejects.toMatchObject({ code: 'FIX_TASK_INVALID' });
+    const task = await createFixTask(cwd, { projectId: project.projectId, evaluationId: 'evaluation-a', issueId: 'shared-issue', confirmed: true });
+    await writeFile(resolve(evaluationA, 'issues.jsonl'), `${JSON.stringify(issueB)}\n`); await writeFile(resolve(reports, 'ux-issues.jsonl'), `${JSON.stringify(uxIssue('shared-issue', '后来生成的全局报告', '全局报告已变化'))}\n`);
+
+    const snapshot = JSON.parse(await readFile(task.sourceSnapshotPath, 'utf8'));
+    expect(snapshot).toEqual(expect.objectContaining({ sourceType: 'evaluation_issue', evaluationId: 'evaluation-a', issueId: 'shared-issue', payload: expect.objectContaining({ userGoal: '提交评测 A 的表单', failureOrAbandonmentPoint: '评测 A 提交后没有结果' }) }));
+    await expect(readFile(resolve(task.taskDirectory, 'task.md'), 'utf8')).resolves.toContain('提交评测 A 的表单');
+    const run = await startAgent(cwd, task.fixTaskId, { confirmed: true, adapter: 'task_package' });
+    expect(run.status).toBe('completed');
+  });
+
+  it('creates an immutable fix source only from a confirmed adaptive finding', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-finding-fix-')); useFixtureDataDir(cwd);
+    const target = resolve(cwd, 'target'); await mkdir(target); await writeFile(resolve(target, 'package.json'), JSON.stringify({ name: 'finding-target' }));
+    const project = await registerProject(cwd, { projectRoot: target, targetUrl: 'http://localhost:3996' }); const now = new Date().toISOString();
+    const finding = { findingId: 'finding-fix-1', projectId: project.projectId, caseId: 'case-adaptive-1', runId: 'run-adaptive-1', title: '提交后没有结果', summary: '用户提交后仍停留在原页面。', status: 'candidate' as const, semanticConfidence: 0.9, deterministicSupport: false, independentEvidenceTypes: ['screenshot', 'network'], confirmedFacts: ['提交动作已执行', '页面没有显示结果'], hypotheses: [], unknowns: ['服务端是否收到请求'], evidenceRefs: ['runs/run-adaptive-1/step-001-after.png'], createdAt: now, updatedAt: now };
+    await saveFinding(project.outputDir, finding);
+    await expect(createFixTask(cwd, { projectId: project.projectId, findingId: finding.findingId, confirmed: true })).rejects.toMatchObject({ code: 'FINDING_NOT_CONFIRMED' });
+    await saveFinding(project.outputDir, { ...finding, status: 'confirmed_product_failure', updatedAt: new Date(Date.now() + 1_000).toISOString() });
+    const task = await createFixTask(cwd, { projectId: project.projectId, findingId: finding.findingId, confirmed: true });
+    await saveFinding(project.outputDir, { ...finding, title: '后来修改的标题', summary: '后来修改的说明', status: 'confirmed_product_failure', updatedAt: new Date(Date.now() + 2_000).toISOString() });
+
+    const snapshot = JSON.parse(await readFile(task.sourceSnapshotPath, 'utf8'));
+    expect(snapshot).toEqual(expect.objectContaining({ sourceType: 'confirmed_finding', findingId: finding.findingId, payload: expect.objectContaining({ title: '提交后没有结果', summary: '用户提交后仍停留在原页面。' }) }));
+    expect(task).toEqual(expect.objectContaining({ evaluationId: null, issueId: null, findingId: finding.findingId, retestCaseId: 'case-adaptive-1' }));
   });
 
   it('persists a failed evaluation and exposes an explicit recovery path', async () => {

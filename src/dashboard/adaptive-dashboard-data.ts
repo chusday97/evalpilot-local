@@ -55,7 +55,9 @@ export async function projectFindings(outputDir: string): Promise<CandidateFindi
 }
 
 export async function projectFinding(outputDir: string, findingId: string): Promise<CandidateFinding | null> {
-  return await pathExists(resolve(outputDir, 'findings', 'v1', `${findingId}.json`)) ? loadFinding(outputDir, findingId) : null;
+  const canonical = resolve(outputDir, 'findings', `${findingId}.json`);
+  const legacy = resolve(outputDir, 'findings', 'v1', `${findingId}.json`);
+  return await pathExists(canonical) || await pathExists(legacy) ? loadFinding(outputDir, findingId) : null;
 }
 
 export async function regressionCases(outputDir: string): Promise<EvalCase[]> {

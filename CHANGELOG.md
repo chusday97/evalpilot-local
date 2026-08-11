@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added immutable `FixSourceSnapshot` task sources for evaluation issues, confirmed Adaptive Findings, and Product Badcases; task packages and later Agent runs no longer re-resolve the global latest report.
+- Changed Legacy fix creation to require `evaluationId + issueId`, and moved new Finding records to `findings/<findingId>.json` while preserving read-only compatibility with `findings/v1/`.
 - Added a ten-category Evaluator Failure taxonomy with schema-validated, versioned `EvaluatorBadcase` storage that stays separate from Product Badcase and Regression lineage.
 - Changed evaluator-inconclusive results to use novice-facing copy and expandable possible reasons while retaining technical classification in structured evidence.
 - Preserved low-confidence product-failure observations as Candidate Findings; wait exhaustion becomes an evaluator failure only when the semantic result is also inconclusive.

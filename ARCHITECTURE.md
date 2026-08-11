@@ -33,6 +33,8 @@ Phase 7 Real Evaluator Benchmark 将 10 个独立本地 Web 应用与单独保�
 
 普通 Dashboard 的 `/evaluate` 现由 Evaluation Orchestrator 统一编排：复用扫描、Background 与 Blueprint，按需建立或读取 Product Model/Eval Set，依据 Quick/Core/Full 和所选功能选择案例，再顺序执行 AI Test Agent → Hybrid Judge → Finding Triage。每个 Evaluation Session 保存 selected Case、真实 run、Finding、Badcase、Coverage Matrix 与评测报告快照；没有配置 Provider 或没有逐次远程模型授权时，在创建 Session 前返回可恢复错误，不调用 Legacy Explorer。Legacy runtime 仅保留给旧记录、CLI 兼容和内部诊断。
 
-Finding Triage 位于 Hybrid Judge 与 Badcase 之间。单次 Semantic Fail 默认只保存到 `findings/v1/`，运行结果保持 Inconclusive；只有确定性硬失败、双类型强证据、stable Case 的重复同类失败或人工明确确认，才能转为 `confirmed_product_failure`。Badcase Store 会重新读取已持久化 Finding 校验谱系，原始模型输出不能直接写入回归资产。
+Finding Triage 位于 Hybrid Judge 与 Badcase 之间。单次 Semantic Fail 默认只保存到 `findings/<findingId>.json`，运行结果保持 Inconclusive；旧 `findings/v1/` 只读兼容。只有确定性硬失败、双类型强证据、stable Case 的重复同类失败或人工明确确认，才能转为 `confirmed_product_failure`。Badcase Store 会重新读取已持久化 Finding 校验谱系，原始模型输出不能直接写入回归资产。
+
+One Evaluation Path Phase 5 将问题列表与修复服务统一到同一来源身份。Legacy 问题必须通过 `evaluationId + issueId` 从该次评测快照解析；Adaptive 路径使用已确认 Finding 或 Badcase。创建任务时完整来源会原子保存到任务目录的 `source-snapshot.json`，之后任务包、Agent 分支和复测都只使用这份快照。全局最新报告仅保留旧界面兼容，不能再改变已经创建的修复目标；缺少快照的旧任务会停止并要求从原评测重新创建。
 
 设计取舍：Legacy 生成器继续使用证据驱动的确定性规则。Experimental Adaptive Evaluation 可在逐次授权后调用 Product Understanding 与 Oracle Builder，但模型输出必须经过本地 Schema、证据白名单和人工审核门禁；开放式 Rubric 仍不能替代独立证据或人工判断。Phase 7 的内部阈值只约束受控基准，真实模型、外部项目与独立审查未通过前不升级对外可靠性承诺。
