@@ -86,8 +86,8 @@ export function decideEvaluationNextAction(input: EvaluationDecisionInput): Eval
       type: 'create_fix_task', title: '为已确认问题创建修复任务', explanation: '这不是单次模型猜测：产品失败已经确认，现在可以安全地进入隔离修复流程。',
       targetCaseIds: unique([...confirmed.findings.map((item) => item.caseId), ...confirmed.badcases.map((item) => item.caseId)]), targetFindingIds: confirmed.findings.map((item) => item.findingId), targetBadcaseIds: confirmed.badcases.map((item) => item.badcaseId),
       primaryCta: firstFinding
-        ? { label: '创建修复任务', route: detailRoute('/findings', 'findingId', firstFinding.findingId) }
-        : { label: '创建修复任务', route: detailRoute('/findings', 'badcaseId', firstBadcase!.badcaseId) }, secondaryCtas: [],
+        ? { label: '生成 Codex 修复任务', route: detailRoute('/findings', 'findingId', firstFinding.findingId) }
+        : { label: '生成 Codex 修复任务', route: detailRoute('/findings', 'badcaseId', firstBadcase!.badcaseId) }, secondaryCtas: [],
     });
   }
 

@@ -120,7 +120,7 @@ export async function waitForProgressAwareOutcome(input: ProgressAwareWaitInput)
     if (observation.state === 'progressing'
       && extensionsUsed < input.policy.maxProgressExtensions
       && elapsedMs + input.policy.progressExtensionMs > deadlineMs) {
-      deadlineMs = Math.min(input.policy.hardTimeoutMs, elapsedMs + input.policy.progressExtensionMs);
+      deadlineMs = Math.min(input.policy.hardTimeoutMs, deadlineMs + input.policy.progressExtensionMs);
       extensionsUsed += 1;
     }
 

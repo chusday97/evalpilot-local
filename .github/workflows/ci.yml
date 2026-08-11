@@ -41,6 +41,7 @@ jobs:
       - run: npm run test:ai-agent
       - run: npm run test:semantic-verifier
       - run: npm run test:real-benchmark
+      - run: npm run test:evaluator-regression
       - run: npm run test:browser
       - run: npm run test:runner
       - run: npm run test:dashboard

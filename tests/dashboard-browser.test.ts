@@ -151,14 +151,14 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.locator('aside nav button').filter({ hasText: '运行' }).click();
     await page.getByRole('heading', { name: '已确认 1 个产品问题，需要处理后复测。', exact: true }).first().waitFor({ state: 'visible' });
     expect(await page.locator('[data-section]').evaluateAll((items) => items.map((item) => item.getAttribute('data-section')))).toEqual(['本次结论', '为什么', '当前不能确定什么', '你现在应该做什么', '证据', '技术详情']);
-    expect(await page.getByRole('button', { name: '创建修复任务' }).isVisible()).toBe(true);
+    expect(await page.getByRole('button', { name: '生成 Codex 修复任务' }).isVisible()).toBe(true);
     expect(await page.getByText('inconclusive', { exact: true }).count()).toBe(0);
     expect(await page.getByText('confirmed_product_failure', { exact: true }).count()).toBe(0);
     expect(await page.getByText('推荐已经出现，但用户找不到保存或继续操作。', { exact: true }).isVisible()).toBe(true);
     expect(await page.getByText('证据不足，不能判断产品好坏').isVisible()).toBe(true);
     expect(await page.getByText('旧记录缺少逐步前后证据，不能补推验证结论。').isVisible()).toBe(true);
     expect(await page.getByText('没有找到保存或继续入口').isVisible()).toBe(true);
-    const primaryResultAction = page.getByRole('button', { name: '创建修复任务' });
+    const primaryResultAction = page.getByRole('button', { name: '生成 Codex 修复任务' });
     await primaryResultAction.focus();
     expect(await primaryResultAction.evaluate((element) => document.activeElement === element)).toBe(true);
     await page.keyboard.press('Enter');

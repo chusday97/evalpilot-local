@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a ten-fixture evaluator regression suite covering slow and streaming AI output, loading and stall semantics, Persona patience, immutable issue snapshots, and safe next-action routing; Chromium CI now runs it on every change.
+- Fixed progress-aware waiting so each earned extension adds to the existing deadline instead of prematurely consuming the bounded extension budget during streaming output.
+- Standardized the confirmed Product Failure action as “生成 Codex 修复任务” across the decision engine and browser acceptance tests.
 - Clarified the Codex repair handoff: task creation now opens an object-specific five-step handoff screen, explicitly states that EvalPilot will not edit code, and hides direct repair unless the server confirms the guarded Codex capability.
 - Added automatically rebuilt, human-readable Eval Set, Product Badcase, and Evaluator Badcase documents while keeping schema-validated JSON as the sole source of truth.
 - Documented the separate Product and Evaluator badcase lifecycles and the rule that runtime evidence remains local and never enters GitHub or the npm package.

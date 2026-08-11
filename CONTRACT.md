@@ -353,6 +353,15 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - “让 Codex 直接修复”只在上述 `directFix` 为 `true` 时显示；不可用时不得渲染禁用或诱导性按钮。Codex 任务交接继续使用既有 `POST /api/fix-tasks/:id/run`，其 `executionMode` 必须是 `handoff` 且不得修改目标项目。
 - Phase 8 不新增持久化实体或请求字段；`FixTask`、`AgentRun`、`AgentConnection` 及其 Zod Schema 保持不变。
 
+### 10.8 One Evaluation Path Phase 9 评测器回归契约
+
+- `tests/evaluator-regression/` 是单一路径评测器的公开回归入口，固定覆盖十类历史 badcase：10 秒 AI 生成、20 秒流式输出、仅有加载提示、永久停滞、评测快照修复交接、陈旧全局问题文件、无产品 Bug 的下一动作、已确认产品 Bug 的下一动作、等待不消耗 Persona 耐心，以及进展重置停滞时钟。
+- 回归夹具必须记录真实产品等待时长和预期结论。标准 CI 可以按固定比例加速浏览器时钟，但必须同时断言生产 `ai_generation` 等待策略仍为 10 秒软上限和 60 秒硬上限；不得向生产代码注入假时钟或缩短真实用户等待策略。
+- 每个夹具必须调用真实的任务状态观测、进展感知等待、Persona 消耗判断、不可变修复来源或下一动作决策代码；只验证夹具自身文本或复制生产分支逻辑不构成回归证据。
+- `pending/progressing` 不能生成 `no_next_action` 或产品失败，且不能消耗 Persona 失败次数；无进展超过等待窗口只能进入 `stalled` 或 Evaluator Failure。每次可观察进展必须更新 `lastProgressAtMs` 并延后停滞判断。
+- Legacy 全局 `reports/ux-issues.jsonl` 的后续变化不得改变已从 `evaluations/<evaluationId>/issues.jsonl` 捕获的 `FixSourceSnapshot`。没有已确认 Product Failure 时主动作固定为“重新评测”；已确认 Product Failure 且尚无 FixTask 时主动作固定为“生成 Codex 修复任务”。
+- Phase 9 不新增运行时持久化实体、API 字段或 Zod Schema；`types.ts` 与现有 Schema 保持不变。回归夹具清单是测试元数据，不进入用户数据目录。
+
 ### 10.4 Accuracy Sprint Phase 5 Semantic Verifier 契约
 
 - `EvalPersonaRef` 新增显式 Agent Policy：知识水平、耐心动作数、允许重试次数、隐私敏感度和退出条件。新案例必须写入全部字段；旧案例只在兼容读取时使用 `medium / 3 / 1 / medium / 证据不足时退出`，不得覆盖原文件。
