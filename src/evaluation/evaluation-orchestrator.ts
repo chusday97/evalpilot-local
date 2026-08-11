@@ -35,7 +35,12 @@ interface OrchestratorDependencies {
 export function configuredEvaluationProvider(): AiProvider {
   const apiKey = process.env.EVALPILOT_OPENAI_API_KEY?.trim();
   if (!apiKey) throw new EvalPilotError('尚未配置 AI 评测能力。请设置 EVALPILOT_OPENAI_API_KEY，重启工作台后再试。', 'AI_PROVIDER_NOT_CONFIGURED');
-  return new OpenAiProvider({ apiKey, model: process.env.EVALPILOT_OPENAI_MODEL?.trim() || 'gpt-5-mini' });
+  const testBaseUrl = process.env.NODE_ENV === 'test' ? process.env.EVALPILOT_TEST_OPENAI_BASE_URL?.trim() : undefined;
+  if (testBaseUrl) {
+    const hostname = new URL(testBaseUrl).hostname;
+    if (!['localhost', '127.0.0.1', '::1'].includes(hostname)) throw new EvalPilotError('测试 Provider 只能连接本机 loopback 地址。', 'AI_PROVIDER_INVALID');
+  }
+  return new OpenAiProvider({ apiKey, model: process.env.EVALPILOT_OPENAI_MODEL?.trim() || 'gpt-5-mini', baseUrl: testBaseUrl });
 }
 
 async function ensureFoundation(projectId: string, outputDir: string, provider: AiProvider): Promise<{ model: ProductModel; cases: EvalCase[]; version: number }> {

@@ -11,7 +11,7 @@ import { writeTextAtomic } from '../utils/file-system.js';
 import { writeSchemaJsonAtomic } from '../utils/schema-file.js';
 
 export const adaptiveEvaluationReportSchema = z.object({
-  reportId: storageIdSchema, projectId: storageIdSchema, generatedAt: z.iso.datetime(), executiveVerdict: z.enum(['can_continue', 'needs_attention', 'insufficient_evidence']), testedCaseIds: z.array(storageIdSchema), notTestedCaseIds: z.array(storageIdSchema), coverage: coverageMatrixSchema.nullable(), caseResults: z.array(evalCaseResultSchema),
+  reportId: storageIdSchema, projectId: storageIdSchema, evaluationId: storageIdSchema.optional(), generatedAt: z.iso.datetime(), executiveVerdict: z.enum(['can_continue', 'needs_attention', 'insufficient_evidence']), testedCaseIds: z.array(storageIdSchema), notTestedCaseIds: z.array(storageIdSchema), coverage: coverageMatrixSchema.nullable(), caseResults: z.array(evalCaseResultSchema),
   journeys: z.array(z.object({ runId: storageIdSchema, caseId: storageIdSchema, actions: z.array(interactionActionSchema), finalState: z.string(), evidenceCompleteness: evidenceCompletenessSchema }).strict()),
   failures: z.array(z.object({ caseId: storageIdSchema, summary: z.string().min(1), severity: z.enum(['P0','P1','P2','P3']), evidenceRefs: z.array(z.string()) }).strict()),
   inconclusiveCases: z.array(z.object({ caseId: storageIdSchema, summary: z.string().min(1), failureSource: z.string().nullable() }).strict()), confirmedFacts: z.array(z.string().min(1)), rootCauseHypotheses: z.array(rootCauseHypothesisSchema), newBadcaseIds: z.array(storageIdSchema), newRegressionCaseIds: z.array(storageIdSchema), passingCoverageGaps: z.array(coverageGapSchema), newChallengeCaseIds: z.array(storageIdSchema), nextAction: evaluationNextActionSchema, recommendedNextActions: z.array(z.string().min(1)), authenticityNotice: z.string().min(1), versionMetadata: z.array(runVersionMetadataSchema),
@@ -38,7 +38,7 @@ export async function buildAdaptiveEvaluationReport(input: { outputDir: string; 
   const nextAction = decideEvaluationNextAction({ evaluationId: input.evaluationId ?? `evaluation-${generatedAt.replace(/[:.]/g, '-')}`, evaluationStatus: input.evaluationStatus ?? 'completed', selectedCases: input.selectedCases, results: input.results, findings: input.findings ?? [], badcases: input.badcases ?? [], fixTasks: input.fixTasks ?? [], evidencePackets: input.packets });
   const recommendedNextActions = [nextAction.explanation];
   const report = adaptiveEvaluationReportSchema.parse({
-    reportId: `adaptive-report-${generatedAt.replace(/[:.]/g, '-')}`, projectId: input.projectId, generatedAt, executiveVerdict,
+    reportId: `adaptive-report-${generatedAt.replace(/[:.]/g, '-')}`, projectId: input.projectId, evaluationId: input.evaluationId, generatedAt, executiveVerdict,
     testedCaseIds: input.results.map((item) => item.caseId), notTestedCaseIds, coverage: input.coverage, caseResults: input.results,
     journeys: input.results.map((result) => { const packet = packetByRun.get(result.runId); return packet ? { runId: packet.runId, caseId: packet.caseId, actions: packet.actions, finalState: packet.finalState.visibleTextSummary, evidenceCompleteness: packet.evidenceCompleteness } : null; }).filter((item): item is NonNullable<typeof item> => item !== null),
     failures, inconclusiveCases,

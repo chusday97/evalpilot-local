@@ -796,6 +796,7 @@ export interface EvalSetSelection {
 export interface AdaptiveEvaluationReport {
   reportId: string;
   projectId: string;
+  evaluationId?: string;
   generatedAt: string;
   executiveVerdict: 'can_continue' | 'needs_attention' | 'insufficient_evidence';
   testedCaseIds: string[];

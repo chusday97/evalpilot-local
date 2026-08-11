@@ -14,7 +14,8 @@ const coverage: CoverageMatrix = { projectId: 'project-report', generatedAt: now
 describe('adaptive human-readable report', () => {
   it('writes all 16 sections from the same structured report', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-adaptive-report-'));
-    const report = await buildAdaptiveEvaluationReport({ outputDir, projectId: 'project-report', selectedCases: [evalCase], results: [result], packets: [packet], coverage, generatedAt: now });
+    const report = await buildAdaptiveEvaluationReport({ outputDir, projectId: 'project-report', evaluationId: 'evaluation-report', selectedCases: [evalCase], results: [result], packets: [packet], coverage, generatedAt: now });
+    expect(report.evaluationId).toBe('evaluation-report');
     expect(report).toMatchObject({ executiveVerdict: 'needs_attention', failures: [{ caseId: 'case-report' }], nextAction: { type: 'no_action', primaryCta: null }, versionMetadata: [{ targetAppGitSha: 'abc123', evalSetVersion: 2 }] });
     const markdown = await readFile(resolve(outputDir, 'reports', 'latest-evaluation.md'), 'utf8');
     for (let index = 1; index <= 16; index += 1) expect(markdown).toContain(`## ${index}.`);

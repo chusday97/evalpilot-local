@@ -5,6 +5,10 @@
 - Added automatically rebuilt, human-readable Eval Set, Product Badcase, and Evaluator Badcase documents while keeping schema-validated JSON as the sole source of truth.
 - Documented the separate Product and Evaluator badcase lifecycles and the rule that runtime evidence remains local and never enters GitHub or the npm package.
 - Fixed DOM-grounded actions so hidden elements cannot shift the visible element index, and preserved evidence-complete deterministic Product failures when the missing next action is itself the defect.
+- Restored the public tarball example gate after Adaptive evaluation became mandatory by using an explicitly authorized loopback-only Mock Responses API in test mode; CI still reads no real model key.
+- Added the originating `evaluationId` to newly generated Adaptive reports while keeping legacy reports without the field readable.
+- Made the public example command build production artifacts before packing so standalone verification cannot silently test stale `dist` files.
+- Updated public example coverage verification to compare executed capability identities instead of mixing legacy counts with multi-dimensional Coverage Matrix cells.
 - Rewrote the Evaluation Result view into six novice-readable sections that answer what happened, whether a Product Bug is confirmed, what remains unknown, and the single next action before exposing evidence and technical enums.
 - Scoped result loading and post-evaluation navigation to the exact `evaluationId`, preventing another run or the project latest record from replacing the selected evaluation lineage.
 - Added a schema-validated Next Action Engine that turns each Evaluation Session into exactly one novice-readable recommendation with object-specific routes.

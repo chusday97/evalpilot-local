@@ -302,6 +302,7 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 
 - 标准 Chromium CI 必须在安装浏览器并完成构建后执行 `npm run test:ai-agent`；该命令固定启用真实 Chromium，并运行 Agent、Evidence Gate 与 Hybrid Judge 测试。
 - 标准 CI 只能使用 `MockAiProvider`，不得依赖或读取真实 `EVALPILOT_OPENAI_API_KEY`。Mock 只替代结构化模型输出；Playwright 浏览器、DOM grounding、动作执行、before/after 截图、本地 Trace、Hybrid Judge、Finding、Badcase、Regression 与 Challenge 均使用真实运行代码。
+- npm 公开示例的端到端 CI 可在 `NODE_ENV=test` 下通过 `EVALPILOT_TEST_OPENAI_BASE_URL` 连接 loopback Mock Responses API；该地址必须是 `localhost`、`127.0.0.1` 或 `::1`，非测试环境与非 loopback 地址一律忽略或拒绝。测试请求仍必须显式携带 `allowRemoteModel=true`，不得绕过用户授权契约。
 - CI 至少覆盖：表单完成 PASS、死点击确认失败、危险动作阻止、模型输出损坏产生 Evaluator Failure、Candidate Challenge 不增加 Verified Coverage、证据缺失不生成 Product Badcase、修复后同案例 PASS 晋升 Regression、PASS 生成 Challenge candidates。
 - `test:ai-agent` 任一失败必须使 `chromium-smoke` 失败；不得使用 `continue-on-error`、空 catch 或缺少浏览器时静默跳过。
 
@@ -462,6 +463,7 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 ## 19. 新架构报告契约
 
 - `AdaptiveEvaluationReport` 固定保存 16 个语义区块：执行结论、已测、未测、覆盖矩阵、案例结果、AI 用户旅程、失败、无法判断、已确认事实、根因假设、新 Badcase、新 Regression、PASS 后缺口、新 Challenge、建议下一步、真实性/不确定性声明。
+- 新生成的 `AdaptiveEvaluationReport` 必须在顶层保存当前 `evaluationId`，确保评测记录、报告与下一动作属于同一谱系；旧报告缺少该字段时继续兼容读取，不得伪造补写。
 - `executiveVerdict` 只有在没有产品失败、没有无法判断、没有未运行且没有高优先级 Coverage Gap 时才可为 `can_continue`；否则分别使用 `needs_attention` 或 `insufficient_evidence`。
 - JSON 与 Markdown 同源生成并原子保存到 `reports/latest-evaluation.json|md`；版本元数据从每个 Evidence Packet 复制，不重新推断。
 
