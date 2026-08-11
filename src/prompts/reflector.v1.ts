@@ -1,4 +1,4 @@
-import type { AgentActionResult, AgentDecision, EvalCase, ReflectionDecision, StepVerification } from '../../types.js';
+import type { AgentActionResult, AgentDecision, EvalCase, ReflectionDecision, StepVerification, TaskStateObservation } from '../../types.js';
 import type { ResolvedPersonaPolicy } from '../eval-set/persona-policy.js';
 
 export const reflectorPromptV1 = {
@@ -9,6 +9,7 @@ export const reflectorPromptV1 = {
     decision: AgentDecision;
     result: AgentActionResult;
     verification: StepVerification;
+    taskState?: TaskStateObservation;
     policy: ResolvedPersonaPolicy;
     failedAttempts: number;
     retryAttempts: number;
@@ -27,6 +28,7 @@ export const reflectorPromptV1 = {
         decision: input.decision,
         actionResult: input.result,
         verification: input.verification,
+        taskState: input.taskState ?? null,
         failedAttempts: input.failedAttempts,
         retryAttempts: input.retryAttempts,
         recentReflections: input.history.slice(-5),

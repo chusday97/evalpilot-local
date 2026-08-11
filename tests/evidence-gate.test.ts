@@ -32,7 +32,7 @@ function completePacket(): EvidencePacket {
       { observationId: 'observation-001-after', pageUrl: 'http://127.0.0.1/', pagePurpose: 'Saved', visibleStateSummary: 'Saved', primaryAreas: ['Saved'], visibleProblems: [], interactableElements: [], formFields: [], evidenceRefs: ['step-001-after.png'], confidence: 1 },
     ],
     stepVerifications: [{ verificationId: 'verification-001', expectation: '显示 Saved', observed: 'Saved', status: 'confirmed', evidenceRefs: ['step-001-after.png'], confidence: 1 }],
-    stepEvidence: [{ stepIndex: 1, beforeObservationId: 'observation-001-before', afterObservationId: 'observation-001-after', beforeScreenshotPath: 'step-001-before.png', afterScreenshotPath: 'step-001-after.png', decisionId: 'decision-001', verificationId: 'verification-001', actionStatus: 'executed', taskState: null }],
+    stepEvidence: [{ stepIndex: 1, beforeObservationId: 'observation-001-before', afterObservationId: 'observation-001-after', beforeScreenshotPath: 'step-001-before.png', afterScreenshotPath: 'step-001-after.png', decisionId: 'decision-001', verificationId: 'verification-001', actionStatus: 'executed', taskState: null, taskWait: null }],
     screenshots: ['step-001-before.png', 'step-001-after.png'], tracePath: 'trace.zip', evidenceCompleteness: { complete: true, hasInitialObservation: true, hasFinalObservation: true, hasBeforeAfterScreenshots: true, hasStepVerifications: true, hasTrace: true, missing: [] },
     consoleEvidence: [], networkEvidence: [], finalState: { url: 'http://127.0.0.1/', visibleTextSummary: 'Saved' },
     versions: { targetAppGitSha: null, productModelVersion: 1, evalSetVersion: 1, caseVersion: 1, evalPilotVersion: '0.5.0-alpha.1', actorModel: 'mock', judgeModel: 'mock', actorPromptVersion: '1', judgePromptVersion: '1', toolSchemaVersion: '1', timestamp: now },
@@ -97,6 +97,13 @@ describe('Evidence completeness gate', () => {
     const withoutTaskState = { ...current, stepEvidence: current.stepEvidence.map(({ taskState: _taskState, ...step }) => step) };
     const compatible = evidencePacketSchema.parse(withoutTaskState);
     expect(compatible.stepEvidence[0]?.taskState).toBeNull();
+  });
+
+  it('reads pre-Phase-3 StepEvidence without inventing a wait policy or Persona cost', () => {
+    const current = completePacket();
+    const withoutTaskWait = { ...current, stepEvidence: current.stepEvidence.map(({ taskWait: _taskWait, ...step }) => step) };
+    const compatible = evidencePacketSchema.parse(withoutTaskWait);
+    expect(compatible.stepEvidence[0]?.taskWait).toBeNull();
   });
 });
 

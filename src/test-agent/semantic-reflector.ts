@@ -1,5 +1,5 @@
 import type { AiProvider } from '../ai/provider.js';
-import type { AgentActionResult, AgentDecision, EvalCase, ReflectionDecision, StepVerification } from '../../types.js';
+import type { AgentActionResult, AgentDecision, EvalCase, ReflectionDecision, StepVerification, TaskStateObservation } from '../../types.js';
 import { resolvePersonaPolicy } from '../eval-set/persona-policy.js';
 import { reflectorPromptV1 } from '../prompts/reflector.v1.js';
 import { reflectionDecisionSchema } from './schemas.js';
@@ -10,11 +10,15 @@ export async function reflectOnStepSemantically(input: {
   decision: AgentDecision;
   result: AgentActionResult;
   verification: StepVerification;
+  taskState?: TaskStateObservation;
   failedAttempts: number;
   retryAttempts: number;
   history: ReflectionDecision[];
   allowRemoteModel: boolean;
 }): Promise<ReflectionDecision | null> {
+  if (input.taskState?.state === 'pending' || input.taskState?.state === 'progressing') {
+    return reflectionDecisionSchema.parse({ nextStep: 'continue', summary: '任务仍在处理，等待过程不消耗 Persona 的失败尝试。', confidence: 1 });
+  }
   const policy = resolvePersonaPolicy(input.evalCase.persona);
   const prompt = reflectorPromptV1.build({ ...input, policy });
   try {

@@ -56,6 +56,16 @@ describe('persona agent policy', () => {
     expect(reflection).toMatchObject({ nextStep: 'abandon', summary: expect.stringContaining('1 步耐心边界') });
   });
 
+  it.each(['pending', 'progressing'] as const)('does not abandon or charge patience while state is %s', (state) => {
+    const reflection = reflectOnStep({
+      evalCase: evalCase(), decision: { intentSummary: '等待', action: 'wait', targetElementId: null, value: null, expectedResult: '完成', confidence: 1 },
+      result: { status: 'executed', action: 'wait', targetElementId: null, summary: '仍在处理', evidenceRefs: [] }, verification: { ...deterministic, status: 'inconclusive' },
+      taskState: { state, progressSignals: [], completionSignals: [], failureSignals: [], loadingSignals: ['loading'], networkActivity: 'active', elapsedMs: 1_000, lastProgressAtMs: state === 'progressing' ? 1_000 : null, confidence: 0.8, evidenceRefs: [] },
+      failedAttempts: 99, retryAttempts: 99,
+    });
+    expect(reflection).toMatchObject({ nextStep: 'continue', summary: expect.stringContaining('不消耗 Persona') });
+  });
+
   it('adds compatibility defaults in memory for a legacy persona', () => {
     expect(evalPersonaRefSchema.parse({ personaId: 'legacy-user', name: '旧用户', behaviorPolicy: ['只看可见内容'] })).toEqual({ personaId: 'legacy-user', name: '旧用户', knowledgeLevel: 'medium', patienceTurns: 3, retryTolerance: 1, privacySensitivity: 'medium', behaviorPolicy: ['只看可见内容'], exitConditions: ['证据不足时退出'] });
   });

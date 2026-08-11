@@ -128,16 +128,22 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
     await browser.close();
   });
 
-  it('records a long-running task as progressing and does not turn it into a verification failure', async () => {
+  it('waits through progress, records the timeline, and does not consume Persona patience', async () => {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
-    await page.setContent('<main><h1>Report</h1><button onclick="this.disabled=true;this.setAttribute(\'aria-busy\',\'true\');this.textContent=\'Generating 25%\';setTimeout(()=>{document.querySelector(\'main\').innerHTML=\'<h1>Report ready</h1>\'},5000)">Generate</button></main>');
+    await page.setContent('<main><h1>Report</h1><button onclick="this.disabled=true;this.setAttribute(\'aria-busy\',\'true\');this.textContent=\'Generating 25%\';setTimeout(()=>{this.textContent=\'Generating 75%\'},150);setTimeout(()=>{document.querySelector(\'main\').innerHTML=\'<h1>Report ready</h1>\'},330)">Generate</button></main>');
     const provider = new MockAiProvider(() => ({ intentSummary: '生成报告', action: 'click', targetElementId: 'E001', value: null, expectedResult: 'Report ready', confidence: 1 }));
     const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-ai-progressing-'));
-    const result = await runAiTestAgent(page, evalCase(), provider, { outputDir, startingUrl: page.url(), maxSteps: 1, waitTimeoutMs: 250, now: () => new Date(now) });
-    const packet = JSON.parse(await readFile(result.evidencePacketPath, 'utf8')) as { stepEvidence: Array<{ taskState: { state: string } }>; stepVerifications: Array<{ status: string }> };
-    expect(packet.stepEvidence[0]?.taskState.state).toBe('progressing');
-    expect(packet.stepVerifications[0]?.status).toBe('inconclusive');
+    const lowPatienceCase = { ...evalCase(), persona: { ...evalCase().persona, patienceTurns: 1, retryTolerance: 0 } };
+    const result = await runAiTestAgent(page, lowPatienceCase, provider, { outputDir, startingUrl: page.url(), maxSteps: 1, waitPolicy: { initialObservationMs: 50, pollIntervalMs: 100, softTimeoutMs: 180, hardTimeoutMs: 1_000, progressExtensionMs: 250, maxProgressExtensions: 3 }, now: () => new Date(now) });
+    const packet = JSON.parse(await readFile(result.evidencePacketPath, 'utf8')) as { actions: unknown[]; stepEvidence: Array<{ taskState: { state: string }; taskWait: { observations: Array<{ state: string }>; extensionsUsed: number; consumedPersonaAttempt: boolean } }>; stepVerifications: Array<{ status: string }> };
+    expect(packet.stepEvidence[0]?.taskState.state).toBe('completed');
+    expect(packet.stepEvidence[0]?.taskWait.observations.some((item) => item.state === 'progressing')).toBe(true);
+    expect(packet.stepEvidence[0]?.taskWait).toMatchObject({ consumedPersonaAttempt: false });
+    expect(packet.stepEvidence[0]?.taskWait.extensionsUsed).toBeGreaterThan(0);
+    expect(packet.stepEvidence[0]?.taskWait.observations.length).toBeGreaterThan(1);
+    expect(packet.actions).toHaveLength(1);
+    expect(packet.stepVerifications[0]?.status).toBe('confirmed');
     expect(result.status).toBe('inconclusive');
     await browser.close();
   });
@@ -187,7 +193,7 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
       judgeModel: 'evalpilot-mock-v1',
       verifierPromptVersion: '1.0.0',
       reflectorPromptVersion: null,
-      toolSchemaVersion: '1.2.0',
+      toolSchemaVersion: '1.3.0',
     });
     const markdown = await readFile(join(outputDir, 'reports', 'latest-evaluation.md'), 'utf8'); expect(markdown).toContain('## 16. Authenticity / uncertainty notice');
     await browser.close();
@@ -208,7 +214,7 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
       ? { verdict: 'fail', taskCompletion: 'failed', summary: '保存按钮可能没有产生反馈。', whatWorked: ['按钮可见'], whatFailed: ['未观察到明确保存状态'], whyItMatters: ['用户可能不确定是否保存'], confirmedFacts: ['页面仍显示 Draft'], hypotheses: [], unknowns: ['按钮是否触发后台请求未知'], evidenceRefs: ['screenshots/step-001-after.png'], confidence: 0.55 }
       : { intentSummary: '尝试保存', action: 'click', targetElementId: 'E001', value: null, expectedResult: '出现保存反馈', confidence: 0.9 });
     const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-adaptive-candidate-'));
-    const outcome = await runAdaptiveCase({ page, provider, outputDir, evalCase: candidateCase, productModel: model, existingCases: [candidateCase], startingUrl: page.url(), evalSetVersion: 1, now: () => new Date(now) });
+    const outcome = await runAdaptiveCase({ page, provider, outputDir, evalCase: candidateCase, productModel: model, existingCases: [candidateCase], startingUrl: page.url(), evalSetVersion: 1, agentWaitTimeoutMs: 300, now: () => new Date(now) });
     expect(outcome.result).toMatchObject({ verdict: 'inconclusive', failureSource: 'unknown' });
     expect(outcome.badcase).toBeNull();
     expect(await listFindings(outputDir)).toEqual([expect.objectContaining({ caseId: candidateCase.caseId, status: 'candidate' })]);
@@ -222,7 +228,7 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
       ? { verdict: 'fail', taskCompletion: 'failed', summary: '保存按钮点击后没有反馈。', whatWorked: ['保存按钮可见'], whatFailed: ['连续点击没有任何稳定变化'], whyItMatters: ['用户无法确认草稿是否保存'], confirmedFacts: ['按钮点击前后页面文字和 URL 均未变化'], hypotheses: [{ hypothesis: '按钮未连接保存动作', confidence: 0.7, supportingEvidence: ['浏览器步骤截图'], contradictingEvidence: [], howToVerify: ['检查 Save 点击处理器'] }], unknowns: ['后端是否收到请求未知'], evidenceRefs: ['screenshots/step-02.png'], confidence: 0.9 }
       : { intentSummary: '尝试保存', action: 'click', targetElementId: 'E001', value: null, expectedResult: '显示 Saved', confidence: 1 });
     const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-adaptive-fail-'));
-    const outcome = await runAdaptiveCase({ page, provider, outputDir, evalCase: failedCase, productModel: model, existingCases: [failedCase], startingUrl: page.url(), evalSetVersion: 1, now: () => new Date(now) });
+    const outcome = await runAdaptiveCase({ page, provider, outputDir, evalCase: failedCase, productModel: model, existingCases: [failedCase], startingUrl: page.url(), evalSetVersion: 1, agentWaitTimeoutMs: 300, now: () => new Date(now) });
     expect(outcome.agentRun.status).toBe('abandoned'); expect(outcome.result).toMatchObject({ verdict: 'fail', failureSource: 'product', severity: 'P1' });
     expect(outcome.badcase).toMatchObject({ caseId: 'case-dead-click', category: 'interaction', confirmedFacts: ['按钮点击前后页面文字和 URL 均未变化'] });
     expect(outcome.report.failures[0]?.evidenceRefs).toContain('screenshots/step-02.png');

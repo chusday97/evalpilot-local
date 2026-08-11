@@ -1,6 +1,6 @@
 import { resolve } from 'node:path';
 import type { Page } from 'playwright';
-import type { AgentActionResult, AgentDecision, AiTestAgentRun, EvalCase, EvidencePacket, InteractionAction, PageObservation, ReflectionDecision, StepEvidence, StepVerification } from '../../types.js';
+import type { AgentActionResult, AgentDecision, AiTestAgentRun, EvalCase, EvidencePacket, InteractionAction, PageObservation, ReflectionDecision, StepEvidence, StepVerification, WaitPolicy } from '../../types.js';
 import type { AiProvider } from '../ai/provider.js';
 import { ensureDirectory, pathExists, writeJsonAtomic } from '../utils/file-system.js';
 import { chooseAgentAction } from './actor.js';
@@ -12,15 +12,15 @@ import { generateSafeInput } from './safe-input-generator.js';
 import { verifyAgentStep } from './verifier.js';
 import { packageVersion } from '../runtime/paths.js';
 import { semanticJudgePromptV1 } from '../prompts/semantic-judge.v1.js';
-import { capturePageWaitBaseline, waitForAdaptiveOutcome } from './adaptive-wait.js';
 import { runSemanticStepVerifier } from './semantic-verifier.js';
 import { mergeStepVerifications } from './verification-merger.js';
 import { reflectOnStepSemantically } from './semantic-reflector.js';
-import { resolvePersonaPolicy } from '../eval-set/persona-policy.js';
 import { verifierPromptV1 } from '../prompts/verifier.v1.js';
 import { reflectorPromptV1 } from '../prompts/reflector.v1.js';
 import { captureTaskStateSignals } from './task-state-signals.js';
-import { gateVerificationByTaskState, observeTaskState } from './task-state-monitor.js';
+import { gateVerificationByTaskState } from './task-state-monitor.js';
+import { classifyOperation } from './operation-classifier.js';
+import { consumesPersonaAttempt, waitForProgressAwareOutcome, waitPolicyFor } from './progress-aware-wait.js';
 
 interface AgentRunnerOptions {
   outputDir: string;
@@ -35,6 +35,7 @@ interface AgentRunnerOptions {
   judgeModel?: string;
   useSemanticReflector?: boolean;
   waitTimeoutMs?: number;
+  waitPolicy?: Partial<WaitPolicy>;
   now?: () => Date;
 }
 
@@ -93,6 +94,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
   let tracePath: string | null = null;
   let traceStarted = false;
   let finalObservation: PageObservation | null = null;
+  let failedAttempts = 0;
   try {
     await page.context().tracing.start({ screenshots: true, snapshots: true, sources: false });
     traceStarted = true;
@@ -110,12 +112,10 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       screenshots.push(beforeScreenshotPath);
       const before = await observePage(page, [beforeScreenshotPath], `observation-${stepLabel}-before`);
       observations.push(before);
-      const waitBaseline = await capturePageWaitBaseline(page);
       const consoleStart = consoleEvidence.length;
       const networkStart = networkEvidence.length;
       const coreNetworkFailureStart = coreNetworkFailures.length;
       const uncaughtErrorStart = uncaughtErrors.length;
-      const networkResponseStart = networkResponseCount;
       let decision: AgentDecision;
       try {
         decision = await chooseAgentAction({
@@ -146,12 +146,24 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       }
       decisions.push(decision);
       const taskStateBefore = await captureTaskStateSignals(page, decision);
-      const actionStartedAt = performance.now();
       actionResult ??= await executeAgentAction(page, before, decision);
-      const policy = resolvePersonaPolicy(evalCase.persona);
-      const waitResult = await waitForAdaptiveOutcome(page, waitBaseline, decision, options.waitTimeoutMs ?? Math.min(3_000, 750 + policy.patienceTurns * 250));
+      const operationType = classifyOperation({ decision, observation: before, evalCase });
+      const waitResult = await waitForProgressAwareOutcome({
+        page,
+        before: taskStateBefore,
+        decision,
+        actionResult,
+        operationType,
+        policy: waitPolicyFor(operationType, options.waitPolicy, options.waitTimeoutMs),
+        stepIndex,
+        readRuntimeSignals: () => ({
+          activeRequests,
+          responseCount: networkResponseCount,
+          coreNetworkFailures: coreNetworkFailures.slice(coreNetworkFailureStart),
+          consoleErrors: uncaughtErrors.slice(uncaughtErrorStart),
+        }),
+      });
       actionResult = { ...actionResult, summary: `${actionResult.summary} ${waitResult.summary}` };
-      const taskStateAfter = await captureTaskStateSignals(page, decision);
       actionResults.push(actionResult);
       interactions.push(interactionFor(decision, actionResult, interactions.length, performance.now() - monotonicStartedAt, before.pageUrl));
       const afterBuffer = await page.screenshot({ path: afterScreenshotPath, fullPage: true });
@@ -162,19 +174,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       actionResult = { ...actionResult, evidenceRefs: [beforeScreenshotPath, afterScreenshotPath] };
       actionResults[actionResults.length - 1] = actionResult;
       interactions[interactions.length - 1] = interactionFor(decision, actionResult, interactions.length - 1, performance.now() - monotonicStartedAt, before.pageUrl);
-      const taskState = observeTaskState({
-        before: taskStateBefore,
-        after: taskStateAfter,
-        decision,
-        actionResult,
-        waitResult,
-        elapsedMs: performance.now() - actionStartedAt,
-        networkActivity: activeRequests > 0 ? 'active' : 'idle',
-        networkResponses: networkResponseCount - networkResponseStart,
-        coreNetworkFailures: coreNetworkFailures.slice(coreNetworkFailureStart),
-        consoleErrors: uncaughtErrors.slice(uncaughtErrorStart),
-        evidenceRefs: [beforeScreenshotPath, afterScreenshotPath],
-      });
+      const taskState = { ...waitResult.taskState, evidenceRefs: [...new Set([...waitResult.taskState.evidenceRefs, beforeScreenshotPath, afterScreenshotPath])] };
       const deterministicVerification = verifyAgentStep(before, after, decision, actionResult, `verification-${stepLabel}`);
       const screenshotAllowed = inputScreenshotAllowed(provider.info.remote, options.allowScreenshotToProvider);
       const semanticVerification = actionResult.status === 'executed'
@@ -194,6 +194,13 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
         : { status: 'inconclusive' as const, observed: actionResult.summary, confirmedFacts: [], unknowns: ['动作未执行，未调用语义验证器。'], evidenceRefs: actionResult.evidenceRefs, confidence: 1 };
       const mergedVerification = mergeStepVerifications({ deterministic: deterministicVerification, semantic: semanticVerification, hardFailure: actionResult.status === 'failed', expectation: decision.expectedResult, visualEvidenceIncluded: screenshotAllowed });
       const verification = gateVerificationByTaskState(mergedVerification, taskState);
+      const consumedPersonaAttempt = consumesPersonaAttempt(taskState, verification.status);
+      if (consumedPersonaAttempt) failedAttempts += 1;
+      const taskWait = {
+        ...waitResult.taskWait,
+        observations: waitResult.taskWait.observations.map((observation, index, all) => index === all.length - 1 ? taskState : observation),
+        consumedPersonaAttempt,
+      };
       verifications.push(verification);
       stepEvidence.push({
         stepIndex,
@@ -205,12 +212,12 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
         verificationId: verification.verificationId,
         actionStatus: actionResult.status,
         taskState,
+        taskWait,
       });
-      const failedAttempts = verifications.filter((item) => item.status !== 'confirmed').length;
       const retryAttempts = decisions.filter((item) => item.action === decision.action && item.targetElementId === decision.targetElementId).length;
-      const deterministicReflection = reflectOnStep({ evalCase, decision, result: actionResult, verification, failedAttempts, retryAttempts });
+      const deterministicReflection = reflectOnStep({ evalCase, decision, result: actionResult, verification, taskState, failedAttempts, retryAttempts });
       const semanticReflection = options.useSemanticReflector
-        ? await reflectOnStepSemantically({ provider, evalCase, decision, result: actionResult, verification, failedAttempts, retryAttempts, history: reflections, allowRemoteModel: provider.info.remote ? Boolean(options.allowRemoteModel) : true })
+        ? await reflectOnStepSemantically({ provider, evalCase, decision, result: actionResult, verification, taskState, failedAttempts, retryAttempts, history: reflections, allowRemoteModel: provider.info.remote ? Boolean(options.allowRemoteModel) : true })
         : null;
       const reflection = semanticReflection ?? deterministicReflection;
       reflections.push(reflection);
@@ -269,7 +276,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       judgePromptVersion: semanticJudgePromptV1.version,
       verifierPromptVersion: verifierPromptV1.version,
       reflectorPromptVersion: options.useSemanticReflector ? reflectorPromptV1.version : null,
-      toolSchemaVersion: '1.2.0',
+      toolSchemaVersion: '1.3.0',
       timestamp: started.toISOString(),
     },
   };

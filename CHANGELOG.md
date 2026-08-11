@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Replaced the AI Test Agent's single bounded wait with operation-aware soft/hard timeouts, lightweight progress polling, and bounded extensions for navigation, form submission, AI generation, file processing, and unknown async work.
+- Separated waiting from Persona cost: pending/progressing polls create no extra user actions and consume no retry or patience budget; only explicit failure or an unconfirmed stalled result counts as a failed attempt.
+- Added per-step `TaskWaitEvidence` with the selected operation type, policy, state timeline, extension count, final reason, and Persona-attempt decision while keeping pre-Phase-3 packets readable.
 - Added a Task State Monitor between Agent actions and verification, with loading, progress, completion, failure, network, blocked, and stalled evidence persisted per step.
 - Changed pending and progressing actions to remain verification-inconclusive instead of being reported as product failures; pre-monitor Evidence Packets stay readable with an explicit null task state.
 - Changed the normal Dashboard evaluation path to use Product Model → Eval Set selection → AI Test Agent → Hybrid Judge → Finding Triage instead of the Legacy Explorer.

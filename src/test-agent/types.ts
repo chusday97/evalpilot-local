@@ -7,9 +7,12 @@ export type {
   GroundedElement,
   GroundedField,
   PageObservation,
+  OperationType,
   ReflectionDecision,
   SafeInputValue,
   TaskRuntimeState,
   TaskStateObservation,
+  TaskWaitEvidence,
+  WaitPolicy,
   StepVerification,
 } from '../../types.js';

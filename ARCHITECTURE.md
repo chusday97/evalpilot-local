@@ -19,7 +19,9 @@ Adaptive Coverage 按 `capabilityId + dimension + value` 建立功能级单元�
 
 Adaptive AI 运行按动作保存独立 before/after Observation 与截图，并使用 `StepEvidence` 连接 Decision、Verification 和动作状态。Playwright Trace 仅保存到本机且关闭源码采集；Evidence Completeness Gate 会重新核对初始/最终观察、截图、验证和 Trace，任一缺失都只能产生 Evaluator Inconclusive。旧 Evidence Packet 通过内存兼容视图保持可读，但不会被改写或补推为可信结论。
 
-One Evaluation Path Phase 2 在 Action 与 Verification 之间增加 Task State Monitor。信号采集层读取可见加载标记、状态文字、进度数值、DOM 增量、预期结果、完成标记、核心请求和页面未捕获错误；判定层输出 `ready | interacting | pending | progressing | completed | failed | blocked | stalled`。每步状态写入 `StepEvidence.taskState` 与独立 JSONL。`pending/progressing` 会把本步验证门禁为 Inconclusive，避免把尚未结束的任务误报为产品失败；动态轮询与 Persona 等待成本仍属于 Phase 3。
+One Evaluation Path Phase 2 在 Action 与 Verification 之间增加 Task State Monitor。信号采集层读取可见加载标记、状态文字、进度数值、DOM 增量、预期结果、完成标记、核心请求和页面未捕获错误；判定层输出 `ready | interacting | pending | progressing | completed | failed | blocked | stalled`。每步状态写入 `StepEvidence.taskState` 与独立 JSONL。`pending/progressing` 会把本步验证门禁为 Inconclusive，避免把尚未结束的任务误报为产品失败。
+
+Phase 3 由 Operation Classifier 在导航、表单提交、AI 生成、文件处理、未知异步和同步操作之间选择 Wait Policy。Progress-aware Wait 以 1 秒生产轮询观察轻量 Task State；新进度可以延长软截止时间，但扩展次数和硬截止时间始终固定。轮询历史保存在同一 `StepEvidence.taskWait`，不会制造额外用户动作。Persona 失败尝试只由明确 `failed`，或 `stalled + not_confirmed` 增加；等待和推进中的状态不消耗耐心或重试额度。
 
 Phase 5 在确定性步骤验证之后增加 Semantic Verifier，并用失败关闭规则合并：执行硬失败优先，确定性与高置信度语义冲突时为 Inconclusive，低置信度语义不能独立确认，未授权截图时不能确认纯视觉结果。动作后的固定延时已替换为目标文字、路由/DOM、加载标记和网络空闲的有界等待。Reflector 使用 Persona 的显式耐心、重试、隐私和退出策略；可选语义建议不能覆盖安全门禁、确认后的 finish 或固定最大步数。
 

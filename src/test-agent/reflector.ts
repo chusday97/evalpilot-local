@@ -1,10 +1,11 @@
-import type { AgentActionResult, AgentDecision, EvalCase, ReflectionDecision, StepVerification } from '../../types.js';
+import type { AgentActionResult, AgentDecision, EvalCase, ReflectionDecision, StepVerification, TaskStateObservation } from '../../types.js';
 import { resolvePersonaPolicy } from '../eval-set/persona-policy.js';
 import { reflectionDecisionSchema } from './schemas.js';
 
-export function reflectOnStep(input: { evalCase: EvalCase; decision: AgentDecision; result: AgentActionResult; verification: StepVerification; failedAttempts: number; retryAttempts?: number }): ReflectionDecision {
+export function reflectOnStep(input: { evalCase: EvalCase; decision: AgentDecision; result: AgentActionResult; verification: StepVerification; taskState?: TaskStateObservation; failedAttempts: number; retryAttempts?: number }): ReflectionDecision {
   const policy = resolvePersonaPolicy(input.evalCase.persona);
   const retryAttempts = input.retryAttempts ?? 0;
+  if (input.taskState?.state === 'pending' || input.taskState?.state === 'progressing') return reflectionDecisionSchema.parse({ nextStep: 'continue', summary: '任务仍在处理，等待过程不消耗 Persona 的失败尝试。', confidence: 1 });
   if (input.result.status === 'blocked_by_safety') return reflectionDecisionSchema.parse({ nextStep: 'abandon', summary: '安全边界阻止继续自动操作。', confidence: 1 });
   if (input.decision.action === 'finish' && input.verification.status === 'confirmed') return reflectionDecisionSchema.parse({ nextStep: 'finish', summary: 'Actor 已基于可见证据完成任务。', confidence: input.verification.confidence });
   if (input.decision.action === 'abandon') return reflectionDecisionSchema.parse({ nextStep: 'abandon', summary: 'Persona 选择放弃当前路径。', confidence: input.decision.confidence });

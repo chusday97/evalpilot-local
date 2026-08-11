@@ -961,6 +961,26 @@ export interface TaskStateObservation {
   evidenceRefs: string[];
 }
 
+export type OperationType = 'navigation' | 'form_submit' | 'ai_generation' | 'file_processing' | 'unknown_async' | 'synchronous';
+
+export interface WaitPolicy {
+  initialObservationMs: number;
+  pollIntervalMs: number;
+  softTimeoutMs: number;
+  hardTimeoutMs: number;
+  progressExtensionMs: number;
+  maxProgressExtensions: number;
+}
+
+export interface TaskWaitEvidence {
+  operationType: OperationType;
+  policy: WaitPolicy;
+  observations: TaskStateObservation[];
+  extensionsUsed: number;
+  finalReason: 'completed' | 'failed' | 'blocked' | 'soft_timeout' | 'hard_timeout' | 'not_needed';
+  consumedPersonaAttempt: boolean;
+}
+
 export interface StepEvidence {
   stepIndex: number;
   beforeObservationId: string;
@@ -972,6 +992,8 @@ export interface StepEvidence {
   actionStatus: AgentActionResult['status'];
   /** null means this packet predates task-state monitoring; no state is inferred. */
   taskState: TaskStateObservation | null;
+  /** null means this packet predates progress-aware waiting; no wait behavior is inferred. */
+  taskWait: TaskWaitEvidence | null;
 }
 
 export interface EvidenceCompleteness {

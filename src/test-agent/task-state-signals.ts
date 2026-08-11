@@ -47,7 +47,7 @@ export async function captureTaskStateSignals(page: Page, decision: AgentDecisio
     const loadingWords = ['loading', 'generating', 'processing', 'uploading', 'thinking', 'searching', '加载中', '生成中', '处理中', '上传中', '思考中', '搜索中'];
     for (const word of loadingWords) if (lowerBodyText.includes(word)) loading.push(`页面显示“${word}”`);
 
-    const statusElements = Array.from(document.querySelectorAll('[role="status"],[aria-live],[data-status],[role="progressbar"]')).filter(visible);
+    const statusElements = Array.from(document.querySelectorAll('[role="status"],[aria-live],[data-status],[role="progressbar"],[aria-busy="true"],.loading,.spinner,[data-loading="true"]')).filter(visible);
     const statusTexts = unique(statusElements.map((element) => clean(element.textContent)).filter(Boolean)).slice(0, 12);
     const progressValues = unique(statusElements.flatMap((element) => {
       const values = [element.getAttribute('aria-valuenow'), element.getAttribute('data-progress')].filter((value): value is string => Boolean(value));

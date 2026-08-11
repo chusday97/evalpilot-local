@@ -82,6 +82,28 @@ export const taskStateObservationSchema = z.object({
   evidenceRefs: z.array(z.string()),
 }).strict();
 
+export const operationTypeSchema = z.enum(['navigation', 'form_submit', 'ai_generation', 'file_processing', 'unknown_async', 'synchronous']);
+
+export const waitPolicySchema = z.object({
+  initialObservationMs: z.number().int().nonnegative(),
+  pollIntervalMs: z.number().int().positive(),
+  softTimeoutMs: z.number().int().positive(),
+  hardTimeoutMs: z.number().int().positive(),
+  progressExtensionMs: z.number().int().nonnegative(),
+  maxProgressExtensions: z.number().int().nonnegative(),
+}).strict().superRefine((value, context) => {
+  if (value.softTimeoutMs > value.hardTimeoutMs) context.addIssue({ code: 'custom', path: ['softTimeoutMs'], message: '软超时不能超过硬超时。' });
+});
+
+export const taskWaitEvidenceSchema = z.object({
+  operationType: operationTypeSchema,
+  policy: waitPolicySchema,
+  observations: z.array(taskStateObservationSchema).min(1),
+  extensionsUsed: z.number().int().nonnegative(),
+  finalReason: z.enum(['completed', 'failed', 'blocked', 'soft_timeout', 'hard_timeout', 'not_needed']),
+  consumedPersonaAttempt: z.boolean(),
+}).strict();
+
 export const stepEvidenceSchema = z.object({
   stepIndex: z.number().int().positive(),
   beforeObservationId: z.string().min(1),
@@ -92,6 +114,7 @@ export const stepEvidenceSchema = z.object({
   verificationId: z.string().min(1),
   actionStatus: z.enum(['executed', 'blocked_by_safety', 'failed']),
   taskState: taskStateObservationSchema.nullable().default(null),
+  taskWait: taskWaitEvidenceSchema.nullable().default(null),
 }).strict();
 
 export const evidenceCompletenessSchema = z.object({
