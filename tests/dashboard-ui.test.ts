@@ -2,13 +2,13 @@ import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 
 describe('dashboard UI contract', () => {
-  it('contains the guided home, four-step product loop, and mandatory feedback surfaces', async () => {
+  it('contains the guided home, six-step product loop, and mandatory feedback surfaces', async () => {
     const source = [
       await readFile(new URL('../dashboard/src/App.tsx', import.meta.url), 'utf8'),
       await readFile(new URL('../dashboard/src/GuidedPages.tsx', import.meta.url), 'utf8'),
       await readFile(new URL('../dashboard/src/IssueDetail.tsx', import.meta.url), 'utf8'),
     ].join('\n');
-    for (const label of ['使用说明', '跟着当前任务往下做', '上一次评测', '添加与切换', '评测集', '运行', '发现', 'Agent 与复测', '回归', '快速检查', '核心评测', '完整评测']) {
+    for (const label of ['使用说明', '跟着当前任务往下做', '上一次评测', '添加与切换', '选择范围并开始', '运行', '发现', 'Agent 与复测', '回归', '快速检查', '核心评测', '完整评测']) {
       expect(source).toContain(label);
     }
     expect(source).toContain('Skeleton');

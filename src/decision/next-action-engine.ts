@@ -149,7 +149,7 @@ export function decideEvaluationNextAction(input: EvaluationDecisionInput): Eval
     type: 'no_action', title: allCriticalPass ? '当前无需处理' : '没有可安全推荐的动作',
     explanation: allCriticalPass ? '所有已选择的关键案例都已通过，且没有待确认的产品失败。' : '当前证据没有形成可执行结论；系统不会为了给出建议而猜测。',
     targetCaseIds: [], targetFindingIds: [], targetBadcaseIds: [], primaryCta: null,
-    secondaryCtas: [{ label: '查看评测集', route: '/eval-set' }],
+    secondaryCtas: [{ label: '查看评测案例', route: '/eval-set' }],
   });
 }
 
@@ -163,7 +163,7 @@ export async function nextActionForEvaluation(cwd: string, evaluationId: string,
   const session = (await listEvaluations(cwd, projectId)).find((item) => item.evaluationId === evaluationId);
   if (!session) throw new EvalPilotError(`没有找到评测：${evaluationId}`, 'EVALUATION_NOT_FOUND');
   if (session.runtime === 'legacy') {
-    return action({ type: 'no_action', title: '旧评测仅供查看', explanation: '旧记录缺少新式 Case、证据和 Finding 谱系，系统不会据此猜测下一步。请新建一次 Adaptive 评测。', targetCaseIds: [], targetFindingIds: [], targetBadcaseIds: [], primaryCta: null, secondaryCtas: [{ label: '新建评测', route: '/evaluate' }] });
+    return action({ type: 'no_action', title: '旧评测仅供查看', explanation: '旧记录缺少新式案例、证据和问题谱系，系统不会据此猜测下一步。请新建一次评测。', targetCaseIds: [], targetFindingIds: [], targetBadcaseIds: [], primaryCta: null, secondaryCtas: [{ label: '新建评测', route: '/evaluate' }] });
   }
 
   const allCases = await loadEvalSetCases(config.outputDir).catch(() => []);

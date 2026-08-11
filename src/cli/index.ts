@@ -16,7 +16,6 @@ import { generateCases } from '../generation/scenario-builder.js';
 import { runScenarios } from '../runner/scenario-runner.js';
 import { runRegression } from '../runner/regression-runner.js';
 import { buildReport } from '../report/report-builder.js';
-import { runExploratoryScenario } from '../ux-evaluation/exploratory-runner.js';
 import { startDashboardServer } from '../dashboard/server.js';
 import { EvalPilotError } from '../utils/errors.js';
 import { dashboardAssetsRoot, isLegacyDataRoot, migrateLegacyData, packageVersion, resolveDataRoot } from '../runtime/paths.js';
@@ -179,18 +178,7 @@ export function createProgram(cwd = process.cwd()): Command {
     .description('用 Chromium 执行自动评测案例')
     .option('--case <case-id>', '只执行指定案例')
     .option('--regression', '执行已确认失败的回归案例')
-    .option('--exploratory', '执行不知道标准路径的探索型模拟用户案例')
-    .action(async ({ case: caseId, regression, exploratory }: { case?: string; regression?: boolean; exploratory?: boolean }) => {
-      if (regression && exploratory) {
-        throw new EvalPilotError('--regression 与 --exploratory 不能同时使用。', 'RUN_MODE_CONFLICT');
-      }
-      if (exploratory) {
-        const run = await runExploratoryScenario(await loadConfig(cwd), caseId);
-        process.stdout.write(
-          `探索型模拟用户运行完成。\n案例：${run.scenario.caseId}\n动作：${run.actions.length}\n用户目标：${run.metrics.taskCompleted ? '完成' : '未完成'}\n完整闭环：${run.metrics.fullLoopCompleted ? '完成' : '未完成'}\n是否放弃：${run.metrics.abandoned ? '是' : '否'}\nUX 判定：${run.evaluation.verdict}\n证据目录：${run.runDirectory}\n报告：${resolve((await loadConfig(cwd)).outputDir, 'reports', 'LATEST_UX_REPORT.md')}\n`,
-        );
-        return;
-      }
+    .action(async ({ case: caseId, regression }: { case?: string; regression?: boolean }) => {
       if (regression) {
         const run = await runRegression(await loadConfig(cwd));
         const passed = run.results.filter((result) => result.status === 'passed').length;

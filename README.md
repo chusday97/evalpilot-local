@@ -11,7 +11,7 @@ EvalPilot Local is a local-first pre-release evaluation tool for web products.
 - [为什么做 EvalPilot](#为什么做-evalpilot)
 - [评测流程](#评测流程)
 - [证据优先机制](#证据优先机制)
-- [两种评测路径](#两种评测路径)
+- [一条默认评测路径](#一条默认评测路径)
 - [Agent 交接](#agent-交接)
 - [Benchmark 与声明边界](#benchmark-与声明边界)
 - [系统架构](#系统架构)
@@ -23,7 +23,7 @@ EvalPilot Local is a local-first pre-release evaluation tool for web products.
 - [Why EvalPilot](#why-evalpilot)
 - [Evaluation Flow](#evaluation-flow)
 - [Evidence-First Model](#evidence-first-model)
-- [Two Evaluation Paths](#two-evaluation-paths)
+- [One Default Evaluation Path](#one-default-evaluation-path)
 - [Agent Handoff](#agent-handoff)
 - [Benchmark & Claim Boundaries](#benchmark--claim-boundaries)
 - [Architecture](#architecture)
@@ -100,30 +100,17 @@ EvalPilot 不因为 AI 输出了一段合理解释，就直接把它当作 Findi
 
 当不同信号冲突时，系统可以保留“不确定”，而不是强制输出一个看似确定的结论。
 
-## 两种评测路径
+## 一条默认评测路径
 
-### Legacy Evaluation
-
-Public Alpha 的默认稳定流程：
+Dashboard 和 CLI 只提供一条面向用户的评测流程：
 
 ```text
 Project → Evaluation → Findings → Evidence → Repair Task → Retest
 ```
 
-更强调确定性浏览器执行与可复现证据。
+系统内部会完成任务理解、案例选择、AI 用户执行、证据门禁、问题分级与回归沉淀，普通用户不需要在两套运行方式之间做选择。
 
-### Experimental Adaptive Evaluation
-
-实验路径探索：
-
-- AI User 风格的任务执行；
-- Evidence Gate；
-- Adaptive Eval Set；
-- Semantic Step Verification；
-- Product Understanding / Oracle；
-- Finding → Badcase → Regression。
-
-这条路径仍是实验能力，不代表系统已经达到可靠的全自动产品评测。
+旧版本评测记录仍可只读查看，但不能重试或补写证据。旧版运行器仅暂留给迁移测试、兼容修复复测和内部诊断，并计划在一个发行周期后重新评估删除。当前能力仍不代表系统已经达到可靠的全自动产品评测。
 
 ## Agent 交接
 
@@ -216,7 +203,7 @@ npm run test:real-benchmark
 - Windows 尚未作为正式目标环境；
 - 真实模型外部 Benchmark 覆盖还不完整；
 - AI 模拟不能替代真实用户满意度和业务指标；
-- Adaptive Evaluation 仍需要结合证据人工复核。
+- AI 评测结论仍需要结合证据人工复核。
 
 ---
 
@@ -265,21 +252,17 @@ The system separates execution evidence, deterministic browser signals, optional
 
 When signals conflict, uncertainty can remain explicit instead of being forced into a false binary judgment.
 
-## Two Evaluation Paths
+## One Default Evaluation Path
 
-### Legacy Evaluation
-
-The default Public Alpha workflow:
+The Dashboard and public CLI expose one user-facing workflow:
 
 ```text
 Project → Evaluation → Findings → Evidence → Repair Task → Retest
 ```
 
-### Experimental Adaptive Evaluation
+Internally, EvalPilot handles task understanding, case selection, AI-user execution, evidence gating, finding triage, and regression lineage. Users do not choose between competing runtimes.
 
-An experimental path exploring AI-user execution, adaptive Eval Sets, semantic verification, Product Understanding, and Finding → Badcase → Regression workflows.
-
-It does not imply reliable autonomous product evaluation.
+Records created by older releases remain read-only. The old runner is temporarily retained only for migration tests, compatibility repair retests, and internal diagnostics, and will be reconsidered after one release cycle. This does not imply reliable autonomous product evaluation.
 
 ## Agent Handoff
 

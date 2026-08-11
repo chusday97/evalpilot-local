@@ -80,7 +80,7 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const provider = dependencies.provider ?? configuredEvaluationProvider();
   const foundation = await ensureFoundation(input.projectId, config.outputDir, provider);
   const selection = selectEvaluationCases({ model: foundation.model, cases: foundation.cases, depth: input.depth, capabilityIds: input.capabilityIds });
-  if (!selection.cases.length) throw new EvalPilotError('所选功能没有可运行的 Adaptive 评测案例。请重新生成评测集或调整功能范围。', 'EVALUATION_CASE_NOT_FOUND');
+  if (!selection.cases.length) throw new EvalPilotError('所选功能没有可运行的评测案例。请重新整理案例或调整功能范围。', 'EVALUATION_CASE_NOT_FOUND');
   await hooks.prepared?.(selection, foundation.model);
 
   const browser = await (dependencies.launchBrowser?.() ?? chromium.launch({ headless: true }));

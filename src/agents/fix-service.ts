@@ -136,6 +136,8 @@ async function retest(cwd: string, task: FixTask, run: AgentRun, projectRoot: st
   try {
     const branchUrl = `http://127.0.0.1:${port}`; let ready = false; for (let index = 0; index < 40; index += 1) { await new Promise((wait) => setTimeout(wait, 250)); try { const response = await fetch(branchUrl); if (response.status < 500) { ready = true; break; } } catch { /* wait */ } if (child.exitCode !== null) break; }
     if (!ready) return { comparisonId: null, verdict: 'needs_review', blockers: ['修复分支测试网址未能启动。'] };
+    // Compatibility-only retest for immutable legacy issue snapshots. New Finding/Badcase
+    // repair verification must use the current evaluation path instead of this runner.
     const result = await runExploratoryScenario({ ...config, projectRoot: run.worktreePath!, targetUrl: branchUrl }, task.retestCaseId ?? undefined); const comparisons = await buildConfirmedComparisons(config, [{ ...issue, addedToRegression: true }], result); const comparison = comparisons[0];
     return comparison ? { comparisonId: comparison.comparisonId, verdict: comparison.verdict === 'needs_human_review' ? 'needs_review' : comparison.verdict, blockers: comparison.verdict === 'improved' ? [] : [`修复复测结果为 ${comparison.verdict}。`] } : { comparisonId: null, verdict: 'needs_review', blockers: ['缺少可关联的修复前证据，无法自动生成前后对比。'] };
   } finally { child.kill('SIGTERM'); }

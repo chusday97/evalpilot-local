@@ -11,6 +11,7 @@ export const evaluationOrchestratorInputSchema = z.object({
   capabilityIds: z.array(storageIdSchema),
   allowRemoteModel: z.literal(true),
   allowScreenshot: z.boolean(),
+  // @deprecated legacy evaluation runtime compatibility marker; normal evaluation always uses false.
   legacyFallback: z.literal(false).optional(),
 }).strict();
 

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Quarantined the legacy evaluation runtime: old records remain read-only while the public CLI and Dashboard can no longer create or control legacy exploratory runs.
+- Changed the normal Dashboard flow to Projects → Evaluation → Runs → Findings → Fixes → Regression; evaluation cases remain available as advanced detail.
+- Marked the legacy exploratory runner deprecated for one release cycle and limited it to migration tests, compatibility repair retests, and internal diagnostics.
+
 - Added a ten-fixture evaluator regression suite covering slow and streaming AI output, loading and stall semantics, Persona patience, immutable issue snapshots, and safe next-action routing; Chromium CI now runs it on every change.
 - Fixed progress-aware waiting so each earned extension adds to the existing deadline instead of prematurely consuming the bounded extension budget during streaming output.
 - Standardized the confirmed Product Failure action as “生成 Codex 修复任务” across the decision engine and browser acceptance tests.

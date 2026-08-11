@@ -1,3 +1,4 @@
+/** @deprecated legacy evaluation runtime. Kept for migration tests and internal diagnostics only. */
 import type { DashboardRunStatus, EvalPilotConfig, InteractionAction, RunEvent } from '../../types.js';
 import { runExploratoryScenario, type ExploratoryRunSummary } from '../ux-evaluation/exploratory-runner.js';
 import { buildConfirmedComparisons } from '../ux-evaluation/comparison-service.js';

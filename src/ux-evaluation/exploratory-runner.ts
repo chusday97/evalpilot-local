@@ -167,6 +167,11 @@ async function loadInputs(config: EvalPilotConfig, caseId?: string): Promise<{
   }
 }
 
+/**
+ * @deprecated legacy evaluation runtime. Compatibility-only for migration tests,
+ * legacy repair retests, and internal diagnostics. Do not call from normal
+ * evaluation, Dashboard routes, or the public CLI.
+ */
 export async function runExploratoryScenario(
   config: EvalPilotConfig,
   caseId?: string,

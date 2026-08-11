@@ -151,9 +151,12 @@ describe('multi-project workspace', () => {
     const project = await registerProject(cwd, { projectRoot: target, targetUrl: 'http://127.0.0.1:9' });
     await mkdir(resolve(project.outputDir, 'evaluations'), { recursive: true });
     const legacySession = { evaluationId: 'evaluation-legacy-failed', projectId: project.projectId, sequenceNumber: 1, depth: 'core', capabilityIds: [], capabilityNames: [], customName: null, competitorSnapshotIds: [], issueIds: [], status: 'failed', currentStage: 'run', stages: [{ name: 'run', status: 'failed', message: 'legacy failed' }], runIds: [], startedAt: new Date().toISOString(), completedAt: new Date().toISOString(), error: 'legacy failed' };
-    await writeFile(resolve(project.outputDir, 'evaluations', 'sessions.jsonl'), `${JSON.stringify(legacySession)}\n`);
+    const sessionsPath = resolve(project.outputDir, 'evaluations', 'sessions.jsonl');
+    const rawLegacySession = `${JSON.stringify(legacySession)}\n`;
+    await writeFile(sessionsPath, rawLegacySession);
 
     await expect(retryEvaluation(cwd, legacySession.evaluationId)).rejects.toMatchObject({ code: 'LEGACY_EVALUATION_READ_ONLY' });
+    expect(await readFile(sessionsPath, 'utf8')).toBe(rawLegacySession);
   });
 
   it('returns understandable depth options and semantic evaluation records', async () => {

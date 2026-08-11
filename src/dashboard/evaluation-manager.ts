@@ -48,7 +48,7 @@ async function executeEvaluation(cwd: string, managed: ManagedEvaluation): Promi
     if (session.stages.find((item) => item.name === 'background')?.status !== 'completed') { await setStage(managed, config.outputDir, 'background', 'running', '正在生成产品背景。'); await generateBackground(config); await setStage(managed, config.outputDir, 'background', 'completed', '产品背景已生成。'); }
     if (session.stages.find((item) => item.name === 'blueprint')?.status !== 'completed') { await setStage(managed, config.outputDir, 'blueprint', 'running', '正在生成评测蓝图。'); await generateBlueprint(config); await setStage(managed, config.outputDir, 'blueprint', 'completed', '评测蓝图已生成。'); }
     if (session.stages.find((item) => item.name === 'run')?.status !== 'completed') {
-      if (session.stages.find((item) => item.name === 'cases')?.status !== 'completed') await setStage(managed, config.outputDir, 'cases', 'running', '正在建立或读取 Adaptive 评测集。');
+      if (session.stages.find((item) => item.name === 'cases')?.status !== 'completed') await setStage(managed, config.outputDir, 'cases', 'running', '正在建立或读取评测案例。');
       const prepared: { selection: EvalSetSelection | null; model: ProductModel | null } = { selection: null, model: null };
       const result = await runEvaluationOrchestrator(cwd, { projectId: session.projectId, evaluationId: session.evaluationId, depth: session.depth, capabilityIds: session.capabilityIds, allowRemoteModel: true, allowScreenshot: session.screenshotAuthorized, legacyFallback: false }, {
         prepared: async (preparedSelection, preparedModel) => {
@@ -56,12 +56,12 @@ async function executeEvaluation(cwd: string, managed: ManagedEvaluation): Promi
           session.selectedCaseIds = preparedSelection.cases.map((item) => item.caseId);
           session.plannedCapabilityIds = [...new Set(preparedSelection.cases.map((item) => item.capabilityId))];
           session.plannedCapabilityNames = session.plannedCapabilityIds.map((id) => preparedModel.capabilities.find((item) => item.capabilityId === id)?.name ?? id);
-          await setStage(managed, config.outputDir, 'cases', 'completed', `已选择 ${preparedSelection.cases.length} 个 Adaptive 评测任务。`);
+          await setStage(managed, config.outputDir, 'cases', 'completed', `已选择 ${preparedSelection.cases.length} 个评测任务。`);
           await setStage(managed, config.outputDir, 'run', 'running', 'AI Test Agent 正在操作页面、保存截图和本地 Trace。');
         },
         caseCompleted: async (completed, total, evalCase) => { emit(managed, `已完成 ${completed}/${total}：${evalCase.title}`); await persist(config.outputDir, session); },
       });
-      if (!prepared.selection || !prepared.model) throw new EvalPilotError('评测集没有完成准备。', 'EVALUATION_CASE_NOT_FOUND');
+      if (!prepared.selection || !prepared.model) throw new EvalPilotError('评测案例没有完成准备。', 'EVALUATION_CASE_NOT_FOUND');
       session.runIds = result.runIds; session.findingIds = result.findings.map((item) => item.findingId); session.badcaseIds = result.badcases.map((item) => item.badcaseId); session.coverageMatrix = result.coverage;
       session.coverage = adaptiveCoverageSummary(prepared.model, prepared.selection.cases, result.results);
       const executed = session.coverage.capabilities.filter((item) => item.executionStatus !== 'not_run');
@@ -70,8 +70,8 @@ async function executeEvaluation(cwd: string, managed: ManagedEvaluation): Promi
       const coverageMessage = session.coverage.complete ? `已实际运行 ${session.coverage.executedCount} 个计划功能。` : `仍有 ${session.coverage.notRunCount} 个计划功能未运行。`;
       await setStage(managed, config.outputDir, 'run', 'completed', `真实路径执行完成。${coverageMessage}`);
     }
-    if (session.stages.find((item) => item.name === 'report')?.status !== 'completed') { await setStage(managed, config.outputDir, 'report', 'running', '正在保存 Adaptive Judge、Finding 和覆盖结果。'); await setStage(managed, config.outputDir, 'report', 'completed', 'Adaptive 评测报告已生成。'); }
-    session.status = 'completed'; session.completedAt = new Date().toISOString(); emit(managed, '评测完成，可以查看 Adaptive 运行结果。'); await persist(config.outputDir, session);
+    if (session.stages.find((item) => item.name === 'report')?.status !== 'completed') { await setStage(managed, config.outputDir, 'report', 'running', '正在保存判断、问题和覆盖结果。'); await setStage(managed, config.outputDir, 'report', 'completed', '评测报告已生成。'); }
+    session.status = 'completed'; session.completedAt = new Date().toISOString(); emit(managed, '评测完成，可以查看运行结果。'); await persist(config.outputDir, session);
   } catch (error) { session.status = 'failed'; session.error = error instanceof Error ? error.message : String(error); session.completedAt = new Date().toISOString(); const stage = session.stages.find((item) => item.name === session.currentStage)!; stage.status = 'failed'; stage.message = session.error; emit(managed, `评测停止：${session.error}`); await persist(config.outputDir, session); }
 }
 
@@ -81,7 +81,7 @@ function adaptiveCoverageSummary(model: ProductModel, cases: EvalCase[], results
     const caseResults = cases.filter((item) => item.capabilityId === capabilityId).map((item) => resultByCase.get(item.caseId)).filter((item): item is NonNullable<typeof item> => Boolean(item));
     const executionStatus = !caseResults.length ? 'not_run' : caseResults.some((item) => item.verdict === 'fail' && item.failureSource === 'product') ? 'failed' : caseResults.some((item) => item.verdict !== 'pass') ? 'blocked' : 'passed';
     const capability = model.capabilities.find((item) => item.capabilityId === capabilityId);
-    return { capabilityId, capabilityName: capability?.name ?? capabilityId, entryPoint: capability?.entryPoints[0] ?? null, discovered: true, browserVisited: caseResults.length > 0, executionStatus, runIds: caseResults.map((item) => item.runId), reason: executionStatus === 'passed' ? '所选 Adaptive 任务均通过证据门禁' : executionStatus === 'failed' ? '存在已确认产品失败' : executionStatus === 'blocked' ? '至少一个任务无法判断' : '尚未运行' } as const;
+    return { capabilityId, capabilityName: capability?.name ?? capabilityId, entryPoint: capability?.entryPoints[0] ?? null, discovered: true, browserVisited: caseResults.length > 0, executionStatus, runIds: caseResults.map((item) => item.runId), reason: executionStatus === 'passed' ? '所选任务均通过证据门禁' : executionStatus === 'failed' ? '存在已确认产品失败' : executionStatus === 'blocked' ? '至少一个任务无法判断' : '尚未运行' } as const;
   });
   return { discoveredCount: model.capabilities.length, plannedCount: capabilities.length, browserVisitedCount: capabilities.filter((item) => item.browserVisited).length, executedCount: capabilities.filter((item) => item.executionStatus !== 'not_run').length, passedCount: capabilities.filter((item) => item.executionStatus === 'passed').length, failedCount: capabilities.filter((item) => item.executionStatus === 'failed').length, blockedCount: capabilities.filter((item) => item.executionStatus === 'blocked').length, notApplicableCount: 0, notRunCount: capabilities.filter((item) => item.executionStatus === 'not_run').length, complete: capabilities.every((item) => item.executionStatus !== 'not_run'), capabilities };
 }
@@ -223,7 +223,7 @@ export async function retryEvaluation(cwd: string, evaluationId: string): Promis
   }
   if (!managed) throw new EvalPilotError(`没有找到评测：${evaluationId}`, 'EVALUATION_NOT_FOUND');
   if (managed.session.status !== 'failed' && managed.session.status !== 'stopped') throw new EvalPilotError('只有失败或中断的评测可以恢复。', 'EVALUATION_NOT_RECOVERABLE');
-  if (managed.session.runtime === 'legacy' || !managed.session.remoteModelAuthorized) throw new EvalPilotError('旧评测只供查看，不能在没有本次 AI 授权的情况下重试。请新建一次 Adaptive 评测。', 'LEGACY_EVALUATION_READ_ONLY');
+  if (managed.session.runtime === 'legacy' || !managed.session.remoteModelAuthorized) throw new EvalPilotError('旧评测只供查看，不能重试或补写证据。请新建一次评测。', 'LEGACY_EVALUATION_READ_ONLY');
   const failed = managed.session.stages.find((item) => item.status === 'failed'); if (failed) { failed.status = 'pending'; failed.message = null; }
   managed.session.status = 'queued'; void executeEvaluation(cwd, managed); return managed.session;
 }

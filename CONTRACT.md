@@ -103,11 +103,7 @@ CLI 错误写入标准错误并使用非零退出码；异步失败不得静默�
 | GET/PATCH | `/api/personas/:id` | PATCH 为 `Partial<Persona>` | `Persona` | `PERSONA_NOT_FOUND`, `PERSONA_INVALID` |
 | GET/POST/PATCH/DELETE | `/api/cases` | 创建/修改使用 `Scenario` 或 `ExploratoryScenario` | 案例或案例列表 | `CASE_INVALID`, `CASE_NOT_FOUND` |
 | GET/PATCH | `/api/journeys/:featureId` | PATCH 为 `Partial<FeatureJourneyGraph>` | `FeatureJourneyGraph` | `JOURNEY_NOT_FOUND`, `JOURNEY_INVALID` |
-| POST | `/api/runs` | `{ caseId, mode }` | `{ runId, status }` | `RUN_CONFLICT`, `CASE_NOT_FOUND`, `BROWSER_BLOCKED` |
-| POST | `/api/runs/:id/pause` | 无 | `{ runId, status: "paused" }` | `RUN_NOT_ACTIVE` |
-| POST | `/api/runs/:id/resume` | 无 | `{ runId, status: "running" }` | `RUN_NOT_PAUSED` |
-| POST | `/api/runs/:id/stop` | `{ confirmed: true }` | 已保存的部分运行摘要 | `CONFIRMATION_REQUIRED`, `RUN_NOT_ACTIVE` |
-| GET | `/api/runs/:id/events` | 无 | SSE `RunEvent` | `RUN_NOT_FOUND` |
+| GET/POST | `/api/runs`、`/api/runs/:id`、旧运行控制与事件 | 兼容入口已隔离 | `410 LEGACY_RUNTIME_QUARANTINED`；旧评测历史改从 Evaluation 接口只读查看 |
 | GET | `/api/reports/latest` | 无 | 功能报告与 UX 报告 | `REPORT_NOT_FOUND` |
 | POST | `/api/issues/:id/confirm` | `{ confirmed: true }` | `UxIssue` | `CONFIRMATION_REQUIRED`, `ISSUE_NOT_FOUND` |
 | GET | `/api/comparisons/:id` | 无 | `BeforeAfterComparison` | `COMPARISON_NOT_FOUND` |
@@ -433,7 +429,7 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 
 ## 15. EvalPilot Next Phase 7 Dashboard 读取与生成接口
 
-主导航迁移为 `Projects → Eval Set → Runs → Findings → Fixes → Regression`。首页仍从品牌入口访问，旧 `/evaluate`、`/issues` 与现有 API 保持兼容。
+Phase 10 后普通主导航为 `Projects → Evaluation → Runs → Findings → Fixes → Regression`。首页仍从品牌入口访问；`/eval-set` 降为评测的高级案例与覆盖详情兼容路由。
 
 | Method | Path | 说明 |
 |---|---|---|
@@ -493,3 +489,13 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - 每次保存 `EvaluatorBadcase` 后，必须同步重建 `evaluator-badcases/EVALUATOR_BADCASES.md`；该文档必须明确这些记录属于评测器自身问题，不是产品 Bug，也不进入 Product Regression。
 - 派生文档写入失败必须向调用方返回错误，不能静默吞掉；已经完成原子写入的 JSON 事实源保持可恢复，下一次保存可重新生成文档。
 - 上述运行时文档保存在项目独立的本地数据目录，受 `.evalpilot` / 用户数据目录边界保护，不进入 npm 包或 GitHub。公开仓库只保存文档规则、脱敏测试夹具和可复现验证方法。
+
+## 21. Phase 10 Legacy Quarantine 契约
+
+- 普通用户唯一评测路径固定为 `项目 → 评测 → 运行 → 发现 → 修复 → 回归`。`/evaluate` 只能调用新的评测编排器，不得调用或回退旧版探索运行时。
+- Eval Set 保留为评测页中的高级案例与覆盖概念；兼容路由 `/eval-set` 可以只读或管理新架构案例，但不得出现在普通主导航中，也不得要求新用户先理解内部架构名词。
+- 缺少 `runtime` 的旧 `EvaluationSession` 继续按 `runtime=legacy` 在内存中兼容读取；读取、列表和报告展示不得回写或补推新证据。旧记录的重试必须返回 `LEGACY_EVALUATION_READ_ONLY`。
+- 公开 CLI 不再接受 `run --exploratory`。旧 Dashboard `POST /api/runs`、运行控制和事件订阅入口统一返回 `410 LEGACY_RUNTIME_QUARANTINED`，并引导用户从“评测”页开始；不得静默转入新运行或继续创建旧记录。
+- 旧版 runner 暂保留一个发行周期，只允许迁移测试、兼容修复复测和内部诊断直接调用。其导出必须标注 `@deprecated legacy evaluation runtime`；普通 Dashboard、评测管理器和公开 CLI 不得导入。
+- `EvaluationRuntime` 的 `legacy` 值及 `EvaluationOrchestratorInput.legacyFallback` 仅为读取/Schema 兼容保留；新增运行固定为 `runtime=adaptive` 且 `legacyFallback=false`。本阶段不删除旧文件、不覆盖用户历史数据。
+- 普通 Dashboard 文案不得显示 `Legacy Evaluation`、`Adaptive Evaluation` 或把“评测集”作为独立主步骤；旧记录仅以“旧记录，只供查看”等用户可理解的说明呈现。

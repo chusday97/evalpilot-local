@@ -16,7 +16,6 @@ import { exploratoryScenarioSchema, featureJourneyGraphSchema } from '../schemas
 import { EvalPilotError } from '../utils/errors.js';
 import { pathExists, readJsonLinesFile, readYamlFile, writeJsonAtomic, writeJsonLinesAtomic, writeYamlAtomic } from '../utils/file-system.js';
 import { loadDashboardOverview, readOptionalText, validateDashboardHost } from './dashboard-data.js';
-import { getDashboardRun, pauseDashboardRun, resumeDashboardRun, startDashboardRun, stopDashboardRun, subscribeDashboardRun, type ManagedRunEvent } from './run-manager.js';
 import { evaluationDepthOptions, evaluationSnapshot, listEvaluationRecords, listEvaluations, renameEvaluation, retryEvaluation, startEvaluation, subscribeEvaluation } from './evaluation-manager.js';
 import { agentSnapshot, applyFix, createFixTask, listAgentRuns, listFixTasks, startAgent, subscribeAgent } from '../agents/fix-service.js';
 import { detectAgentConnections, discoverWorkspaceCandidates, PUBLIC_ALPHA_DIRECT_FIX_ENABLED } from '../agents/agent-discovery.js';
@@ -345,23 +344,12 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
         selectedRunDirectory ? readOptionalText(resolve(selectedRunDirectory, 'journey-comparison.json')).then((value) => value ? JSON.parse(value) : null) : readLatestRunArtifact(config.outputDir, 'journey-comparison.json'),
         readComparisons(config.outputDir),
       ]);
-      if (!markdown && !evaluation) return fail(404, 'REPORT_NOT_FOUND', '尚无 UX 报告，请先运行探索案例。');
+      if (!markdown && !evaluation) return fail(404, 'REPORT_NOT_FOUND', '尚无评测报告，请先从“评测”页开始一次评测。');
       return ok({ markdown, issues: issues.map(presentIssue), evaluation, metrics, comparison, comparisons });
     }
-    if (method === 'GET' && /^\/api\/runs\/[^/]+$/.test(pathname)) {
-      const runId = decodeURIComponent(pathname.slice('/api/runs/'.length));
-      const run = getDashboardRun(runId);
-      return run ? ok(run) : fail(404, 'RUN_NOT_FOUND', `没有找到运行：${runId}`);
-    }
+    if (method === 'GET' && /^\/api\/runs\/[^/]+$/.test(pathname)) return fail(410, 'LEGACY_RUNTIME_QUARANTINED', '旧版运行入口已经停用。旧评测记录仍可从评测历史查看；要开始新评测，请进入“评测”页。');
     const controlMatch = pathname.match(/^\/api\/runs\/([^/]+)\/(pause|resume|stop)$/);
-    if (method === 'POST' && controlMatch) {
-      const runId = decodeURIComponent(controlMatch[1] ?? '');
-      const operation = controlMatch[2];
-      if (operation === 'stop' && recordBody(body)?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '停止运行前需要明确确认；已有轨迹会保存。');
-      const run = operation === 'pause' ? pauseDashboardRun(runId) : operation === 'resume' ? resumeDashboardRun(runId) : stopDashboardRun(runId);
-      if (!run) return fail(409, operation === 'pause' ? 'RUN_NOT_ACTIVE' : operation === 'resume' ? 'RUN_NOT_PAUSED' : 'RUN_NOT_ACTIVE', '当前运行状态不允许执行此操作。');
-      return ok({ runId: run.runId, status: run.status });
-    }
+    if (method === 'POST' && controlMatch) return fail(410, 'LEGACY_RUNTIME_QUARANTINED', '旧版运行控制已经停用。旧记录不会被修改；要继续验证，请从“评测”页新建评测。');
     if (method === 'GET' && pathname.startsWith('/api/comparisons/')) {
       const id = decodeURIComponent(pathname.slice('/api/comparisons/'.length));
       const path = resolve(config.outputDir, 'comparisons', `${id}.json`);
@@ -379,12 +367,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
       await writeJsonLinesAtomic(path, issues);
       return ok(issues[index]);
     }
-    if (method === 'POST' && pathname === '/api/runs') {
-      const request = body && typeof body === 'object' ? body as { caseId?: string; mode?: string } : {};
-      if (request.mode && request.mode !== 'exploratory') return fail(400, 'RUN_MODE_INVALID', 'Dashboard 当前只支持 exploratory 运行。');
-      const run = await startDashboardRun(config, request.caseId);
-      return { status: 202, body: { success: true, data: { runId: run.runId, status: run.status } } };
-    }
+    if (method === 'POST' && pathname === '/api/runs') return fail(410, 'LEGACY_RUNTIME_QUARANTINED', '旧版运行入口已经停用。请从“评测”页选择范围并开始，系统会保存新的证据链。');
     return fail(404, 'API_NOT_FOUND', `本地 API 不存在：${method} ${pathname}`);
   } catch (error) {
     if (error instanceof EvalPilotError) return fail(error.code === 'NOT_INITIALIZED' ? 404 : 422, error.code, error.message);
@@ -395,10 +378,6 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
 function sendJson(response: ServerResponse, result: ApiResult): void {
   response.writeHead(result.status, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
   response.end(JSON.stringify(result.body));
-}
-
-function writeSse(response: ServerResponse, event: ManagedRunEvent): void {
-  response.write(`id: ${event.id}\nevent: ${event.name}\ndata: ${JSON.stringify(event.data)}\n\n`);
 }
 
 const mime: Record<string, string> = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.zip': 'application/zip' };
@@ -422,15 +401,7 @@ export async function startDashboardServer(cwd: string, port = 4173, assetsRoot 
       const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
       const eventMatch = url.pathname.match(/^\/api\/runs\/([^/]+)\/events$/);
       if (request.method === 'GET' && eventMatch) {
-        const runId = decodeURIComponent(eventMatch[1] ?? '');
-        const run = getDashboardRun(runId);
-        if (!run) { sendJson(response, fail(404, 'RUN_NOT_FOUND', `没有找到运行：${runId}`)); return; }
-        response.writeHead(200, { 'content-type': 'text/event-stream; charset=utf-8', 'cache-control': 'no-cache', connection: 'keep-alive' });
-        const lastEventId = Number(request.headers['last-event-id'] ?? 0);
-        for (const event of run.events.filter((item) => item.id > lastEventId)) writeSse(response, event);
-        if (run.status === 'completed' || run.status === 'failed' || run.status === 'stopped') { response.end(); return; }
-        const unsubscribe = subscribeDashboardRun(runId, (event) => { writeSse(response, event); if (event.name === 'run.finished' || event.name === 'run.error') response.end(); });
-        request.on('close', () => unsubscribe?.());
+        sendJson(response, fail(410, 'LEGACY_RUNTIME_QUARANTINED', '旧版运行事件入口已经停用。旧记录仍可从评测历史查看。'));
         return;
       }
       const evaluationEventMatch = url.pathname.match(/^\/api\/evaluations\/([^/]+)\/events$/);
