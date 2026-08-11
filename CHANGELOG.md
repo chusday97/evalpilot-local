@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a ten-category Evaluator Failure taxonomy with schema-validated, versioned `EvaluatorBadcase` storage that stays separate from Product Badcase and Regression lineage.
+- Changed evaluator-inconclusive results to use novice-facing copy and expandable possible reasons while retaining technical classification in structured evidence.
+- Preserved low-confidence product-failure observations as Candidate Findings; wait exhaustion becomes an evaluator failure only when the semantic result is also inconclusive.
 - Replaced the AI Test Agent's single bounded wait with operation-aware soft/hard timeouts, lightweight progress polling, and bounded extensions for navigation, form submission, AI generation, file processing, and unknown async work.
 - Separated waiting from Persona cost: pending/progressing polls create no extra user actions and consume no retry or patience budget; only explicit failure or an unconfirmed stalled result counts as a failed attempt.
 - Added per-step `TaskWaitEvidence` with the selected operation type, policy, state timeline, extension count, final reason, and Persona-attempt decision while keeping pre-Phase-3 packets readable.

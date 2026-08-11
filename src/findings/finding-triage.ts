@@ -55,7 +55,9 @@ function findingFrom(input: { evalCase: EvalCase; result: EvalCaseResult; status
     projectId: input.evalCase.projectId,
     caseId: input.evalCase.caseId,
     runId: input.result.runId,
-    title: input.status === 'confirmed_product_failure' ? input.result.semantic.summary : `可疑问题：${input.evalCase.title}`,
+    title: input.status === 'confirmed_product_failure' || input.status === 'evaluator_failure'
+      ? input.result.semantic.summary
+      : `可疑问题：${input.evalCase.title}`,
     summary: input.result.semantic.summary,
     status: input.status,
     semanticConfidence: input.result.semantic.confidence,

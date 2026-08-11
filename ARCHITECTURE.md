@@ -23,6 +23,8 @@ One Evaluation Path Phase 2 在 Action 与 Verification 之间增加 Task State 
 
 Phase 3 由 Operation Classifier 在导航、表单提交、AI 生成、文件处理、未知异步和同步操作之间选择 Wait Policy。Progress-aware Wait 以 1 秒生产轮询观察轻量 Task State；新进度可以延长软截止时间，但扩展次数和硬截止时间始终固定。轮询历史保存在同一 `StepEvidence.taskWait`，不会制造额外用户动作。Persona 失败尝试只由明确 `failed`，或 `stalled + not_confirmed` 增加；等待和推进中的状态不消耗耐心或重试额度。
 
+Phase 4 在 Hybrid Judge 与 Finding Triage 之间增加 Evaluator Failure Classifier。分类器只使用当前 Agent Run、Evidence Packet 和 Judge Result，将无法选出下一步、不支持的控件、模型输出损坏、上下文不足、状态歧义、无结论的等待耗尽、证据缺失、导航不匹配和工具错误保存为独立 `evaluator-badcases/v1/` 记录。对应结果统一降级为 `inconclusive/evaluator`，用小白可理解的说明代替内部错误文案；Evaluator Badcase 不进入 Product Badcase、Product Regression 或 Verified Coverage。已有低置信度产品失败线索仍由 Candidate Finding 管理，不会仅因等待到期而被吞掉。
+
 Phase 5 在确定性步骤验证之后增加 Semantic Verifier，并用失败关闭规则合并：执行硬失败优先，确定性与高置信度语义冲突时为 Inconclusive，低置信度语义不能独立确认，未授权截图时不能确认纯视觉结果。动作后的固定延时已替换为目标文字、路由/DOM、加载标记和网络空闲的有界等待。Reflector 使用 Persona 的显式耐心、重试、隐私和退出策略；可选语义建议不能覆盖安全门禁、确认后的 finish 或固定最大步数。
 
 Phase 6 Product Understanding 使用 Background、Blueprint 和有界的路由/可见页面/文档证据目录生成任务级 Product Model。输出中的证据引用、路由、任务—能力关系、规则关系和成功信号会再次本地校验；无效引用被过滤并触发人工审核。Oracle Builder 只把任务明确关联的成功信号转换为受支持的确定性断言，推断规则不会进入自动产品失败路径。Dashboard 默认继续本地确定性生成，只有用户勾选并配置 Provider 后才启用远程理解。

@@ -557,6 +557,31 @@ export interface CandidateFinding {
   updatedAt: string;
 }
 
+export type EvaluatorFailureCategory =
+  | 'no_next_action'
+  | 'unsupported_control'
+  | 'model_output_invalid'
+  | 'insufficient_context'
+  | 'ambiguous_page_state'
+  | 'wait_policy_exhausted'
+  | 'evidence_missing'
+  | 'navigation_mismatch'
+  | 'tool_execution_error'
+  | 'unknown';
+
+export interface EvaluatorBadcase {
+  evaluatorBadcaseId: string;
+  projectId: string;
+  caseId: string;
+  runId: string;
+  category: EvaluatorFailureCategory;
+  observedState: string;
+  attemptedActions: string[];
+  evidenceRefs: string[];
+  resolved: boolean;
+  regressionFixtureId: string | null;
+}
+
 export interface Badcase {
   badcaseId: string;
   projectId: string;

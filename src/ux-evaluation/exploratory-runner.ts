@@ -240,7 +240,7 @@ export async function runExploratoryScenario(
 
         const target = chooseSemanticTarget(targets, `${context.goal} ${conditionState.missing.join(' ')}`, visited);
         if (!target) {
-          abandonment = { abandoned: true, reason: '当前页面没有与目标相关且安全的未尝试操作', step: actions.at(-1)?.actionId ?? null };
+          abandonment = { abandoned: true, reason: 'EvalPilot 暂时无法确定下一步操作。当前没有足够证据判断这是产品问题。', step: actions.at(-1)?.actionId ?? null };
           action(actions, {
             type: 'abandon', timestampMs: Date.now() - started.getTime(), page: page.url(), target: null,
             inputField: null, inputLength: null, inputFingerprint: null, outcome: abandonment.reason ?? 'abandoned', evidence: await screenshotEvidence(page, runDirectory, actions.length + 1),

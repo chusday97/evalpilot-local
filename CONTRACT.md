@@ -304,7 +304,16 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - CI 至少覆盖：表单完成 PASS、死点击确认失败、危险动作阻止、模型输出损坏产生 Evaluator Failure、Candidate Challenge 不增加 Verified Coverage、证据缺失不生成 Product Badcase、修复后同案例 PASS 晋升 Regression、PASS 生成 Challenge candidates。
 - `test:ai-agent` 任一失败必须使 `chromium-smoke` 失败；不得使用 `continue-on-error`、空 catch 或缺少浏览器时静默跳过。
 
-### 10.3 Accuracy Sprint Phase 5 Semantic Verifier 契约
+### 10.3 One Evaluation Path Phase 4 Evaluator Failure 契约
+
+- `EvaluatorFailureCategory` 固定为 `no_next_action | unsupported_control | model_output_invalid | insufficient_context | ambiguous_page_state | wait_policy_exhausted | evidence_missing | navigation_mismatch | tool_execution_error | unknown`。
+- 评测器无法选择下一步、不支持当前控件、模型输出损坏、上下文不足、页面状态歧义、等待策略耗尽但没有产品失败证据、证据缺失、导航预期不匹配或工具执行异常时，结果必须为 `inconclusive/evaluator`，严重度为空。
+- 面向用户的主说明固定为“EvalPilot 暂时无法确定下一步操作。当前没有足够证据判断这是产品问题。”；技术原因只作为可展开信息，并明确可能是页面仍在处理、下一步入口不明显或评测器尚未理解页面。
+- 每次分类后的 Evaluator Failure 保存为 `evaluator-badcases/v1/<evaluatorBadcaseId>.json`，内容必须通过 Zod Schema 后原子写入。`observedState`、`attemptedActions` 和 `evidenceRefs` 只能来自当前运行证据，不得补写推测事实。
+- `EvaluatorBadcase` 与 Product `Badcase`、Product Regression 使用独立目录和类型；它不得创建 Product Badcase、不得进入 Product Regression，也不得增加 Verified Coverage。
+- 旧运行记录保持只读；Phase 4 不根据旧文案反向补建 Evaluator Badcase。
+
+### 10.4 Accuracy Sprint Phase 5 Semantic Verifier 契约
 
 - `EvalPersonaRef` 新增显式 Agent Policy：知识水平、耐心动作数、允许重试次数、隐私敏感度和退出条件。新案例必须写入全部字段；旧案例只在兼容读取时使用 `medium / 3 / 1 / medium / 证据不足时退出`，不得覆盖原文件。
 - 每个 Agent 动作继续先执行确定性验证，再以最小化 before/after Observation、动作结果、控制台/网络增量和获准的截图运行 `SemanticStepVerification`。远程 Provider 未获得截图授权时不得接收截图，也不得确认只能由视觉证据证明的结果。
