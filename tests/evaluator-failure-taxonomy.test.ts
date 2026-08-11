@@ -70,6 +70,17 @@ describe('Evaluator Failure taxonomy', () => {
     expect(triage).toMatchObject({ finding: { status: 'evaluator_failure', title: EVALUATOR_FAILURE_USER_SUMMARY }, badcase: null });
   });
 
+  it('does not hide an evidence-complete deterministic product failure behind no-next-action text', () => {
+    const judged = {
+      ...result('product'),
+      verdict: 'fail' as const,
+      severity: 'P1' as const,
+      deterministic: { ...result('product').deterministic, hardFailure: true, severity: 'P1' as const },
+    };
+    const abandoned = run({ status: 'abandoned', decisions: [{ intentSummary: '没有下一步安全操作', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止', confidence: 1 }] });
+    expect(classifyEvaluatorFailure({ agentRun: abandoned, packet: packet(), result: judged })).toBeNull();
+  });
+
   it('stores schema-validated Evaluator Badcases in their own versioned lineage', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-evaluator-badcase-'));
     const classification = { category: 'no_next_action' as const, technicalReason: '没有找到安全下一步。' };

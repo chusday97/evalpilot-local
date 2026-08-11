@@ -14,7 +14,7 @@ export async function executeAgentAction(page: Page, observation: PageObservatio
   }
   try {
     const index = target ? Number(target.locatorHint.split(':')[1]) : null;
-    const locator = index === null ? null : page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').nth(index);
+    const locator = index === null ? null : page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').filter({ visible: true }).nth(index);
     if (decision.action === 'click') await locator!.click();
     else if (decision.action === 'fill') await locator!.fill(decision.value ?? '');
     else if (decision.action === 'select') await locator!.selectOption(decision.value ?? '');

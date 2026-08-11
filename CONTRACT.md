@@ -309,6 +309,7 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 
 - `EvaluatorFailureCategory` 固定为 `no_next_action | unsupported_control | model_output_invalid | insufficient_context | ambiguous_page_state | wait_policy_exhausted | evidence_missing | navigation_mismatch | tool_execution_error | unknown`。
 - 评测器无法选择下一步、不支持当前控件、模型输出损坏、上下文不足、页面状态歧义、等待策略耗尽但没有产品失败证据、证据缺失、导航预期不匹配或工具执行异常时，结果必须为 `inconclusive/evaluator`，严重度为空。
+- Evidence Packet 完整且确定性断言已经形成 Product hard failure 时，该结论优先于 `no_next_action` 文案分类；“没有下一步”可能正是产品缺陷，不能被评测器分类静默覆盖。DOM Grounding 的观察和执行必须使用同一可见元素集合，隐藏元素不得占用可执行序号。
 - 面向用户的主说明固定为“EvalPilot 暂时无法确定下一步操作。当前没有足够证据判断这是产品问题。”；技术原因只作为可展开信息，并明确可能是页面仍在处理、下一步入口不明显或评测器尚未理解页面。
 - 每次分类后的 Evaluator Failure 保存为 `evaluator-badcases/v1/<evaluatorBadcaseId>.json`，内容必须通过 Zod Schema 后原子写入。`observedState`、`attemptedActions` 和 `evidenceRefs` 只能来自当前运行证据，不得补写推测事实。
 - `EvaluatorBadcase` 与 Product `Badcase`、Product Regression 使用独立目录和类型；它不得创建 Product Badcase、不得进入 Product Regression，也不得增加 Verified Coverage。

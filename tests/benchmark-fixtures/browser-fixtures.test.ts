@@ -1,5 +1,6 @@
 import { chromium } from 'playwright';
 import { describe, expect, it } from 'vitest';
+import { executeAgentAction } from '../../src/test-agent/action-executor.js';
 import { observePage } from '../../src/test-agent/observer.js';
 import { browserFixturePages } from './pages.js';
 
@@ -18,6 +19,18 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('known browser fixtu
     await page.setContent(browserFixturePages.missingNextStep); expect(await page.getByRole('link').count()).toBe(0); expect(await page.getByRole('button').count()).toBe(0);
     await page.setContent(browserFixturePages.safeBoundary); await page.getByRole('button', { name: 'Continue' }).click(); expect(await page.locator('body').getAttribute('data-accepted')).toBe('empty');
     await page.setContent(browserFixturePages.destructiveButton); const observation = await observePage(page); expect(observation.interactableElements[0]).toMatchObject({ label: 'Delete account', risk: 'high' });
+    await browser.close();
+  });
+
+  it('executes the same visible element index that the observer exposed', async () => {
+    const browser = await chromium.launch({ headless: true }); const page = await browser.newPage();
+    await page.setContent('<button hidden>Old action</button><button onclick="document.body.dataset.clicked=\'yes\'">Visible action</button>');
+    const observation = await observePage(page);
+    expect(observation.interactableElements).toHaveLength(1);
+    expect(observation.interactableElements[0]).toMatchObject({ elementId: 'E001', label: 'Visible action' });
+    const result = await executeAgentAction(page, observation, { decisionId: 'decision-visible', intentSummary: '点击可见操作', action: 'click', targetElementId: 'E001', value: null, expectedResult: '操作被执行', confidence: 1 });
+    expect(result.status).toBe('executed');
+    expect(await page.locator('body').getAttribute('data-clicked')).toBe('yes');
     await browser.close();
   });
 });
