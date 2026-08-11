@@ -49,6 +49,7 @@ export async function saveAgentEvidence(outputDir: string, packet: EvidencePacke
     writeJsonLinesAtomic(resolve(runDirectory, 'observations.jsonl'), validatedPacket.observations),
     writeJsonLinesAtomic(resolve(runDirectory, 'agent-decisions.jsonl'), decisions.map((decision, index) => ({ ...decision, decisionId: decision.decisionId ?? `decision-${String(index + 1).padStart(3, '0')}` }))),
     writeJsonLinesAtomic(resolve(runDirectory, 'verifications.jsonl'), validatedPacket.stepVerifications),
+    writeJsonLinesAtomic(resolve(runDirectory, 'task-state-observations.jsonl'), validatedPacket.stepEvidence.flatMap((step) => step.taskState ? [{ stepIndex: step.stepIndex, ...step.taskState }] : [])),
   ]);
   return resolve(runDirectory, 'evidence-packet.json');
 }

@@ -105,11 +105,14 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
     expect(result.actionResults[0]).toMatchObject({ status: 'executed', targetElementId: 'E001' });
     expect(provider.requests.every((item) => item.imageDataUrls[0]?.startsWith('data:image/png;base64,'))).toBe(true);
     expect(provider.requests.filter((item) => item.task === 'actor').every((item) => item.userPrompt.includes('interactableElements'))).toBe(true);
-    const packet = JSON.parse(await readFile(result.evidencePacketPath, 'utf8')) as { actions: unknown[]; stepEvidence: Array<{ beforeScreenshotPath: string; afterScreenshotPath: string }>; tracePath: string | null; evidenceCompleteness: { complete: boolean } };
+    const packet = JSON.parse(await readFile(result.evidencePacketPath, 'utf8')) as { actions: unknown[]; stepEvidence: Array<{ beforeScreenshotPath: string; afterScreenshotPath: string; taskState: { state: string } | null }>; tracePath: string | null; evidenceCompleteness: { complete: boolean } };
     expect(packet.evidenceCompleteness.complete).toBe(true);
     expect(packet.stepEvidence).toHaveLength(packet.actions.length);
     expect(packet.stepEvidence.at(-1)?.afterScreenshotPath).toMatch(/step-003-after\.png$/);
     expect(packet.stepEvidence.every((step) => step.beforeScreenshotPath !== step.afterScreenshotPath)).toBe(true);
+    expect(packet.stepEvidence.every((step) => step.taskState !== null)).toBe(true);
+    expect(packet.stepEvidence.some((step) => step.taskState?.state === 'completed')).toBe(true);
+    await expect(stat(join(outputDir, 'runs', result.runId, 'task-state-observations.jsonl'))).resolves.toBeTruthy();
     expect(packet.tracePath).toMatch(/trace\.zip$/);
     await browser.close();
   });
@@ -122,6 +125,20 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
     const result = await runAiTestAgent(page, evalCase(), provider, { outputDir: await mkdtemp(join(tmpdir(), 'evalpilot-ai-safety-')), startingUrl: page.url(), maxSteps: 1, now: () => new Date(now) });
     expect(result.status).toBe('blocked_by_safety');
     expect(result.actionResults[0]?.summary).toContain('已阻止 high 风险操作');
+    await browser.close();
+  });
+
+  it('records a long-running task as progressing and does not turn it into a verification failure', async () => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    await page.setContent('<main><h1>Report</h1><button onclick="this.disabled=true;this.setAttribute(\'aria-busy\',\'true\');this.textContent=\'Generating 25%\';setTimeout(()=>{document.querySelector(\'main\').innerHTML=\'<h1>Report ready</h1>\'},5000)">Generate</button></main>');
+    const provider = new MockAiProvider(() => ({ intentSummary: '生成报告', action: 'click', targetElementId: 'E001', value: null, expectedResult: 'Report ready', confidence: 1 }));
+    const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-ai-progressing-'));
+    const result = await runAiTestAgent(page, evalCase(), provider, { outputDir, startingUrl: page.url(), maxSteps: 1, waitTimeoutMs: 250, now: () => new Date(now) });
+    const packet = JSON.parse(await readFile(result.evidencePacketPath, 'utf8')) as { stepEvidence: Array<{ taskState: { state: string } }>; stepVerifications: Array<{ status: string }> };
+    expect(packet.stepEvidence[0]?.taskState.state).toBe('progressing');
+    expect(packet.stepVerifications[0]?.status).toBe('inconclusive');
+    expect(result.status).toBe('inconclusive');
     await browser.close();
   });
 
@@ -170,7 +187,7 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('AI Test Agent brows
       judgeModel: 'evalpilot-mock-v1',
       verifierPromptVersion: '1.0.0',
       reflectorPromptVersion: null,
-      toolSchemaVersion: '1.1.0',
+      toolSchemaVersion: '1.2.0',
     });
     const markdown = await readFile(join(outputDir, 'reports', 'latest-evaluation.md'), 'utf8'); expect(markdown).toContain('## 16. Authenticity / uncertainty notice');
     await browser.close();

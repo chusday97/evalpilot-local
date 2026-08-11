@@ -9,5 +9,7 @@ export type {
   PageObservation,
   ReflectionDecision,
   SafeInputValue,
+  TaskRuntimeState,
+  TaskStateObservation,
   StepVerification,
 } from '../../types.js';

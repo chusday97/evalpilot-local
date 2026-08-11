@@ -67,6 +67,21 @@ export const stepVerificationSchema = z.object({
 
 export const semanticStepVerificationSchema = stepVerificationSchema.shape.semantic.unwrap().unwrap();
 
+export const taskRuntimeStateSchema = z.enum(['ready', 'interacting', 'pending', 'progressing', 'completed', 'failed', 'blocked', 'stalled']);
+
+export const taskStateObservationSchema = z.object({
+  state: taskRuntimeStateSchema,
+  progressSignals: z.array(z.string().min(1)),
+  completionSignals: z.array(z.string().min(1)),
+  failureSignals: z.array(z.string().min(1)),
+  loadingSignals: z.array(z.string().min(1)),
+  networkActivity: z.enum(['idle', 'active', 'unknown']),
+  elapsedMs: z.number().nonnegative(),
+  lastProgressAtMs: z.number().nonnegative().nullable(),
+  confidence: z.number().min(0).max(1),
+  evidenceRefs: z.array(z.string()),
+}).strict();
+
 export const stepEvidenceSchema = z.object({
   stepIndex: z.number().int().positive(),
   beforeObservationId: z.string().min(1),
@@ -76,6 +91,7 @@ export const stepEvidenceSchema = z.object({
   decisionId: z.string().min(1),
   verificationId: z.string().min(1),
   actionStatus: z.enum(['executed', 'blocked_by_safety', 'failed']),
+  taskState: taskStateObservationSchema.nullable().default(null),
 }).strict();
 
 export const evidenceCompletenessSchema = z.object({

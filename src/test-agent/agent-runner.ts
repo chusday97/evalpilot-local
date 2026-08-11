@@ -19,6 +19,8 @@ import { reflectOnStepSemantically } from './semantic-reflector.js';
 import { resolvePersonaPolicy } from '../eval-set/persona-policy.js';
 import { verifierPromptV1 } from '../prompts/verifier.v1.js';
 import { reflectorPromptV1 } from '../prompts/reflector.v1.js';
+import { captureTaskStateSignals } from './task-state-signals.js';
+import { gateVerificationByTaskState, observeTaskState } from './task-state-monitor.js';
 
 interface AgentRunnerOptions {
   outputDir: string;
@@ -63,9 +65,26 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
   const screenshots: string[] = [];
   const consoleEvidence: string[] = [];
   const networkEvidence: string[] = [];
+  const coreNetworkFailures: string[] = [];
+  const uncaughtErrors: string[] = [];
+  let activeRequests = 0;
+  let networkResponseCount = 0;
   const onConsole = (message: { type(): string; text(): string }) => { if (message.type() === 'error') consoleEvidence.push(message.text()); };
-  const onResponse = (response: { status(): number; url(): string }) => { if (response.status() >= 400) networkEvidence.push(`${response.status()} ${response.url()}`); };
+  const onPageError = (pageError: Error) => { uncaughtErrors.push(pageError.message); consoleEvidence.push(`uncaught: ${pageError.message}`); };
+  const onRequest = () => { activeRequests += 1; };
+  const onRequestSettled = () => { activeRequests = Math.max(0, activeRequests - 1); };
+  const onResponse = (response: { status(): number; url(): string; request(): { resourceType(): string } }) => {
+    networkResponseCount += 1;
+    if (response.status() < 400) return;
+    const failure = `${response.status()} ${response.url()}`;
+    networkEvidence.push(failure);
+    if (['document', 'xhr', 'fetch'].includes(response.request().resourceType())) coreNetworkFailures.push(failure);
+  };
   page.on('console', onConsole);
+  page.on('pageerror', onPageError);
+  page.on('request', onRequest);
+  page.on('requestfinished', onRequestSettled);
+  page.on('requestfailed', onRequestSettled);
   page.on('response', onResponse);
   let status: AiTestAgentRun['status'] = 'inconclusive';
   let failureSource: AiTestAgentRun['failureSource'] = null;
@@ -94,6 +113,9 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       const waitBaseline = await capturePageWaitBaseline(page);
       const consoleStart = consoleEvidence.length;
       const networkStart = networkEvidence.length;
+      const coreNetworkFailureStart = coreNetworkFailures.length;
+      const uncaughtErrorStart = uncaughtErrors.length;
+      const networkResponseStart = networkResponseCount;
       let decision: AgentDecision;
       try {
         decision = await chooseAgentAction({
@@ -123,10 +145,13 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
         }
       }
       decisions.push(decision);
+      const taskStateBefore = await captureTaskStateSignals(page, decision);
+      const actionStartedAt = performance.now();
       actionResult ??= await executeAgentAction(page, before, decision);
       const policy = resolvePersonaPolicy(evalCase.persona);
       const waitResult = await waitForAdaptiveOutcome(page, waitBaseline, decision, options.waitTimeoutMs ?? Math.min(3_000, 750 + policy.patienceTurns * 250));
       actionResult = { ...actionResult, summary: `${actionResult.summary} ${waitResult.summary}` };
+      const taskStateAfter = await captureTaskStateSignals(page, decision);
       actionResults.push(actionResult);
       interactions.push(interactionFor(decision, actionResult, interactions.length, performance.now() - monotonicStartedAt, before.pageUrl));
       const afterBuffer = await page.screenshot({ path: afterScreenshotPath, fullPage: true });
@@ -137,6 +162,19 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       actionResult = { ...actionResult, evidenceRefs: [beforeScreenshotPath, afterScreenshotPath] };
       actionResults[actionResults.length - 1] = actionResult;
       interactions[interactions.length - 1] = interactionFor(decision, actionResult, interactions.length - 1, performance.now() - monotonicStartedAt, before.pageUrl);
+      const taskState = observeTaskState({
+        before: taskStateBefore,
+        after: taskStateAfter,
+        decision,
+        actionResult,
+        waitResult,
+        elapsedMs: performance.now() - actionStartedAt,
+        networkActivity: activeRequests > 0 ? 'active' : 'idle',
+        networkResponses: networkResponseCount - networkResponseStart,
+        coreNetworkFailures: coreNetworkFailures.slice(coreNetworkFailureStart),
+        consoleErrors: uncaughtErrors.slice(uncaughtErrorStart),
+        evidenceRefs: [beforeScreenshotPath, afterScreenshotPath],
+      });
       const deterministicVerification = verifyAgentStep(before, after, decision, actionResult, `verification-${stepLabel}`);
       const screenshotAllowed = inputScreenshotAllowed(provider.info.remote, options.allowScreenshotToProvider);
       const semanticVerification = actionResult.status === 'executed'
@@ -154,7 +192,8 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
           allowScreenshot: screenshotAllowed,
         })
         : { status: 'inconclusive' as const, observed: actionResult.summary, confirmedFacts: [], unknowns: ['动作未执行，未调用语义验证器。'], evidenceRefs: actionResult.evidenceRefs, confidence: 1 };
-      const verification = mergeStepVerifications({ deterministic: deterministicVerification, semantic: semanticVerification, hardFailure: actionResult.status === 'failed', expectation: decision.expectedResult, visualEvidenceIncluded: screenshotAllowed });
+      const mergedVerification = mergeStepVerifications({ deterministic: deterministicVerification, semantic: semanticVerification, hardFailure: actionResult.status === 'failed', expectation: decision.expectedResult, visualEvidenceIncluded: screenshotAllowed });
+      const verification = gateVerificationByTaskState(mergedVerification, taskState);
       verifications.push(verification);
       stepEvidence.push({
         stepIndex,
@@ -165,6 +204,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
         decisionId: decision.decisionId!,
         verificationId: verification.verificationId,
         actionStatus: actionResult.status,
+        taskState,
       });
       const failedAttempts = verifications.filter((item) => item.status !== 'confirmed').length;
       const retryAttempts = decisions.filter((item) => item.action === decision.action && item.targetElementId === decision.targetElementId).length;
@@ -203,6 +243,10 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
   }
   if (!tracePath) { status = 'inconclusive'; failureSource = 'evaluator'; }
   page.off('console', onConsole);
+  page.off('pageerror', onPageError);
+  page.off('request', onRequest);
+  page.off('requestfinished', onRequestSettled);
+  page.off('requestfailed', onRequestSettled);
   page.off('response', onResponse);
   const completedAt = now().toISOString();
   const resolvedFinalObservation = finalObservation ?? observations.at(-1) ?? {
@@ -225,7 +269,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       judgePromptVersion: semanticJudgePromptV1.version,
       verifierPromptVersion: verifierPromptV1.version,
       reflectorPromptVersion: options.useSemanticReflector ? reflectorPromptV1.version : null,
-      toolSchemaVersion: '1.1.0',
+      toolSchemaVersion: '1.2.0',
       timestamp: started.toISOString(),
     },
   };

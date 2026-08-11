@@ -259,7 +259,9 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - `PageObservation` 只包含当前 URL、可见状态摘要、可交互元素、表单字段、公开页面问题和证据引用。每次观察生成 `E001` 起的稳定元素 ID；Actor 只能引用这些 ID，不能生成 CSS/XPath 或坐标。
 - `AgentDecision` 每次只允许一个动作。`ActionExecutor` 必须重新校验元素是否存在、是否禁用及风险等级；删除、支付、发布、外部发送、凭证和其他高风险动作即使模型要求也返回 `blocked_by_safety`。
 - 安全输入按 `known_fixture | synthetic_generated` 记录来源；敏感或高风险字段返回 `blocked_by_safety`，不生成真实个人信息、凭证或秘密。
-- 每个动作必须保存带稳定 ID 的前后 `PageObservation`、独立的 before/after 截图、单步 Decision、执行结果和带稳定 ID 的 `StepVerification`；`StepEvidence` 按 `stepIndex` 连接这些引用。模型输出损坏、DOM 目标消失、页面证据不足或工具失败时结果为 `inconclusive/evaluator_failure`，不能生成产品失败。
+- 每个动作必须保存带稳定 ID 的前后 `PageObservation`、独立的 before/after 截图、单步 Decision、执行结果、`TaskStateObservation` 和带稳定 ID 的 `StepVerification`；`StepEvidence` 按 `stepIndex` 连接这些引用。模型输出损坏、DOM 目标消失、页面证据不足或工具失败时结果为 `inconclusive/evaluator_failure`，不能生成产品失败。
+- `TaskStateObservation` 必须在 Action 与 Verification 之间根据页面、加载、进度、完成、失败和网络信号记录 `ready | interacting | pending | progressing | completed | failed | blocked | stalled`。`pending` 和 `progressing` 表示任务仍在等待或有进展，只能将本步验证门禁为 `inconclusive`，不得判为 Verification Failure。
+- 加载信号至少识别 `aria-busy`、`progressbar`、spinner 以及 loading/generating/processing/uploading/thinking/searching 文案；进度、完成和失败必须分别记录可复核信号及证据引用。只有显式错误、核心请求 4xx/5xx、未捕获错误、失败状态或动作执行失败可直接形成 `failed` 状态。
 - 只保存简短 `intentSummary`、动作、期望、验证和置信度，不保存或请求隐藏 chain-of-thought。
 - Evidence Packet 位于 `runs/<run-id>/evidence-packet.json`；Observation、Decision、Verification 同时以 JSONL 保存。每个执行动作保存 `step-NNN-before.png` 与 `step-NNN-after.png`；`finish/abandon` 也必须保存并关联最终截图。截图只保存在本地运行目录。
 - `EvidenceCompleteness` 分别记录初始观察、最终观察、前后截图、逐步验证和本地 Trace 是否齐全，并列出缺失项。所有引用必须能在当前 Evidence Packet 中解析；不能只相信历史记录自报的 `complete=true`。
@@ -272,7 +274,7 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - Deterministic Judge 只判断 Evidence Packet 中可直接观察的 URL、可见文本、网络、控制台和状态证据；无法从现有证据证明的断言必须返回 `inconclusive`。
 - Semantic Judge 只接收 Eval Case、Oracle、最小化 Evidence Packet 摘要和确定性结果；输出必须区分 `confirmedFacts`、带置信度的 `hypotheses` 和 `unknowns`。
 - Verdict Merger 的优先级为：证据完整性门禁 → 确定性硬失败 → 任一无法判断 → 双方通过。单次 Semantic Fail 不再直接生成 Product Failure；必须继续通过 Finding Triage 门禁，否则统一返回 `verdict=inconclusive, failureSource=unknown`。
-- 旧 Evidence Packet 继续兼容读取；缺少 Phase 2 字段时通过兼容转换生成不完整状态，不改写旧文件，也不得补推验证通过。
+- 旧 Evidence Packet 继续兼容读取；缺少证据门禁字段时通过兼容转换生成不完整状态，不改写旧文件，也不得补推验证通过。缺少 Task State 的新架构旧记录将 `StepEvidence.taskState` 读取为 `null`，不能反向推断当时的运行状态。
 - Provider/Schema/工具失败统一产生 `verdict=inconclusive, failureSource=evaluator, severity=null`，不得创建产品问题或 Product Regression。
 - 直接证据支持的产品失败为 `failureSource=product`；无法区分产品与评测器时使用 `unknown`，不得伪造根因。
 - Judge 产物写入 `runs/<run-id>/deterministic-judge.json`、`semantic-judge.json` 和 `result.json`，均先过 Schema 后原子落盘。
@@ -304,7 +306,7 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - 合并规则固定为：动作执行硬失败优先；确定性与高置信度语义结果冲突时为 `inconclusive`；语义置信度低于 `0.8` 不能独立确认；视觉目标缺少获准截图时为 `inconclusive`；其余确定性证据仍可独立确认非视觉结果。
 - Reflector 不得再用 `behaviorPolicy.length` 代替耐心。重试和放弃必须使用 `patienceTurns`、`retryTolerance` 与 `exitConditions`；可选 Semantic Reflector 的建议仍受固定最大动作数、危险动作门禁和 Persona 上限约束。
 - 固定 `50ms/300ms` 等待替换为有界信号等待：目标文本出现、DOM/URL 变化、加载标记消失或网络空闲；所有路径必须有明确超时，超时只表示当前步骤未确认，不能无限等待或伪造通过。
-- 新运行在版本矩阵中记录 `verifierPromptVersion`、可选 `reflectorPromptVersion` 和 `toolSchemaVersion=1.1.0`；旧 Evidence Packet 缺少这些字段时继续兼容读取，不补写原文件。
+- 新运行在版本矩阵中记录 `verifierPromptVersion`、可选 `reflectorPromptVersion` 和 `toolSchemaVersion=1.2.0`；旧 Evidence Packet 缺少这些字段时继续兼容读取，不补写原文件。
 
 ### 10.4 Accuracy Sprint Phase 6 Product Task 与 Oracle 契约
 

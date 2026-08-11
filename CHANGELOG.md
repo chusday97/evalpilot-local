@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Added a Task State Monitor between Agent actions and verification, with loading, progress, completion, failure, network, blocked, and stalled evidence persisted per step.
+- Changed pending and progressing actions to remain verification-inconclusive instead of being reported as product failures; pre-monitor Evidence Packets stay readable with an explicit null task state.
 - Changed the normal Dashboard evaluation path to use Product Model → Eval Set selection → AI Test Agent → Hybrid Judge → Finding Triage instead of the Legacy Explorer.
 - Added a schema-validated Evaluation Orchestrator, Product Model-aware Quick/Core/Full selection, per-session Adaptive run/Finding/Badcase lineage, and immutable evaluation report snapshots.
 - Added an explicit AI Provider setup gate and per-run remote-model consent; missing configuration no longer silently falls back to Legacy or produces a substitute result.

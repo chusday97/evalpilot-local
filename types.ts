@@ -946,6 +946,21 @@ export interface SemanticStepVerification {
   confidence: number;
 }
 
+export type TaskRuntimeState = 'ready' | 'interacting' | 'pending' | 'progressing' | 'completed' | 'failed' | 'blocked' | 'stalled';
+
+export interface TaskStateObservation {
+  state: TaskRuntimeState;
+  progressSignals: string[];
+  completionSignals: string[];
+  failureSignals: string[];
+  loadingSignals: string[];
+  networkActivity: 'idle' | 'active' | 'unknown';
+  elapsedMs: number;
+  lastProgressAtMs: number | null;
+  confidence: number;
+  evidenceRefs: string[];
+}
+
 export interface StepEvidence {
   stepIndex: number;
   beforeObservationId: string;
@@ -955,6 +970,8 @@ export interface StepEvidence {
   decisionId: string;
   verificationId: string;
   actionStatus: AgentActionResult['status'];
+  /** null means this packet predates task-state monitoring; no state is inferred. */
+  taskState: TaskStateObservation | null;
 }
 
 export interface EvidenceCompleteness {
