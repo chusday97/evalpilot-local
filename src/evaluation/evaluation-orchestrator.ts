@@ -6,7 +6,8 @@ import { chromium, type Browser } from 'playwright';
 import type { AiProvider } from '../ai/provider.js';
 import type { EvalCase, EvalSetSelection, EvaluationOrchestratorInput, EvaluationOrchestratorResult, ProductModel } from '../../types.js';
 import { OpenAiProvider } from '../ai/openai-provider.js';
-import { currentOpenAiCredential, openAiProviderBaseUrl } from '../ai/provider-connection.js';
+import { OpenAiCompatibleProvider } from '../ai/openai-compatible-provider.js';
+import { currentAiCredential } from '../ai/provider-connection.js';
 import { evalSetManifestPath, loadEvalSetCases, loadEvalSetManifest } from '../eval-set/eval-set-store.js';
 import { analyzeCoverage } from '../eval-set/coverage-analyzer.js';
 import { saveCoverageMatrix } from '../eval-set/coverage-store.js';
@@ -34,9 +35,10 @@ interface OrchestratorDependencies {
 }
 
 export function configuredEvaluationProvider(): AiProvider {
-  const credential = currentOpenAiCredential();
-  if (!credential) throw new EvalPilotError('尚未连接 AI 评测能力。请在评测页连接 OpenAI；生成评测资产时也可以取消 AI 深度理解，先使用本地确定性方式。', 'AI_PROVIDER_NOT_CONFIGURED');
-  return new OpenAiProvider({ apiKey: credential.apiKey, model: credential.model, baseUrl: openAiProviderBaseUrl() });
+  const credential = currentAiCredential();
+  if (!credential) throw new EvalPilotError('尚未连接 AI 评测能力。请先在评测页选择一个模型服务并验证 Key。', 'AI_PROVIDER_NOT_CONFIGURED');
+  if (credential.protocol === 'responses') return new OpenAiProvider({ apiKey: credential.apiKey, model: credential.model, baseUrl: credential.baseUrl });
+  return new OpenAiCompatibleProvider({ providerId: credential.provider as 'deepseek' | 'kimi' | 'openai_compatible', displayName: credential.displayName, apiKey: credential.apiKey, model: credential.model, baseUrl: credential.baseUrl, screenshotInput: credential.screenshotInput });
 }
 
 async function ensureFoundation(projectId: string, outputDir: string, provider: AiProvider): Promise<{ model: ProductModel; cases: EvalCase[]; version: number }> {

@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import type { AiStructuredRequest, EvalCase, ProductModel } from '../types.js';
 import { MockAiProvider } from '../src/ai/mock-provider.js';
+import { OpenAiCompatibleProvider } from '../src/ai/openai-compatible-provider.js';
 import { OpenAiProvider } from '../src/ai/openai-provider.js';
 import { AiProviderError } from '../src/ai/provider.js';
 import { runAiTestAgent } from '../src/test-agent/agent-runner.js';
@@ -68,6 +69,25 @@ describe('AI provider contracts', () => {
     });
     await expect(provider.generateStructured(request(), agentDecisionSchema)).resolves.toMatchObject({ action: 'finish' });
     expect(body).toMatchObject({ model: 'test-model', text: { format: { type: 'json_schema', name: 'agent_decision', strict: true } } });
+  });
+
+  it('uses compatible Chat Completions JSON output and validates it locally', async () => {
+    let body: Record<string, unknown> | null = null;
+    const provider = new OpenAiCompatibleProvider({
+      providerId: 'deepseek', displayName: 'DeepSeek', apiKey: 'test-key', model: 'deepseek-test', baseUrl: 'https://api.deepseek.com', maxRetries: 0,
+      fetchImplementation: (async (url, init) => {
+        expect(url).toBe('https://api.deepseek.com/chat/completions');
+        body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+        return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ intentSummary: '完成', action: 'finish', targetElementId: null, value: null, expectedResult: '完成', confidence: 1 }) } }] }), { status: 200, headers: { 'content-type': 'application/json' } });
+      }) as typeof fetch,
+    });
+    await expect(provider.generateStructured(request(), agentDecisionSchema)).resolves.toMatchObject({ action: 'finish' });
+    expect(body).toMatchObject({ model: 'deepseek-test', response_format: { type: 'json_object' } });
+  });
+
+  it('stops instead of accepting malformed compatible-provider JSON', async () => {
+    const provider = new OpenAiCompatibleProvider({ providerId: 'kimi', displayName: 'Kimi', apiKey: 'test-key', model: 'kimi-test', baseUrl: 'https://api.moonshot.cn/v1', maxRetries: 0, fetchImplementation: (async () => new Response(JSON.stringify({ choices: [{ message: { content: '{"action":"finish"}' } }] }), { status: 200 })) as typeof fetch });
+    await expect(provider.generateStructured(request(), agentDecisionSchema)).rejects.toMatchObject({ code: 'INVALID_OUTPUT' });
   });
 });
 

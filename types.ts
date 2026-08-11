@@ -25,8 +25,12 @@ export interface AgentCapabilities { workspaceDiscovery: boolean; directFix: boo
 export interface RuntimeCheck { status: 'ready' | 'missing' | 'blocked'; label: string; detail: string; recoveryAction: string | null }
 export interface RuntimeReadiness { packageVersion: string; contractVersion: '0.6.0'; platform: NodeJS.Platform; nodeVersion: string; dataRoot: string; checks: { node: RuntimeCheck; chromium: RuntimeCheck; git: RuntimeCheck; aiProvider: RuntimeCheck }; agents: AgentConnection[]; blockingIssues: string[]; recoveryActions: string[]; checkedAt: string }
 export type AiProviderConnectionSource = 'environment' | 'session' | null;
-export interface AiProviderConnectionStatus { provider: 'openai'; configured: boolean; source: AiProviderConnectionSource; model: string | null; connectedAt: string | null }
-export interface AiProviderConnectionRequest { provider: 'openai'; apiKey: string; model?: string; confirmed: true }
+export type AiProviderName = 'openai' | 'deepseek' | 'kimi' | 'openai_compatible';
+export type AiProviderProtocol = 'responses' | 'chat_completions';
+export interface AiProviderConnectionStatus { provider: AiProviderName | null; displayName: string | null; configured: boolean; source: AiProviderConnectionSource; protocol: AiProviderProtocol | null; apiHost: string | null; model: string | null; connectedAt: string | null }
+export type AiProviderConnectionRequest =
+  | { provider: Exclude<AiProviderName, 'openai_compatible'>; apiKey: string; model?: string; confirmed: true }
+  | { provider: 'openai_compatible'; apiKey: string; baseUrl: string; model: string; confirmed: true };
 export interface DashboardHealth { status: 'ok'; packageVersion: string; contractVersion: '0.6.0'; capabilities: string[]; runtime: RuntimeReadiness; aiProviderConnection?: AiProviderConnectionStatus }
 export interface GuidedFlowStep { id: Exclude<GuidedStepId, 'complete'>; title: string; description: string; status: GuidedStepStatus; actionLabel: string | null; route: string; anchor: string | null }
 export interface GuidedFlowState { projectId: string | null; currentStep: GuidedStepId; steps: GuidedFlowStep[]; updatedAt: string }

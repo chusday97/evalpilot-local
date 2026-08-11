@@ -21,7 +21,7 @@ describe('dashboard local data boundary', () => {
       status: 'ok',
       contractVersion: '0.6.0',
       capabilities: expect.arrayContaining(['guidance', 'structured_evidence', 'not_applicable_runs', 'adaptive_eval_set', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder']),
-      aiProductUnderstanding: expect.objectContaining({ configured: false, provider: 'openai', defaultEnabled: false, screenshotInput: false }),
+      aiProductUnderstanding: expect.objectContaining({ configured: false, provider: null, defaultEnabled: false, screenshotInput: false }),
     }) }));
   });
 
@@ -129,7 +129,7 @@ describe('dashboard local data boundary', () => {
       expect(summary.body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({ manifest: null, counts: { baseline: 0, regression: 0, challenge: 0, exploratory: 0 } }) }));
       expect(runs.body).toEqual({ success: true, data: [] });
       expect(coverage.body).toEqual({ success: true, data: null });
-      expect(aiFoundation.body).toEqual(expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'AI_PROVIDER_NOT_CONFIGURED', message: expect.stringContaining('本地确定性方式') }) }));
+      expect(aiFoundation.body).toEqual(expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'AI_PROVIDER_NOT_CONFIGURED', message: expect.stringContaining('选择一个模型服务') }) }));
       expect(agentRun.body).toEqual(expect.objectContaining({ success: false, error: expect.objectContaining({ code: 'AI_PROVIDER_NOT_CONFIGURED' }) }));
     } finally { delete process.env.EVALPILOT_DATA_DIR; }
   });

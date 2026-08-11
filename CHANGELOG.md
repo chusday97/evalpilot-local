@@ -2,7 +2,9 @@
 
 ## Unreleased
 
-- Added an in-process OpenAI connection flow to the Evaluation page with credential validation, memory-only storage, explicit disconnect, actionable errors, and immediate provider readiness refresh without restarting the Dashboard.
+- Expanded the in-process AI connection flow from OpenAI-only to safe OpenAI, DeepSeek, and Kimi presets plus an advanced OpenAI-compatible Chat Completions endpoint.
+- Added fixed official-provider hosts, visible credential destinations, HTTPS/loopback validation for custom endpoints, provider-specific protocol routing, and local Zod validation for compatible JSON output.
+- Added provider cards, novice-readable connection guidance, field-level errors, password masking, explicit disconnect, and immediate readiness refresh without restarting the Dashboard.
 - Kept environment-variable provider configuration as a compatible fallback while ensuring API keys are never persisted, echoed in status responses, or included in connection errors.
 
 - Quarantined the legacy evaluation runtime: old records remain read-only while the public CLI and Dashboard can no longer create or control legacy exploratory runs.

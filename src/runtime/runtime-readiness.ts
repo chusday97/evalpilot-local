@@ -5,7 +5,7 @@ import { chromium } from 'playwright';
 import type { RuntimeCheck, RuntimeReadiness } from '../../types.js';
 import { detectAgentConnections } from '../agents/agent-discovery.js';
 import { packageVersion, resolveDataRoot } from './paths.js';
-import { openAiConnectionStatus } from '../ai/provider-connection.js';
+import { aiConnectionStatus } from '../ai/provider-connection.js';
 
 const exec = promisify(execFile);
 
@@ -34,10 +34,10 @@ async function gitCheck(): Promise<RuntimeCheck> {
 }
 
 function aiProviderCheck(): RuntimeCheck {
-  const connection = openAiConnectionStatus();
+  const connection = aiConnectionStatus();
   return connection.configured
-    ? { status: 'ready', label: 'AI Test Agent', detail: `OpenAI 已连接（模型：${connection.model}；来源：${connection.source === 'session' ? '本次工作台' : '启动环境'}）。默认只发送最小化可见页面文字；截图仍需每次显式确认。`, recoveryAction: null }
-    : { status: 'missing', label: 'AI Test Agent', detail: '尚未连接 OpenAI；Dashboard 仍可查看，但新的 AI 评测不能开始。', recoveryAction: '在评测页点击“连接 OpenAI”，验证成功后即可开始；Key 不会写入本地文件。' };
+    ? { status: 'ready', label: 'AI Test Agent', detail: `${connection.displayName} 已连接（模型：${connection.model}；来源：${connection.source === 'session' ? '本次工作台' : '启动环境'}）。默认只发送最小化可见页面文字；截图仍需每次显式确认。`, recoveryAction: null }
+    : { status: 'missing', label: 'AI Test Agent', detail: '尚未连接 AI 模型；Dashboard 仍可查看，但新的 AI 评测不能开始。', recoveryAction: '在评测页选择 OpenAI、DeepSeek、Kimi 或其他兼容服务，验证 Key 后即可开始；Key 不会写入本地文件。' };
 }
 
 export async function inspectRuntime(cwd: string, dataDir?: string | null): Promise<RuntimeReadiness> {

@@ -106,15 +106,17 @@ describe.skipIf(!enabled)('dashboard browser', () => {
       expect(await title.isVisible(), `页面标题未显示：${heading}`).toBe(true);
     }
     await page.goto(`${baseUrl}/evaluate`, { waitUntil: 'networkidle' });
-    await page.getByRole('button', { name: '连接 OpenAI' }).click();
-    expect(await page.getByLabel('OpenAI API Key').getAttribute('type')).toBe('password');
-    await page.getByLabel('OpenAI API Key').fill('sk-browser-test-only-value');
+    await page.getByRole('button', { name: '选择 AI 模型并连接' }).click();
+    expect(await page.getByText('DeepSeek', { exact: true }).first().isVisible()).toBe(true);
+    expect(await page.getByText('Kimi', { exact: true }).first().isVisible()).toBe(true);
+    expect(await page.getByLabel('2. 粘贴 OpenAI API Key').getAttribute('type')).toBe('password');
+    await page.getByLabel('2. 粘贴 OpenAI API Key').fill('sk-browser-test-only-value');
     vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response('{}', { status: 200 })));
     await page.getByRole('button', { name: '验证并连接' }).click();
     await page.getByText('AI 评测能力已连接', { exact: true }).waitFor({ state: 'visible' });
     expect(await page.locator('.ai-connected-strip small').filter({ hasText: '只在本次工作台运行期间有效' }).isVisible()).toBe(true);
     await page.getByRole('button', { name: '断开本次连接' }).click();
-    await page.getByRole('button', { name: '连接 OpenAI' }).waitFor({ state: 'visible' });
+    await page.getByRole('button', { name: '选择 AI 模型并连接' }).waitFor({ state: 'visible' });
     vi.unstubAllGlobals();
     await page.goto(`${baseUrl}/issues`, { waitUntil: 'networkidle' });
     const resultGuide = page.getByRole('heading', { name: '先看结论，再决定要不要处理' });
@@ -158,7 +160,7 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.getByRole('button', { name: '用 AI 用户运行这个案例' }).click();
     expect(await page.getByRole('dialog', { name: '确认运行 AI 用户' }).isVisible()).toBe(true);
     await page.getByRole('button', { name: '确认并开始运行' }).click();
-    await page.getByText(/尚未连接 AI 评测能力。请在评测页连接 OpenAI/).waitFor({ state: 'visible' });
+    await page.getByText(/尚未连接 AI 评测能力。请先在评测页选择一个模型服务/).waitFor({ state: 'visible' });
     expect(await page.getByRole('button', { name: '确认并开始运行' }).isEnabled()).toBe(true);
     await page.getByRole('button', { name: '取消' }).click();
     await page.locator('aside nav button').filter({ hasText: '运行' }).click();
@@ -195,6 +197,13 @@ describe.skipIf(!enabled)('dashboard browser', () => {
       await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
       expect(await page.evaluate(() => ({ root: document.documentElement.scrollWidth, viewport: window.innerWidth, buttons: [...document.querySelectorAll('main button')].filter((button) => { const rect = button.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && (rect.right > window.innerWidth + 1 || rect.left < -1); }).length }))).toEqual({ root: 390, viewport: 390, buttons: 0 });
     }
+    await page.goto(`${baseUrl}/evaluate`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: '选择 AI 模型并连接' }).click();
+    await page.getByRole('radio', { name: /其他兼容服务/ }).check();
+    await page.getByRole('textbox', { name: /^API 地址/ }).fill('https://models.example.com/v1');
+    await page.getByRole('textbox', { name: /^模型名称/ }).fill('custom-model');
+    expect(await page.getByText('models.example.com', { exact: true }).isVisible()).toBe(true);
+    expect(await page.evaluate(() => ({ root: document.documentElement.scrollWidth, viewport: window.innerWidth }))).toEqual({ root: 390, viewport: 390 });
     await page.goto(`${baseUrl}/home`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: '打开主导航' }).click();
     expect(await page.getByRole('navigation', { name: '产品闭环' }).isVisible()).toBe(true);

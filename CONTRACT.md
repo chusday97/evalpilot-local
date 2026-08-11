@@ -180,15 +180,19 @@ Dashboard 不得直接读写 YAML/JSONL；所有写操作经 Core 校验并原�
 | 方法 | 路径 | 请求 | 返回 |
 |---|---|---|---|
 | GET | `/api/ai-provider` | 无 | `AiProviderConnectionStatus` |
-| POST | `/api/ai-provider/connect` | `{ provider: "openai", apiKey, model?, confirmed: true }` | `AiProviderConnectionStatus` |
+| POST | `/api/ai-provider/connect` | 官方预设：`{ provider: "openai" | "deepseek" | "kimi", apiKey, model?, confirmed: true }`；兼容服务：`{ provider: "openai_compatible", apiKey, baseUrl, model, confirmed: true }` | `AiProviderConnectionStatus` |
 | POST | `/api/ai-provider/disconnect` | `{ confirmed: true }` | `AiProviderConnectionStatus` |
 
 - `AiProviderConnectionStatus.source` 为 `session | environment | null`。页面内连接优先于环境变量；断开页面内连接后可回退到环境变量。
-- 页面提交的 OpenAI API Key 只保存在当前 Dashboard 服务进程内存中，不写入数据目录、项目、日志、响应、错误详情或浏览器持久存储；服务重启后自动清除。
-- 连接前仅向 OpenAI 模型读取接口验证凭证和指定模型是否可访问，不生成评测内容。生产环境只允许官方 OpenAI API；测试环境只允许显式配置的 loopback 地址。
+- `AiProviderConnectionStatus` 只返回已连接的 `provider`、`displayName`、`protocol`、`apiHost`、`model` 和时间，不返回 Key 或完整自定义 URL；未连接时这些身份字段为 `null`。
+- 页面提交的任何 API Key 只保存在当前 Dashboard 服务进程内存中，不写入数据目录、项目、日志、响应、错误详情或浏览器持久存储；服务重启后自动清除。
+- 官方预设固定为：OpenAI 使用官方 Responses API；DeepSeek 与 Kimi 使用各自官方 OpenAI-compatible Chat Completions API。界面可以修改模型名，但不能修改官方预设的目标主机。
+- `openai_compatible` 只支持 OpenAI-compatible Chat Completions。用户必须显式提供 `baseUrl` 和 `model`；远程地址必须为 HTTPS，只有 `localhost`、`127.0.0.1` 和 `::1` 可以使用 HTTP。URL 禁止用户名、密码、query 和 fragment。
+- 连接前仅向目标服务的模型读取接口验证凭证和指定模型是否可访问，不生成评测内容。连接界面必须在提交前显示 Key 将发送到的目标主机。
 - 验证失败不得替换已有的会话连接。接口只返回可操作的人话错误，不返回远端响应正文或 Key 片段。
 - `disconnect` 只影响之后创建的 Provider；已经启动的单次评测持有自己的 Provider 实例，按原评测流程结束。
 - 环境变量 `EVALPILOT_OPENAI_API_KEY` 与 `EVALPILOT_OPENAI_MODEL` 继续兼容。由环境提供的连接不能在页面中删除，只能停止服务并修改启动环境。
+- Chat Completions Provider 使用 JSON Output，并在本地用同一 Zod Schema 复验；空内容、无效 JSON、字段不匹配或多次重试失败统一归类为 Provider 输出无效，不得冒充评测完成或产品失败。
 
 ### 4.3 v0.3 核心实体与迁移
 

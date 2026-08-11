@@ -170,7 +170,18 @@ evalpilot doctor
 evalpilot dashboard
 ```
 
-打开 Dashboard 后进入“评测”页，点击“连接 OpenAI”，粘贴 API Key 并选择“验证并连接”。Key 只保存在当前 EvalPilot 服务进程的内存中，不会写入项目或数据目录；服务关闭或重启后需要重新连接。原有 `EVALPILOT_OPENAI_API_KEY` 环境变量方式仍可作为开发者备用入口。
+打开 Dashboard 后进入“评测”页，点击“选择 AI 模型并连接”。小白用户可以直接选择 OpenAI、DeepSeek 或 Kimi，然后粘贴对应厂商的 API Key；高级入口支持提供 OpenAI-compatible Chat Completions 的其他服务。系统会在提交前显示 Key 将发送到的主机，官方预设不能改写目标地址。
+
+Key 只保存在当前 EvalPilot 服务进程的内存中，不会写入项目、数据目录、浏览器持久存储或状态响应；服务关闭或重启后需要重新连接。自定义远程服务必须使用 HTTPS，本机 loopback 可以使用 HTTP。原有 `EVALPILOT_OPENAI_API_KEY` 与 `EVALPILOT_OPENAI_MODEL` 仍可作为 OpenAI 开发者备用入口。
+
+| 服务 | 默认协议 | 默认模型 | 默认目标 |
+|---|---|---|---|
+| OpenAI | Responses API + strict JSON Schema | `gpt-5-mini` | `api.openai.com` |
+| DeepSeek | Chat Completions + JSON Output | `deepseek-v4-flash` | `api.deepseek.com` |
+| Kimi 中国站 | Chat Completions + JSON Output | `kimi-k2.6` | `api.moonshot.cn` |
+| 其他兼容服务 | OpenAI-compatible Chat Completions | 用户填写 | 用户确认的 HTTPS/loopback 地址 |
+
+模型名称可能随厂商更新而变化，连接页的高级详情允许修改模型 ID。DeepSeek、Kimi 和兼容服务的 JSON 结果会在本地再次通过同一 Zod Schema 校验；无效输出不会被当成评测完成或产品问题。当前自定义入口不代表原生支持 Anthropic Messages、Google Gemini 或本地 Ollama 协议。
 
 评测运行会持续维护本地 Eval Set、已确认 Product Badcase 和 Evaluator Badcase，并自动生成对应的可读 Markdown。两类 Badcase 永不混用，运行证据也不会上传到仓库。维护边界和检查方法见 [Eval Set 与 Badcase 维护规则](docs/EVAL_SET_AND_BADCASES.md)。
 

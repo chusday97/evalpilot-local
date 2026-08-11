@@ -31,7 +31,7 @@ import { confirmProductFailure, dismissFinding, markEvaluatorFailure } from '../
 import { chromium } from 'playwright';
 import { runAdaptiveCase } from '../evaluation/adaptive-evaluation-service.js';
 import { configuredEvaluationProvider } from '../evaluation/evaluation-orchestrator.js';
-import { connectOpenAiSession, disconnectOpenAiSession, openAiConnectionStatus } from '../ai/provider-connection.js';
+import { aiConnectionStatus, connectAiSession, disconnectAiSession } from '../ai/provider-connection.js';
 import { loadEvalSetManifest } from '../eval-set/eval-set-store.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
 import { nextActionForEvaluation } from '../decision/next-action-engine.js';
@@ -107,7 +107,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
   try {
     if (method === 'GET' && pathname === '/api/health') {
       const runtime = await inspectRuntime(cwd);
-      const aiProviderConnection = openAiConnectionStatus();
+      const aiProviderConnection = aiConnectionStatus();
       return ok({
         status: 'ok',
         packageVersion: runtime.packageVersion,
@@ -115,20 +115,20 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
         capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'in_memory_ai_provider', 'adaptive_eval_set', 'adaptive_default_evaluation', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder', 'next_action_engine'],
         runtime,
         aiProviderConnection,
-        aiTestAgent: { configured: aiProviderConnection.configured, provider: 'openai', source: aiProviderConnection.source, model: aiProviderConnection.model, screenshotDefault: false },
-        aiProductUnderstanding: { configured: aiProviderConnection.configured, provider: 'openai', source: aiProviderConnection.source, model: aiProviderConnection.model, defaultEnabled: false, screenshotInput: false },
+        aiTestAgent: { configured: aiProviderConnection.configured, provider: aiProviderConnection.provider, source: aiProviderConnection.source, model: aiProviderConnection.model, screenshotDefault: false },
+        aiProductUnderstanding: { configured: aiProviderConnection.configured, provider: aiProviderConnection.provider, source: aiProviderConnection.source, model: aiProviderConnection.model, defaultEnabled: false, screenshotInput: false },
       });
     }
-    if (method === 'GET' && pathname === '/api/ai-provider') return ok(openAiConnectionStatus());
+    if (method === 'GET' && pathname === '/api/ai-provider') return ok(aiConnectionStatus());
     if (method === 'POST' && pathname === '/api/ai-provider/connect') {
       const parsed = aiProviderConnectionRequestSchema.safeParse(body);
       if (!parsed.success) return validationFailure('AI_PROVIDER_CONNECTION_INVALID', parsed.error.issues);
-      return ok(await connectOpenAiSession(parsed.data));
+      return ok(await connectAiSession(parsed.data));
     }
     if (method === 'POST' && pathname === '/api/ai-provider/disconnect') {
       const parsed = aiProviderDisconnectRequestSchema.safeParse(body);
       if (!parsed.success) return validationFailure('AI_PROVIDER_DISCONNECT_INVALID', parsed.error.issues);
-      return ok(disconnectOpenAiSession());
+      return ok(disconnectAiSession());
     }
     const safeLegacyPost = pathname === '/api/workspace-candidates' || pathname === '/api/system/pick-directory' || pathname === '/api/connect/check' || pathname === '/api/ai-provider/connect' || pathname === '/api/ai-provider/disconnect' || /^\/api\/agents\/(codex|claude_code|antigravity)\/check$/.test(pathname);
     if (isLegacyDataRoot(cwd) && method !== 'GET' && !safeLegacyPost) return fail(409, 'LEGACY_DATA_READ_ONLY', '旧 .evalpilot 当前只能查看；请先运行 evalpilot migrate --confirmed。');
