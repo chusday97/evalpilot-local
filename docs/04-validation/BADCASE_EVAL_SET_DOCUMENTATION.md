@@ -18,7 +18,7 @@
 | 文档持久化与 Failure taxonomy 专项测试 | 9 项通过 |
 | `npm test` | 199 项通过，27 项按既有条件跳过 |
 | `npm run build` | 通过 |
-| `npm run audit:package` | 173 个文件，压缩后 270,942 bytes，敏感命中 0 |
+| `npm run audit:package` | 173 个文件，压缩后 271,344 bytes，敏感命中 0 |
 | `git diff --check` | 通过 |
 
 本次没有修改 Dashboard UI、API 或浏览器运行路径，因此没有新增浏览器交互验收。文档生成器会把动态文本中的 HTML 边界符转义，避免本地项目文案被当作 Markdown HTML。
