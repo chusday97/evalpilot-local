@@ -65,7 +65,10 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await writeFile(resolve(outputDir, 'journeys', 'cap-recommend.yaml'), stringify(buildFeatureJourneyGraph(capability)));
     await writeFile(resolve(outputDir, 'reports', 'ux-issues.jsonl'), '');
     const coverage = { discoveredCount: 1, plannedCount: 1, browserVisitedCount: 1, executedCount: 1, passedCount: 0, failedCount: 1, blockedCount: 0, notApplicableCount: 0, notRunCount: 0, complete: true, capabilities: [{ capabilityId: 'cap-recommend', capabilityName: '首次推荐', entryPoint: '/', discovered: true, browserVisited: true, executionStatus: 'failed', runIds: ['run-home'], reason: '真实运行发现失败' }] };
-    await writeFile(resolve(outputDir, 'evaluations', 'sessions.jsonl'), `${JSON.stringify({ evaluationId: 'evaluation-home', projectId: 'dashboard-fixture', sequenceNumber: 1, depth: 'core', capabilityIds: ['cap-recommend'], capabilityNames: ['首次推荐'], plannedCapabilityIds: ['cap-recommend'], plannedCapabilityNames: ['首次推荐'], executedCapabilityIds: ['cap-recommend'], executedCapabilityNames: ['首次推荐'], coverage, customName: null, competitorSnapshotIds: [], issueIds: ['ux-home-1'], status: 'completed', currentStage: 'report', stages: ['readiness','scan','background','blueprint','cases','run','report'].map((name) => ({ name, status: 'completed', message: '完成' })), runIds: ['run-home'], startedAt, completedAt, error: null })}\n`);
+    const completedStages = ['readiness','scan','background','blueprint','cases','run','report'].map((name) => ({ name, status: 'completed', message: '完成' }));
+    const homeSession = { evaluationId: 'evaluation-home', projectId: 'dashboard-fixture', sequenceNumber: 2, depth: 'core', capabilityIds: ['cap-recommend'], capabilityNames: ['首次推荐'], plannedCapabilityIds: ['cap-recommend'], plannedCapabilityNames: ['首次推荐'], executedCapabilityIds: ['cap-recommend'], executedCapabilityNames: ['首次推荐'], coverage, customName: null, competitorSnapshotIds: [], issueIds: ['ux-home-1'], status: 'completed', currentStage: 'report', stages: completedStages, runIds: ['run-home'], startedAt, completedAt, error: null };
+    const resultSession = { evaluationId: 'evaluation-adaptive-result', projectId: 'dashboard-fixture', sequenceNumber: 1, runtime: 'adaptive', depth: 'core', capabilityIds: ['cap-recommend'], capabilityNames: ['首次推荐'], plannedCapabilityIds: ['cap-recommend'], plannedCapabilityNames: ['首次推荐'], executedCapabilityIds: ['cap-recommend'], executedCapabilityNames: ['首次推荐'], selectedCaseIds: [adaptiveCase.caseId], coverage: null, coverageMatrix: null, customName: null, competitorSnapshotIds: [], issueIds: [], findingIds: [], badcaseIds: [badcase.badcaseId], remoteModelAuthorized: true, screenshotAuthorized: false, status: 'completed', currentStage: 'report', stages: completedStages, runIds: [adaptiveResult.runId], startedAt: new Date(new Date(startedAt).getTime() - 60_000).toISOString(), completedAt, error: null };
+    await writeFile(resolve(outputDir, 'evaluations', 'sessions.jsonl'), `${JSON.stringify(homeSession)}\n${JSON.stringify(resultSession)}\n`);
     await writeFile(resolve(outputDir, 'evaluations', 'evaluation-home', 'issues.jsonl'), `${JSON.stringify({ issueId: 'ux-home-1', type: 'interaction_feedback_issue', severity: 'P1', featureId: '首次推荐', personaId: 'persona-new-user', caseId: 'case-home', userGoal: '获得推荐结果', idealPath: ['开始', '看到结果'], actualPath: ['开始', '没有反馈'], shortestReasonablePath: ['开始', '看到结果'], failureOrAbandonmentPoint: '提交后没有结果反馈，用户无法确认任务是否完成。', metrics: {}, evidence: ['trace.zip'], recommendation: '补充明确结果反馈', protectedSafetySteps: [], confidence: 'high', needsHumanReview: true, addedToRegression: false })}\n`);
     process.env.EVALPILOT_DATA_DIR = outputDir;
     const server = await startDashboardServer(cwd, 0, resolve(process.cwd(), 'dist-dashboard'));
@@ -113,9 +116,9 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     expect(await page.getByText('这是一条旧记录，现有证据不能可靠定位到具体步骤。').isVisible()).toBe(true);
     expect(await page.getByText('尚未定位到具体代码文件').isVisible()).toBe(true);
     await page.getByRole('button', { name: '返回问题列表' }).last().click();
-    for (const [label, heading] of [['评测集', '评测集 v2'], ['运行', '运行结果'], ['发现', '问题发现'], ['回归', '回归与评测集演进']] as const) {
+    for (const [label, heading] of [['评测集', '评测集 v2'], ['运行', '已确认 1 个产品问题，需要处理后复测。'], ['发现', '问题发现'], ['回归', '回归与评测集演进']] as const) {
       await page.locator('aside nav button').filter({ hasText: label }).click();
-      await page.getByRole('heading', { name: heading, exact: true }).waitFor({ state: 'visible' });
+      await page.getByRole('heading', { name: heading, exact: true }).first().waitFor({ state: 'visible' });
     }
     await page.locator('aside nav button').filter({ hasText: '评测集' }).click();
     await page.getByText('评测资产覆盖').waitFor({ state: 'visible' });
@@ -136,12 +139,20 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     expect(await page.getByRole('button', { name: '确认并开始运行' }).isEnabled()).toBe(true);
     await page.getByRole('button', { name: '取消' }).click();
     await page.locator('aside nav button').filter({ hasText: '运行' }).click();
-    await page.getByText('推荐已经出现，但用户找不到保存或继续操作。', { exact: true }).waitFor({ state: 'visible' });
+    await page.getByRole('heading', { name: '已确认 1 个产品问题，需要处理后复测。', exact: true }).first().waitFor({ state: 'visible' });
+    expect(await page.locator('[data-section]').evaluateAll((items) => items.map((item) => item.getAttribute('data-section')))).toEqual(['本次结论', '为什么', '当前不能确定什么', '你现在应该做什么', '证据', '技术详情']);
+    expect(await page.getByRole('button', { name: '创建修复任务' }).isVisible()).toBe(true);
+    expect(await page.getByText('inconclusive', { exact: true }).count()).toBe(0);
+    expect(await page.getByText('confirmed_product_failure', { exact: true }).count()).toBe(0);
     expect(await page.getByText('推荐已经出现，但用户找不到保存或继续操作。', { exact: true }).isVisible()).toBe(true);
     expect(await page.getByText('证据不足，不能判断产品好坏').isVisible()).toBe(true);
     expect(await page.getByText('旧记录缺少逐步前后证据，不能补推验证结论。').isVisible()).toBe(true);
     expect(await page.getByText('没有找到保存或继续入口').isVisible()).toBe(true);
-    await page.locator('aside nav button').filter({ hasText: '发现' }).click();
+    const primaryResultAction = page.getByRole('button', { name: '创建修复任务' });
+    await primaryResultAction.focus();
+    expect(await primaryResultAction.evaluate((element) => document.activeElement === element)).toBe(true);
+    await page.keyboard.press('Enter');
+    await page.waitForURL(/\/findings\?badcaseId=badcase-next-step$/);
     await page.getByText('已确认事实', { exact: true }).waitFor({ state: 'visible' });
     expect(await page.getByText('已确认事实').isVisible()).toBe(true);
     expect(await page.getByText('可能根因（仍需验证）').isVisible()).toBe(true);
@@ -157,7 +168,7 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${baseUrl}/home`, { waitUntil: 'networkidle' });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    for (const path of ['/eval-set', '/runs', '/findings', '/regression']) {
+    for (const path of ['/eval-set', '/runs?evaluationId=evaluation-adaptive-result', '/findings', '/regression']) {
       await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
       expect(await page.evaluate(() => ({ root: document.documentElement.scrollWidth, viewport: window.innerWidth, buttons: [...document.querySelectorAll('main button')].filter((button) => { const rect = button.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && (rect.right > window.innerWidth + 1 || rect.left < -1); }).length }))).toEqual({ root: 390, viewport: 390, buttons: 0 });
     }

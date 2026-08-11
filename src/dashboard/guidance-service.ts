@@ -41,12 +41,11 @@ export async function buildGuidedFlow(cwd: string, requestedProjectId?: string):
   steps[1] = { ...steps[1]!, status: 'completed', actionLabel: null };
   const latestSession = (await listEvaluations(cwd, project.projectId)).find((item) => item.evaluationId === latest.evaluationId) ?? null;
   if (latestSession?.runtime === 'adaptive') {
-    const firstRunId = latestSession.runIds[0];
     steps[2] = {
       ...steps[2]!,
       title: '查看运行与发现',
       description: '先看 AI 用户实际做了什么，再处理候选发现或已确认问题。',
-      route: firstRunId ? `/runs?runId=${encodeURIComponent(firstRunId)}` : '/runs',
+      route: `/runs?evaluationId=${encodeURIComponent(latestSession.evaluationId)}`,
       anchor: null,
       status: latest.issueCount > 0 ? 'current' : 'completed',
       actionLabel: latest.issueCount > 0 ? '查看本次运行和发现' : null,

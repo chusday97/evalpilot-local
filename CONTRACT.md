@@ -332,6 +332,16 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - 零个已确认 Product Failure 时，主动作绝不能是创建修复、复测修复或加入回归。旧 Legacy 问题不参与 Adaptive 下一动作推导。
 - 新增 `GET /api/evaluations/:id/next-action?projectId=`，从该 Evaluation Session 的 Case、Result、Evidence、Finding、Badcase 和 FixTask 谱系实时重算，不读取泛化最新报告。
 
+### 10.6 One Evaluation Path Phase 7 结果呈现契约
+
+- 结果页必须通过 URL 中的 `evaluationId` 读取指定 Evaluation Session，并只展示其 `runIds`、`findingIds` 和 `badcaseIds` 谱系；不得用项目最新记录替换用户刚完成或主动选择的评测。
+- 默认视图固定按“本次结论 → 为什么 → 当前不能确定什么 → 你现在应该做什么 → 证据 → 技术详情”排序。标题先回答发生了什么和是否为产品问题，不得以 `fail`、`inconclusive`、Finding 状态或严重度枚举开头。
+- `inconclusive` 面向用户显示“还不能判断”；`failureSource=evaluator` 显示“评测器没有完成这一步”；Candidate Finding 显示为证据尚不足的可疑现象；`pending/progressing` 与 `stalled` 分别解释为仍在处理和长时间没有变化。
+- 只有已确认 Finding 或 Product Badcase 计入“确认问题”。Evaluator Failure、未运行案例、Candidate Finding 和进行中任务不得显示为产品 Bug。
+- “你现在应该做什么”只显示 Phase 6 `EvaluationNextAction` 的一个主动作；当 `primaryCta=null` 时最多使用第一个安全次动作。所有路由必须保留具体对象 ID。
+- 技术枚举、Session/Run ID、失败来源与严重度仅在默认折叠的“技术详情”中展示。证据区使用人话动作、实际结果和证据完整性说明，且 Trace 继续声明为仅本机保存。
+- 评测完成入口与 Guidance 必须跳转到 `/runs?evaluationId=<id>`；独立单案例运行可使用 `runId` 兼容查看，但不得冒充完整 Evaluation Session 结论。
+
 ### 10.4 Accuracy Sprint Phase 5 Semantic Verifier 契约
 
 - `EvalPersonaRef` 新增显式 Agent Policy：知识水平、耐心动作数、允许重试次数、隐私敏感度和退出条件。新案例必须写入全部字段；旧案例只在兼容读取时使用 `medium / 3 / 1 / medium / 证据不足时退出`，不得覆盖原文件。

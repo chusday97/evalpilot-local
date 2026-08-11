@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Rewrote the Evaluation Result view into six novice-readable sections that answer what happened, whether a Product Bug is confirmed, what remains unknown, and the single next action before exposing evidence and technical enums.
+- Scoped result loading and post-evaluation navigation to the exact `evaluationId`, preventing another run or the project latest record from replacing the selected evaluation lineage.
 - Added a schema-validated Next Action Engine that turns each Evaluation Session into exactly one novice-readable recommendation with object-specific routes.
 - Added `GET /api/evaluations/:id/next-action` and persisted the same decision in Adaptive reports while keeping report snapshots separate from live recomputation.
 - Prevented Candidate, evaluator, Legacy issue, and unconfirmed evidence states from recommending code repair or regression promotion before a Product Failure is confirmed and a passing retest exists.
