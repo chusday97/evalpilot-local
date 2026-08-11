@@ -33,6 +33,16 @@ async function probe(projectRoot: string, url: string | null): Promise<{ reachab
 
 async function freePort(): Promise<number> { return new Promise((resolvePort, reject) => { const server = createServer(); server.once('error', reject); server.listen(0, '127.0.0.1', () => { const address = server.address(); const port = typeof address === 'object' && address ? address.port : 0; server.close((error) => error ? reject(error) : resolvePort(port)); }); }); }
 
+async function isViteScript(projectRoot: string, script: string): Promise<boolean> {
+  try {
+    const manifest = JSON.parse(await readFile(resolve(projectRoot, 'package.json'), 'utf8')) as { scripts?: Record<string, unknown> };
+    const command = manifest.scripts?.[script];
+    return typeof command === 'string' && /(^|[\s/])vite(?:\s|$)/.test(command);
+  } catch {
+    return false;
+  }
+}
+
 export async function discoverProject(projectRootInput: string, targetUrl: string | null = null, projectId: string | null = null): Promise<ProjectReadiness> {
   let root = resolve(projectRootInput);
   let pathValid = true;
@@ -91,7 +101,9 @@ export async function startProject(cwd: string, projectId: string, command?: str
     const index = registry.projects.findIndex((item) => item.projectId === projectId); registry.projects[index] = { ...project, targetUrl, updatedAt: new Date().toISOString() }; await saveProjectRegistry(cwd, registry);
     await writeYamlAtomic(resolve(project.outputDir, 'config.yaml'), { version: 1, projectRoot: project.projectRoot, targetUrl, outputDir: project.outputDir, browser: project.browser, createdAt: project.createdAt });
   }
-  const args = ['run', script, ...(targetUrl !== project.targetUrl && port ? ['--', '--host', '127.0.0.1', '--port', String(port)] : [])];
+  const parsedTarget = new URL(targetUrl);
+  const shouldForwardTarget = Boolean(port) && (targetUrl !== project.targetUrl || await isViteScript(project.projectRoot, script));
+  const args = ['run', script, ...(shouldForwardTarget ? ['--', '--host', parsedTarget.hostname, '--port', String(port)] : [])];
   const child = spawn('npm', args, { cwd: project.projectRoot, stdio: 'ignore' });
   processes.set(projectId, child); child.once('exit', () => processes.delete(projectId));
   for (let attempt = 0; attempt < 20; attempt += 1) { await new Promise((resolveWait) => setTimeout(resolveWait, 250)); const next = await discoverProject(project.projectRoot, targetUrl, projectId); if (next.canEvaluate) { const index = registry.projects.findIndex((item) => item.projectId === projectId); registry.projects[index] = { ...project, targetUrl, startCommand: selected, status: 'ready', updatedAt: new Date().toISOString() }; await saveProjectRegistry(cwd, registry); return next; } if (child.exitCode !== null) break; }

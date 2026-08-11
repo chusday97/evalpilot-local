@@ -39,6 +39,19 @@ describe('dashboard local data boundary', () => {
     expect(guidance.steps[0]?.actionLabel).toBe('连接第一个项目');
   });
 
+  it('does not treat a cached ready project as currently reachable', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-stale-readiness-'));
+    const dataDir = resolve(cwd, 'data'); const outputDir = resolve(dataDir, 'projects', 'stale-ready'); const now = new Date().toISOString();
+    await mkdir(outputDir, { recursive: true });
+    await writeFile(resolve(cwd, 'package.json'), JSON.stringify({ name: 'stale-ready' }));
+    await writeFile(resolve(dataDir, 'projects.json'), JSON.stringify({ version: 1, activeProjectId: 'stale-ready', projects: [{ projectId: 'stale-ready', name: 'Stale ready', projectRoot: cwd, targetUrl: 'http://127.0.0.1:9', outputDir, browser: 'chromium', startCommand: null, status: 'ready', importSource: 'manual', preferredAgent: null, createdAt: now, updatedAt: now, lastOpenedAt: now }] }));
+    process.env.EVALPILOT_DATA_DIR = dataDir;
+    try {
+      const result = await dispatchDashboardApi(cwd, 'GET', '/api/guidance', '?projectId=stale-ready', {});
+      expect(result.body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({ currentStep: 'project', steps: expect.arrayContaining([expect.objectContaining({ id: 'project', status: 'current', actionLabel: '启动当前项目' })]) }) }));
+    } finally { delete process.env.EVALPILOT_DATA_DIR; }
+  });
+
   it('recomputes the next action from the requested evaluation instead of the latest session', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-next-action-api-'));
     const dataDir = resolve(cwd, 'data'); const outputDir = resolve(dataDir, 'projects', 'project-next'); const now = new Date().toISOString();

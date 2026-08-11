@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Fixed project readiness so the Dashboard and guided flow recheck the live test URL instead of trusting a stale saved `ready` status; stopped projects now expose one visible start action before evaluation.
+- Fixed Vite startup to honor the exact confirmed test host and port, then require a matching project fingerprint before the project can be marked ready.
+
 - Expanded the in-process AI connection flow from OpenAI-only to safe OpenAI, DeepSeek, and Kimi presets plus an advanced OpenAI-compatible Chat Completions endpoint.
 - Added fixed official-provider hosts, visible credential destinations, HTTPS/loopback validation for custom endpoints, provider-specific protocol routing, and local Zod validation for compatible JSON output.
 - Added provider cards, novice-readable connection guidance, field-level errors, password masking, explicit disconnect, and immediate readiness refresh without restarting the Dashboard.

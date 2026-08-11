@@ -198,7 +198,7 @@ Dashboard 不得直接读写 YAML/JSONL；所有写操作经 Core 校验并原�
 
 - `ProjectRegistry`：`version, activeProjectId, projects`，位于 `.evalpilot/projects.json`。
 - `ProjectProfile`：项目身份、源码路径、目标 URL、输出目录、启动命令、状态和最近打开时间。项目列表另返回 `ProjectCardSummary`，包含最近评测时间/状态和 P0/P1 问题数。
-- `ProjectReadiness`：路径/URL/Git/脏工作区事实、启动建议、端口、目标服务指纹是否匹配、阻塞原因和可评测状态。`urlReachable` 只说明端口有响应，`targetVerified` 才说明响应与所选项目匹配。
+- `ProjectReadiness`：路径/URL/Git/脏工作区事实、启动建议、端口、目标服务指纹是否匹配、阻塞原因和可评测状态。`urlReachable` 只说明端口有响应，`targetVerified` 才说明响应与所选项目匹配。项目页、流程引导和评测入口必须使用当前请求重新探测得到的 `canEvaluate`，不得把 `ProjectProfile.status=ready` 当作实时可达证明。启动 Vite 项目时必须把已确认测试网址的 host/port 传给启动命令，并在成功返回前重新验证项目指纹。
 - `EvaluationSession`：增加 `runtime`、`selectedCaseIds`、`coverageMatrix`、`findingIds`、`badcaseIds`、远程模型授权和截图授权；深度、请求/计划/实际执行能力、兼容覆盖摘要、流水线阶段、运行 ID、状态、错误和时间继续保留。旧记录缺少新字段时只按 `runtime=legacy` 兼容读取，不改写、不根据名称反推 Adaptive 证据。
 - `EvaluationOrchestratorInput`：`projectId`、`evaluationId`、`depth`、`capabilityIds`、`allowRemoteModel=true`、`allowScreenshot`；内部 `legacyFallback` 默认 `false`，普通 Dashboard 不可设置。
 - `EvaluationOrchestratorResult`：`evaluationId`、`selectedCaseIds`、`runIds`、真实 `EvalCaseResult[]`、`CandidateFinding[]`、`Badcase[]` 和 `CoverageMatrix`。默认路径固定为 Product Model → Eval Set → AI Test Agent → Hybrid Judge → Finding Triage；不得调用 Legacy Explorer。

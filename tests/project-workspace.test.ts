@@ -1,4 +1,5 @@
 import { execFile } from 'node:child_process';
+import { createServer } from 'node:net';
 import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -6,7 +7,7 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { promisify } from 'node:util';
 import { applyFix, createFixTask, listAgentRuns, startAgent } from '../src/agents/fix-service.js';
 import { loadProjectRegistry } from '../src/projects/project-registry.js';
-import { registerProject } from '../src/projects/project-service.js';
+import { registerProject, startProject } from '../src/projects/project-service.js';
 import { startDashboardServer } from '../src/dashboard/server.js';
 import { evaluationDepthOptions, evaluationSnapshot, listEvaluationRecords, renameEvaluation, retryEvaluation, startEvaluation } from '../src/dashboard/evaluation-manager.js';
 import { saveFinding } from '../src/findings/finding-store.js';
@@ -17,6 +18,18 @@ afterEach(async () => { delete process.env.EVALPILOT_DATA_DIR; delete process.en
 
 function useFixtureDataDir(cwd: string): void {
   process.env.EVALPILOT_DATA_DIR = resolve(cwd, '.evalpilot-data');
+}
+
+async function unusedPort(): Promise<number> {
+  return new Promise((resolvePort, reject) => {
+    const server = createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const address = server.address();
+      if (!address || typeof address === 'string') return reject(new Error('没有取得测试端口'));
+      server.close((error) => error ? reject(error) : resolvePort(address.port));
+    });
+  });
 }
 
 function uxIssue(issueId: string, userGoal: string, failure: string) {
@@ -52,6 +65,19 @@ describe('multi-project workspace', () => {
     expect(a.outputDir).not.toBe(b.outputDir);
     expect(a.startCommand).toBe('npm run dev');
     expect(b.startCommand).toBe('npm run start');
+  });
+
+  it.skipIf(process.env.EVALPILOT_DASHBOARD_TEST !== '1')('starts a Vite project on the exact confirmed test URL', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-vite-start-')); const target = resolve(cwd, 'vite-target'); await mkdir(target);
+    useFixtureDataDir(cwd);
+    const port = await unusedPort();
+    await writeFile(resolve(target, 'package.json'), JSON.stringify({ name: 'vite-target', scripts: { dev: 'node server.mjs vite' } }));
+    await writeFile(resolve(target, 'server.mjs'), `import { createServer } from 'node:http';\nconst value = (name) => process.argv[process.argv.indexOf(name) + 1];\nconst server = createServer((_request, response) => { response.end('<title>vite-target</title>'); setTimeout(() => server.close(), 50); });\nserver.listen(Number(value('--port')), value('--host'));\n`);
+    const project = await registerProject(cwd, { projectRoot: target, targetUrl: `http://127.0.0.1:${port}` });
+
+    const readiness = await startProject(cwd, project.projectId);
+
+    expect(readiness).toEqual(expect.objectContaining({ targetUrl: `http://127.0.0.1:${port}`, port, urlReachable: true, targetVerified: true, canEvaluate: true }));
   });
 
   it.skipIf(process.env.EVALPILOT_DASHBOARD_TEST !== '1')('falls back to the next port only when automatic recovery is enabled', async () => {

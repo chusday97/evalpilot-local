@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import type { GuidedFlowState, GuidedFlowStep, UxIssue } from '../../types.js';
 import { listFixTasks } from '../agents/fix-service.js';
 import { loadProjectRegistry } from '../projects/project-registry.js';
+import { discoverProject } from '../projects/project-service.js';
 import { pathExists, readJsonLinesFile } from '../utils/file-system.js';
 import { listEvaluationRecords, listEvaluations } from './evaluation-manager.js';
 
@@ -26,10 +27,11 @@ export async function buildGuidedFlow(cwd: string, requestedProjectId?: string):
     return { projectId: null, currentStep: 'project', steps, updatedAt: new Date().toISOString() };
   }
 
-  steps[0] = project.status === 'ready'
+  const readiness = await discoverProject(project.projectRoot, project.targetUrl, project.projectId);
+  steps[0] = readiness.canEvaluate
     ? { ...steps[0]!, status: 'completed', actionLabel: null }
     : { ...steps[0]!, status: 'current', actionLabel: '启动当前项目' };
-  if (project.status !== 'ready') return { projectId: project.projectId, currentStep: 'project', steps, updatedAt: new Date().toISOString() };
+  if (!readiness.canEvaluate) return { projectId: project.projectId, currentStep: 'project', steps, updatedAt: new Date().toISOString() };
 
   const records = await listEvaluationRecords(cwd, project.projectId);
   const latest = records[0] ?? null;
