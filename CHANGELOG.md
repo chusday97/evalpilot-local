@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added a schema-validated Next Action Engine that turns each Evaluation Session into exactly one novice-readable recommendation with object-specific routes.
+- Added `GET /api/evaluations/:id/next-action` and persisted the same decision in Adaptive reports while keeping report snapshots separate from live recomputation.
+- Prevented Candidate, evaluator, Legacy issue, and unconfirmed evidence states from recommending code repair or regression promotion before a Product Failure is confirmed and a passing retest exists.
 - Added immutable `FixSourceSnapshot` task sources for evaluation issues, confirmed Adaptive Findings, and Product Badcases; task packages and later Agent runs no longer re-resolve the global latest report.
 - Changed Legacy fix creation to require `evaluationId + issueId`, and moved new Finding records to `findings/<findingId>.json` while preserving read-only compatibility with `findings/v1/`.
 - Added a ten-category Evaluator Failure taxonomy with schema-validated, versioned `EvaluatorBadcase` storage that stays separate from Product Badcase and Regression lineage.

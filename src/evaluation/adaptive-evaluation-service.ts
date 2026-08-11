@@ -63,6 +63,6 @@ export async function runAdaptiveCase(input: {
     }));
   }
   await saveCoverageMatrix(input.outputDir, coverage);
-  const report = await buildAdaptiveEvaluationReport({ outputDir: input.outputDir, projectId: input.evalCase.projectId, selectedCases: [input.evalCase], results: [result], packets: [packet], coverage, badcases: badcase ? [badcase] : [], challengeCases: passAnalysis?.challengeCandidates ?? [], generatedAt: agentRun.completedAt });
+  const report = await buildAdaptiveEvaluationReport({ outputDir: input.outputDir, projectId: input.evalCase.projectId, evaluationId: `evaluation-${result.runId}`, evaluationStatus: 'completed', selectedCases: [input.evalCase], results: [result], packets: [packet], coverage, findings: triage.finding ? [triage.finding] : [], badcases: badcase ? [badcase] : [], challengeCases: passAnalysis?.challengeCandidates ?? [], generatedAt: agentRun.completedAt });
   return { agentRun, result, finding: triage.finding, badcase, evaluatorBadcase, passAnalysis, report };
 }

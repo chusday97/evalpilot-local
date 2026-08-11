@@ -15,7 +15,7 @@ describe('adaptive human-readable report', () => {
   it('writes all 16 sections from the same structured report', async () => {
     const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-adaptive-report-'));
     const report = await buildAdaptiveEvaluationReport({ outputDir, projectId: 'project-report', selectedCases: [evalCase], results: [result], packets: [packet], coverage, generatedAt: now });
-    expect(report).toMatchObject({ executiveVerdict: 'needs_attention', failures: [{ caseId: 'case-report' }], versionMetadata: [{ targetAppGitSha: 'abc123', evalSetVersion: 2 }] });
+    expect(report).toMatchObject({ executiveVerdict: 'needs_attention', failures: [{ caseId: 'case-report' }], nextAction: { type: 'no_action', primaryCta: null }, versionMetadata: [{ targetAppGitSha: 'abc123', evalSetVersion: 2 }] });
     const markdown = await readFile(resolve(outputDir, 'reports', 'latest-evaluation.md'), 'utf8');
     for (let index = 1; index <= 16; index += 1) expect(markdown).toContain(`## ${index}.`);
     expect(markdown).toContain('结果没有继续入口');

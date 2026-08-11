@@ -34,6 +34,7 @@ import { OpenAiProvider } from '../ai/openai-provider.js';
 import { runAdaptiveCase } from '../evaluation/adaptive-evaluation-service.js';
 import { loadEvalSetManifest } from '../eval-set/eval-set-store.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
+import { nextActionForEvaluation } from '../decision/next-action-engine.js';
 
 interface ApiResult { status: number; body: ApiResponse<unknown> }
 const execFileAsync = promisify(execFile);
@@ -110,7 +111,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
         status: 'ok',
         packageVersion: runtime.packageVersion,
         contractVersion: runtime.contractVersion,
-        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'adaptive_eval_set', 'adaptive_default_evaluation', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder'],
+        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'adaptive_eval_set', 'adaptive_default_evaluation', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder', 'next_action_engine'],
         runtime,
         aiTestAgent: { configured: Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim()), provider: 'openai', screenshotDefault: false },
         aiProductUnderstanding: { configured: Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim()), provider: 'openai', defaultEnabled: false, screenshotInput: false },
@@ -183,6 +184,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
     if (pathname === '/api/evaluations' && method === 'GET') { const query = new URLSearchParams(search); const projectId = query.get('projectId') ?? (await activeProject(cwd)).projectId; return ok(await listEvaluations(cwd, projectId)); }
     if (pathname === '/api/evaluation-depths' && method === 'GET') { const query = new URLSearchParams(search); const projectId = query.get('projectId') ?? (await activeProject(cwd)).projectId; return ok(await evaluationDepthOptions(cwd, projectId)); }
     if (pathname === '/api/evaluation-records' && method === 'GET') { const query = new URLSearchParams(search); const projectId = query.get('projectId') ?? (await activeProject(cwd)).projectId; return ok(await listEvaluationRecords(cwd, projectId)); }
+    if (method === 'GET' && /^\/api\/evaluations\/[^/]+\/next-action$/.test(pathname)) { const query = new URLSearchParams(search); const projectId = query.get('projectId') ?? (await activeProject(cwd)).projectId; const id = decodeURIComponent(pathname.slice('/api/evaluations/'.length, -'/next-action'.length)); return ok(await nextActionForEvaluation(cwd, id, projectId)); }
     if (method === 'PATCH' && /^\/api\/evaluations\/[^/]+$/.test(pathname)) { const id = decodeURIComponent(pathname.slice('/api/evaluations/'.length)); return ok(await renameEvaluation(cwd, id, body)); }
     if (method === 'POST' && /^\/api\/evaluations\/[^/]+\/retry$/.test(pathname)) { if (recordBody(body)?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '恢复评测前需要明确确认。'); const id = decodeURIComponent(pathname.slice('/api/evaluations/'.length, -'/retry'.length)); return ok(await retryEvaluation(cwd, id)); }
     if (method === 'GET' && /^\/api\/evaluations\/[^/]+$/.test(pathname)) { const id = decodeURIComponent(pathname.slice('/api/evaluations/'.length)); const snapshot = evaluationSnapshot(id); return snapshot ? ok(snapshot) : fail(404, 'EVALUATION_NOT_FOUND', `没有找到评测：${id}`); }

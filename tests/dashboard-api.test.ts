@@ -3,11 +3,13 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { stringify } from 'yaml';
 import { describe, expect, it } from 'vitest';
-import type { EvalPilotConfig } from '../types.js';
+import type { EvalCase, EvalCaseResult, EvalPilotConfig } from '../types.js';
 import { loadDashboardOverview, validateDashboardHost } from '../src/dashboard/dashboard-data.js';
 import { dispatchDashboardApi } from '../src/dashboard/server.js';
 import { saveCoverageMatrix } from '../src/eval-set/coverage-store.js';
 import { saveFinding } from '../src/findings/finding-store.js';
+import { saveEvalCase } from '../src/eval-set/eval-set-store.js';
+import { saveEvalCaseResult } from '../src/judge/eval-result-store.js';
 
 describe('dashboard local data boundary', () => {
   it('reports the local contract version before the UI calls feature APIs', async () => {
@@ -35,6 +37,25 @@ describe('dashboard local data boundary', () => {
     expect(guidance).toEqual(expect.objectContaining({ currentStep: 'project', projectId: null }));
     expect(guidance.steps.filter((step) => step.status === 'current')).toHaveLength(1);
     expect(guidance.steps[0]?.actionLabel).toBe('连接第一个项目');
+  });
+
+  it('recomputes the next action from the requested evaluation instead of the latest session', async () => {
+    const cwd = await mkdtemp(join(tmpdir(), 'evalpilot-next-action-api-'));
+    const dataDir = resolve(cwd, 'data'); const outputDir = resolve(dataDir, 'projects', 'project-next'); const now = new Date().toISOString();
+    await mkdir(resolve(outputDir, 'evaluations'), { recursive: true });
+    await writeFile(resolve(dataDir, 'projects.json'), JSON.stringify({ version: 1, activeProjectId: 'project-next', projects: [{ projectId: 'project-next', name: 'Next', projectRoot: cwd, targetUrl: 'http://127.0.0.1:3000', outputDir, browser: 'chromium', startCommand: null, status: 'ready', importSource: 'manual', preferredAgent: null, createdAt: now, updatedAt: now, lastOpenedAt: now }] }));
+    const evalCase: EvalCase = { caseId: 'case-next', projectId: 'project-next', setType: 'baseline', status: 'stable', origin: { type: 'human', note: 'fixture' }, capabilityId: 'cap-next', taskId: null, title: '完成任务', hypothesis: '任务可完成', persona: { personaId: 'persona', name: '用户', behaviorPolicy: ['使用可见控件'] }, goal: '完成', knownInformation: {}, preconditions: [], oracle: { expectedOutcome: ['完成'], mustObserve: [], mustNotObserve: [], businessRules: [], semanticRubric: ['用户能确认任务完成'], deterministicAssertions: [], inconclusiveWhen: ['缺少完成状态证据'] }, coverageDimensions: [{ dimension: 'capability', value: 'cap-next' }], riskLevel: 'P1', generationReason: 'fixture', version: 1, stats: { passCount: 1, failCount: 0, inconclusiveCount: 0, latestResult: 'pass', latestRunId: 'run-next', uniqueCoverageContribution: 1, lastExecutedAt: now }, regressionMetadata: null, retirementReason: null, needsHumanReview: false, createdAt: now, updatedAt: now };
+    const result: EvalCaseResult = { runId: 'run-next', caseId: 'case-next', verdict: 'pass', failureSource: null, severity: null, deterministic: { checks: [], hardFailure: false, severity: null, evidenceRefs: [] }, semantic: { verdict: 'pass', taskCompletion: 'complete', summary: '任务完成', whatWorked: ['任务完成'], whatFailed: [], whyItMatters: [], confirmedFacts: ['完成状态可见'], hypotheses: [], unknowns: [], evidenceRefs: [], confidence: 1 }, evidencePacketPath: 'runs/run-next/evidence-packet.json', createdAt: now };
+    await saveEvalCase(outputDir, evalCase); await saveEvalCaseResult(outputDir, result);
+    const session = (evaluationId: string, runIds: string[]) => ({ evaluationId, projectId: 'project-next', sequenceNumber: evaluationId === 'evaluation-older' ? 1 : 2, runtime: 'adaptive', depth: 'core', capabilityIds: ['cap-next'], capabilityNames: ['任务'], plannedCapabilityIds: ['cap-next'], plannedCapabilityNames: ['任务'], executedCapabilityIds: runIds.length ? ['cap-next'] : [], executedCapabilityNames: runIds.length ? ['任务'] : [], selectedCaseIds: ['case-next'], coverage: null, coverageMatrix: null, customName: null, competitorSnapshotIds: [], issueIds: [], findingIds: [], badcaseIds: [], remoteModelAuthorized: true, screenshotAuthorized: false, status: 'completed', currentStage: 'report', stages: [], runIds, startedAt: now, completedAt: now, error: null });
+    await writeFile(resolve(outputDir, 'evaluations', 'sessions.jsonl'), `${JSON.stringify(session('evaluation-older', ['run-next']))}\n${JSON.stringify(session('evaluation-latest', []))}\n`);
+    process.env.EVALPILOT_DATA_DIR = dataDir;
+    try {
+      const older = await dispatchDashboardApi(cwd, 'GET', '/api/evaluations/evaluation-older/next-action', '?projectId=project-next', {});
+      const latest = await dispatchDashboardApi(cwd, 'GET', '/api/evaluations/evaluation-latest/next-action', '?projectId=project-next', {});
+      expect(older.body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({ type: 'no_action' }) }));
+      expect(latest.body).toEqual(expect.objectContaining({ success: true, data: expect.objectContaining({ type: 'run_remaining_cases', targetCaseIds: ['case-next'] }) }));
+    } finally { delete process.env.EVALPILOT_DATA_DIR; }
   });
 
   it('loads a non-technical overview from initialized local artifacts', async () => {

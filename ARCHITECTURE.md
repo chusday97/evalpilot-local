@@ -37,4 +37,6 @@ Finding Triage 位于 Hybrid Judge 与 Badcase 之间。单次 Semantic Fail 默
 
 One Evaluation Path Phase 5 将问题列表与修复服务统一到同一来源身份。Legacy 问题必须通过 `evaluationId + issueId` 从该次评测快照解析；Adaptive 路径使用已确认 Finding 或 Badcase。创建任务时完整来源会原子保存到任务目录的 `source-snapshot.json`，之后任务包、Agent 分支和复测都只使用这份快照。全局最新报告仅保留旧界面兼容，不能再改变已经创建的修复目标；缺少快照的旧任务会停止并要求从原评测重新创建。
 
+One Evaluation Path Phase 6 增加纯函数 Next Action Engine。它只接收指定 Evaluation Session 的 Case、Result、Evidence Packet、Finding、Badcase 和 FixTask 谱系，并按照“运行中 → 已确认失败的修复生命周期 → 人工判断 → 评测器重跑 → 未运行案例 → 无动作”的固定优先级返回 exactly one `EvaluationNextAction`。报告快照保存当时的推荐，`GET /api/evaluations/:id/next-action` 则按指定评测实时重算；零个 confirmed Product Failure 时，决策引擎不会推荐创建修复、复测修复或加入回归。
+
 设计取舍：Legacy 生成器继续使用证据驱动的确定性规则。Experimental Adaptive Evaluation 可在逐次授权后调用 Product Understanding 与 Oracle Builder，但模型输出必须经过本地 Schema、证据白名单和人工审核门禁；开放式 Rubric 仍不能替代独立证据或人工判断。Phase 7 的内部阈值只约束受控基准，真实模型、外部项目与独立审查未通过前不升级对外可靠性承诺。

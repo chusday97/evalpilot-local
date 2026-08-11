@@ -19,6 +19,7 @@ export type CompetitorSource = 'github' | 'apple_app_store' | 'external_url';
 export type GuidedStepId = 'project' | 'evaluation' | 'issues' | 'fix' | 'complete';
 export type GuidedStepStatus = 'completed' | 'current' | 'waiting' | 'attention';
 export type FixSourceType = 'evaluation_issue' | 'confirmed_finding' | 'badcase';
+export type EvaluationNextActionType = 'no_action' | 'run_remaining_cases' | 'rerun_case' | 'wait_and_resume' | 'provide_human_input' | 'review_candidate_finding' | 'confirm_product_failure' | 'create_fix_task' | 'retest_fix' | 'add_to_regression';
 
 export interface AgentCapabilities { workspaceDiscovery: boolean; directFix: boolean; taskPackageHandoff: boolean }
 export interface RuntimeCheck { status: 'ready' | 'missing' | 'blocked'; label: string; detail: string; recoveryAction: string | null }
@@ -54,6 +55,8 @@ export interface EvaluationFoundationState { schemaVersion: 1; sourceFingerprint
 export interface EvaluationRecordSummary { evaluationId: string; projectId: string; sequenceNumber: number; displayName: string; depth: EvaluationDepth; capabilityIds: string[]; capabilityNames: string[]; plannedCapabilityNames: string[]; coverage: EvaluationCoverageSummary | null; status: WorkflowStatus; verdict: 'can_continue' | 'needs_attention' | 'unknown'; severeIssueCount: number; issueCount: number; notApplicableCount: number; durationMs: number | null; startedAt: string; completedAt: string | null; legacyEvidenceIncomplete: boolean }
 export interface EvaluationEvent { evaluationId: string; status: WorkflowStatus; stage: EvaluationStageName; message: string; timestamp: string }
 export interface FixSourceSnapshot { sourceType: FixSourceType; evaluationId: string | null; issueId: string | null; findingId: string | null; badcaseId: string | null; capturedAt: string; payload: UxIssue | CandidateFinding | Badcase }
+export interface EvaluationNextActionCta { label: string; route: string }
+export interface EvaluationNextAction { type: EvaluationNextActionType; title: string; explanation: string; targetCaseIds: string[]; targetFindingIds: string[]; targetBadcaseIds: string[]; primaryCta: EvaluationNextActionCta | null; secondaryCtas: EvaluationNextActionCta[] }
 export interface FixTask { fixTaskId: string; projectId: string; sourceType: FixSourceType; evaluationId: string | null; issueId: string | null; findingId: string | null; badcaseId: string | null; sourceSnapshotPath: string; status: FixTaskStatus; taskDirectory: string; baselineCommit: string | null; allowedScope: string[]; verificationCommands: string[]; retestCaseId: string | null; createdAt: string; authorizedAt: string | null; error: string | null; worktreePath?: string | null; branch?: string | null; verification?: FixVerification | null }
 export interface AgentRun { agentRunId: string; fixTaskId: string; adapter: AgentAdapterName; executionMode: AgentExecutionMode; phase: 'queued' | 'preparing' | 'analyzing' | 'editing' | 'testing' | 'retesting' | 'waiting_user' | 'completed'; status: WorkflowStatus; branch: string | null; worktreePath: string | null; logFile: string; changedFiles: string[]; requiresUserAction: string | null; verification: FixVerification | null; exitCode: number | null; startedAt: string; completedAt: string | null; error: string | null }
 export interface AgentEvent { agentRunId: string; status: WorkflowStatus; phase: AgentRun['phase']; message: string; timestamp: string }
@@ -808,6 +811,7 @@ export interface AdaptiveEvaluationReport {
   newRegressionCaseIds: string[];
   passingCoverageGaps: CoverageGap[];
   newChallengeCaseIds: string[];
+  nextAction: EvaluationNextAction;
   recommendedNextActions: string[];
   authenticityNotice: string;
   versionMetadata: RunVersionMetadata[];

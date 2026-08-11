@@ -322,6 +322,16 @@ Phase 1 新增实验性 AI Test Agent，不替换 Public Alpha 的固定/确定�
 - `task.json`、`task.md`、Agent 分支命名和后续复测只使用不可变快照，不得重新解析全局 `reports/ux-issues.jsonl`。旧修复任务仍可列出，但缺少快照时必须要求从原评测重新创建，不能猜测来源。
 - Canonical 来源固定为 `evaluations/<evaluationId>/issues.jsonl`、`findings/<findingId>.json` 和 `badcases/<badcaseId>.json`。`reports/ux-issues.jsonl` 与 `findings/v1/` 仅作旧数据兼容读取，不再作为新修复任务的来源。
 
+### 10.5 One Evaluation Path Phase 6 下一动作契约
+
+- `EvaluationNextActionType` 固定为 `no_action | run_remaining_cases | rerun_case | wait_and_resume | provide_human_input | review_candidate_finding | confirm_product_failure | create_fix_task | retest_fix | add_to_regression`。
+- 每次评测必须返回且只返回一个 `EvaluationNextAction`，包含人话标题、解释、目标 Case/Finding/Badcase，以及一个可选主动作和若干次动作。路由必须带具体对象 ID，不能退化为泛化“最新结果”。
+- 决策优先级固定为：运行中状态 → 已确认产品失败的修复生命周期 → 人工审查/业务信息 → 评测器失败重跑 → 未运行案例 → 无需操作。该顺序用于在多种状态同时存在时保持 exactly one 推荐动作。
+- `candidate` 映射为 `review_candidate_finding`，`needs_human_review` 映射为 `confirm_product_failure`；只有 `confirmed_product_failure` 或对应 Product Badcase 可以进入 `create_fix_task/retest_fix/add_to_regression`。
+- `pending/progressing` 必须映射为 `wait_and_resume`；`inconclusive/evaluator` 映射为 `rerun_case`；未运行案例映射为 `run_remaining_cases`；需要人工审核且没有 Finding 的业务规则映射为 `provide_human_input`。
+- 零个已确认 Product Failure 时，主动作绝不能是创建修复、复测修复或加入回归。旧 Legacy 问题不参与 Adaptive 下一动作推导。
+- 新增 `GET /api/evaluations/:id/next-action?projectId=`，从该 Evaluation Session 的 Case、Result、Evidence、Finding、Badcase 和 FixTask 谱系实时重算，不读取泛化最新报告。
+
 ### 10.4 Accuracy Sprint Phase 5 Semantic Verifier 契约
 
 - `EvalPersonaRef` 新增显式 Agent Policy：知识水平、耐心动作数、允许重试次数、隐私敏感度和退出条件。新案例必须写入全部字段；旧案例只在兼容读取时使用 `medium / 3 / 1 / medium / 证据不足时退出`，不得覆盖原文件。

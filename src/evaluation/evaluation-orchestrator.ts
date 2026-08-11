@@ -120,7 +120,7 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const currentCases = await loadEvalSetCases(config.outputDir);
   const coverage = analyzeCoverage({ model: foundation.model, cases: currentCases, results, evidencePackets: packets });
   await saveCoverageMatrix(config.outputDir, coverage);
-  const report = await buildAdaptiveEvaluationReport({ outputDir: config.outputDir, projectId: input.projectId, selectedCases: selection.cases, results, packets, coverage, badcases, challengeCases });
+  const report = await buildAdaptiveEvaluationReport({ outputDir: config.outputDir, projectId: input.projectId, evaluationId: input.evaluationId, evaluationStatus: 'completed', selectedCases: selection.cases, results, packets, coverage, findings, badcases, challengeCases });
   const evaluationDirectory = resolve(config.outputDir, 'evaluations', input.evaluationId);
   await ensureDirectory(evaluationDirectory);
   await writeJsonAtomic(resolve(evaluationDirectory, 'report.json'), report);
