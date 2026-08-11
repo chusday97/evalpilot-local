@@ -6,6 +6,7 @@ import { chromium, type Browser } from 'playwright';
 import type { AiProvider } from '../ai/provider.js';
 import type { EvalCase, EvalSetSelection, EvaluationOrchestratorInput, EvaluationOrchestratorResult, ProductModel } from '../../types.js';
 import { OpenAiProvider } from '../ai/openai-provider.js';
+import { currentOpenAiCredential, openAiProviderBaseUrl } from '../ai/provider-connection.js';
 import { evalSetManifestPath, loadEvalSetCases, loadEvalSetManifest } from '../eval-set/eval-set-store.js';
 import { analyzeCoverage } from '../eval-set/coverage-analyzer.js';
 import { saveCoverageMatrix } from '../eval-set/coverage-store.js';
@@ -33,14 +34,9 @@ interface OrchestratorDependencies {
 }
 
 export function configuredEvaluationProvider(): AiProvider {
-  const apiKey = process.env.EVALPILOT_OPENAI_API_KEY?.trim();
-  if (!apiKey) throw new EvalPilotError('尚未配置 AI 评测能力。请设置 EVALPILOT_OPENAI_API_KEY，重启工作台后再试。', 'AI_PROVIDER_NOT_CONFIGURED');
-  const testBaseUrl = process.env.NODE_ENV === 'test' ? process.env.EVALPILOT_TEST_OPENAI_BASE_URL?.trim() : undefined;
-  if (testBaseUrl) {
-    const hostname = new URL(testBaseUrl).hostname;
-    if (!['localhost', '127.0.0.1', '::1'].includes(hostname)) throw new EvalPilotError('测试 Provider 只能连接本机 loopback 地址。', 'AI_PROVIDER_INVALID');
-  }
-  return new OpenAiProvider({ apiKey, model: process.env.EVALPILOT_OPENAI_MODEL?.trim() || 'gpt-5-mini', baseUrl: testBaseUrl });
+  const credential = currentOpenAiCredential();
+  if (!credential) throw new EvalPilotError('尚未连接 AI 评测能力。请在评测页连接 OpenAI；生成评测资产时也可以取消 AI 深度理解，先使用本地确定性方式。', 'AI_PROVIDER_NOT_CONFIGURED');
+  return new OpenAiProvider({ apiKey: credential.apiKey, model: credential.model, baseUrl: openAiProviderBaseUrl() });
 }
 
 async function ensureFoundation(projectId: string, outputDir: string, provider: AiProvider): Promise<{ model: ProductModel; cases: EvalCase[]; version: number }> {

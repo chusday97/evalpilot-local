@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 import type { RuntimeCheck, RuntimeReadiness } from '../../types.js';
 import { detectAgentConnections } from '../agents/agent-discovery.js';
 import { packageVersion, resolveDataRoot } from './paths.js';
+import { openAiConnectionStatus } from '../ai/provider-connection.js';
 
 const exec = promisify(execFile);
 
@@ -33,10 +34,10 @@ async function gitCheck(): Promise<RuntimeCheck> {
 }
 
 function aiProviderCheck(): RuntimeCheck {
-  const configured = Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim());
-  return configured
-    ? { status: 'ready', label: '实验 AI Test Agent', detail: `OpenAI Provider 已配置（模型：${process.env.EVALPILOT_OPENAI_MODEL?.trim() || 'gpt-5-mini'}）。默认只发送最小化可见页面文字；截图仍需每次显式确认。`, recoveryAction: null }
-    : { status: 'missing', label: '实验 AI Test Agent', detail: '未配置远程模型；稳定评测、Dashboard 和任务包仍可使用，AI 用户运行按钮会给出恢复说明。', recoveryAction: '需要实验 AI 用户时，在启动 Dashboard 前设置 EVALPILOT_OPENAI_API_KEY；不要把密钥写入项目文件。' };
+  const connection = openAiConnectionStatus();
+  return connection.configured
+    ? { status: 'ready', label: 'AI Test Agent', detail: `OpenAI 已连接（模型：${connection.model}；来源：${connection.source === 'session' ? '本次工作台' : '启动环境'}）。默认只发送最小化可见页面文字；截图仍需每次显式确认。`, recoveryAction: null }
+    : { status: 'missing', label: 'AI Test Agent', detail: '尚未连接 OpenAI；Dashboard 仍可查看，但新的 AI 评测不能开始。', recoveryAction: '在评测页点击“连接 OpenAI”，验证成功后即可开始；Key 不会写入本地文件。' };
 }
 
 export async function inspectRuntime(cwd: string, dataDir?: string | null): Promise<RuntimeReadiness> {

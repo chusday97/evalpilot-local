@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Added an in-process OpenAI connection flow to the Evaluation page with credential validation, memory-only storage, explicit disconnect, actionable errors, and immediate provider readiness refresh without restarting the Dashboard.
+- Kept environment-variable provider configuration as a compatible fallback while ensuring API keys are never persisted, echoed in status responses, or included in connection errors.
+
 - Quarantined the legacy evaluation runtime: old records remain read-only while the public CLI and Dashboard can no longer create or control legacy exploratory runs.
 - Changed the normal Dashboard flow to Projects → Evaluation → Runs → Findings → Fixes → Regression; evaluation cases remain available as advanced detail.
 - Marked the legacy exploratory runner deprecated for one release cycle and limited it to migration tests, compatibility repair retests, and internal diagnostics.

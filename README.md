@@ -170,6 +170,8 @@ evalpilot doctor
 evalpilot dashboard
 ```
 
+打开 Dashboard 后进入“评测”页，点击“连接 OpenAI”，粘贴 API Key 并选择“验证并连接”。Key 只保存在当前 EvalPilot 服务进程的内存中，不会写入项目或数据目录；服务关闭或重启后需要重新连接。原有 `EVALPILOT_OPENAI_API_KEY` 环境变量方式仍可作为开发者备用入口。
+
 评测运行会持续维护本地 Eval Set、已确认 Product Badcase 和 Evaluator Badcase，并自动生成对应的可读 Markdown。两类 Badcase 永不混用，运行证据也不会上传到仓库。维护边界和检查方法见 [Eval Set 与 Badcase 维护规则](docs/EVAL_SET_AND_BADCASES.md)。
 
 源码开发：

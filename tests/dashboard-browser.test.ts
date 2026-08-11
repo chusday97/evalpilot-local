@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { chromium } from 'playwright';
 import { stringify } from 'yaml';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { startDashboardServer } from '../src/dashboard/server.js';
 import { buildPersonas } from '../src/generation/persona-builder.js';
 import { buildExploratoryScenarios } from '../src/ux-evaluation/exploratory-scenario-builder.js';
@@ -105,6 +105,17 @@ describe.skipIf(!enabled)('dashboard browser', () => {
       await title.waitFor({ state: 'visible' });
       expect(await title.isVisible(), `页面标题未显示：${heading}`).toBe(true);
     }
+    await page.goto(`${baseUrl}/evaluate`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: '连接 OpenAI' }).click();
+    expect(await page.getByLabel('OpenAI API Key').getAttribute('type')).toBe('password');
+    await page.getByLabel('OpenAI API Key').fill('sk-browser-test-only-value');
+    vi.stubGlobal('fetch', vi.fn<typeof fetch>().mockResolvedValue(new Response('{}', { status: 200 })));
+    await page.getByRole('button', { name: '验证并连接' }).click();
+    await page.getByText('AI 评测能力已连接', { exact: true }).waitFor({ state: 'visible' });
+    expect(await page.locator('.ai-connected-strip small').filter({ hasText: '只在本次工作台运行期间有效' }).isVisible()).toBe(true);
+    await page.getByRole('button', { name: '断开本次连接' }).click();
+    await page.getByRole('button', { name: '连接 OpenAI' }).waitFor({ state: 'visible' });
+    vi.unstubAllGlobals();
     await page.goto(`${baseUrl}/issues`, { waitUntil: 'networkidle' });
     const resultGuide = page.getByRole('heading', { name: '先看结论，再决定要不要处理' });
     await resultGuide.waitFor({ state: 'visible' });
@@ -126,11 +137,13 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     for (const step of ['在 Codex 中打开当前项目', '使用生成的修复任务', '让 Codex 修改并运行测试', '完成后返回 EvalPilot', '点击“复测修复结果”']) expect(await page.getByText(step, { exact: true }).isVisible()).toBe(true);
     expect(await page.getByRole('button', { name: '让 Codex 直接修复' }).count()).toBe(0);
     const handoffUrl = page.url();
-    for (const [label, heading] of [['评测集', '评测集 v2'], ['运行', '已确认 1 个产品问题，需要处理后复测。'], ['发现', '问题发现'], ['回归', '回归与评测集演进']] as const) {
+    await page.goto(`${baseUrl}/eval-set`, { waitUntil: 'networkidle' });
+    await page.getByRole('heading', { name: '评测集 v2', exact: true }).first().waitFor({ state: 'visible' });
+    for (const [label, heading] of [['运行', '已确认 1 个产品问题，需要处理后复测。'], ['发现', '问题发现'], ['回归', '回归与评测集演进']] as const) {
       await page.locator('aside nav button').filter({ hasText: label }).click();
       await page.getByRole('heading', { name: heading, exact: true }).first().waitFor({ state: 'visible' });
     }
-    await page.locator('aside nav button').filter({ hasText: '评测集' }).click();
+    await page.goto(`${baseUrl}/eval-set`, { waitUntil: 'networkidle' });
     await page.getByText('评测资产覆盖').waitFor({ state: 'visible' });
     await page.getByRole('button', { name: '根据当前产品重新生成' }).click();
     const understandingConsent = page.getByRole('checkbox', { name: /让 AI 深入理解用户任务/ });
@@ -145,7 +158,7 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.getByRole('button', { name: '用 AI 用户运行这个案例' }).click();
     expect(await page.getByRole('dialog', { name: '确认运行 AI 用户' }).isVisible()).toBe(true);
     await page.getByRole('button', { name: '确认并开始运行' }).click();
-    await page.getByText('尚未配置实验 AI Provider。请在启动 Dashboard 前设置 EVALPILOT_OPENAI_API_KEY。').waitFor({ state: 'visible' });
+    await page.getByText(/尚未连接 AI 评测能力。请在评测页连接 OpenAI/).waitFor({ state: 'visible' });
     expect(await page.getByRole('button', { name: '确认并开始运行' }).isEnabled()).toBe(true);
     await page.getByRole('button', { name: '取消' }).click();
     await page.locator('aside nav button').filter({ hasText: '运行' }).click();
@@ -178,7 +191,7 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${baseUrl}/home`, { waitUntil: 'networkidle' });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    for (const path of ['/eval-set', '/runs?evaluationId=evaluation-adaptive-result', '/findings', '/regression', new URL(handoffUrl).pathname + new URL(handoffUrl).search + new URL(handoffUrl).hash]) {
+    for (const path of ['/evaluate', '/eval-set', '/runs?evaluationId=evaluation-adaptive-result', '/findings', '/regression', new URL(handoffUrl).pathname + new URL(handoffUrl).search + new URL(handoffUrl).hash]) {
       await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
       expect(await page.evaluate(() => ({ root: document.documentElement.scrollWidth, viewport: window.innerWidth, buttons: [...document.querySelectorAll('main button')].filter((button) => { const rect = button.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && (rect.right > window.innerWidth + 1 || rect.left < -1); }).length }))).toEqual({ root: 390, viewport: 390, buttons: 0 });
     }
@@ -186,5 +199,5 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.getByRole('button', { name: '打开主导航' }).click();
     expect(await page.getByRole('navigation', { name: '产品闭环' }).isVisible()).toBe(true);
     await browser.close();
-  });
+  }, 60_000);
 });

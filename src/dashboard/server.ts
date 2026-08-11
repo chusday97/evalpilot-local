@@ -19,7 +19,7 @@ import { loadDashboardOverview, readOptionalText, validateDashboardHost } from '
 import { evaluationDepthOptions, evaluationSnapshot, listEvaluationRecords, listEvaluations, renameEvaluation, retryEvaluation, startEvaluation, subscribeEvaluation } from './evaluation-manager.js';
 import { agentSnapshot, applyFix, createFixTask, listAgentRuns, listFixTasks, startAgent, subscribeAgent } from '../agents/fix-service.js';
 import { detectAgentConnections, discoverWorkspaceCandidates, PUBLIC_ALPHA_DIRECT_FIX_ENABLED } from '../agents/agent-discovery.js';
-import { workspaceCandidateRequestSchema } from '../schemas/workspace.js';
+import { aiProviderConnectionRequestSchema, aiProviderDisconnectRequestSchema, workspaceCandidateRequestSchema } from '../schemas/workspace.js';
 import { buildGuidedFlow } from './guidance-service.js';
 import { presentIssue } from './issue-presenter.js';
 import { inspectRuntime } from '../runtime/runtime-readiness.js';
@@ -29,8 +29,9 @@ import { storageIdSchema } from '../eval-set/schemas.js';
 import { evalSetSummary, findAdaptiveCase, generateAdaptiveFoundation, latestCoverage, latestProductModel, listAdaptiveCases, listAdaptiveRuns, projectBadcase, projectBadcases, projectFinding, projectFindings, regressionCases } from './adaptive-dashboard-data.js';
 import { confirmProductFailure, dismissFinding, markEvaluatorFailure } from '../findings/finding-triage.js';
 import { chromium } from 'playwright';
-import { OpenAiProvider } from '../ai/openai-provider.js';
 import { runAdaptiveCase } from '../evaluation/adaptive-evaluation-service.js';
+import { configuredEvaluationProvider } from '../evaluation/evaluation-orchestrator.js';
+import { connectOpenAiSession, disconnectOpenAiSession, openAiConnectionStatus } from '../ai/provider-connection.js';
 import { loadEvalSetManifest } from '../eval-set/eval-set-store.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
 import { nextActionForEvaluation } from '../decision/next-action-engine.js';
@@ -106,17 +107,30 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
   try {
     if (method === 'GET' && pathname === '/api/health') {
       const runtime = await inspectRuntime(cwd);
+      const aiProviderConnection = openAiConnectionStatus();
       return ok({
         status: 'ok',
         packageVersion: runtime.packageVersion,
         contractVersion: runtime.contractVersion,
-        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'adaptive_eval_set', 'adaptive_default_evaluation', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder', 'next_action_engine'],
+        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'in_memory_ai_provider', 'adaptive_eval_set', 'adaptive_default_evaluation', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder', 'next_action_engine'],
         runtime,
-        aiTestAgent: { configured: Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim()), provider: 'openai', screenshotDefault: false },
-        aiProductUnderstanding: { configured: Boolean(process.env.EVALPILOT_OPENAI_API_KEY?.trim()), provider: 'openai', defaultEnabled: false, screenshotInput: false },
+        aiProviderConnection,
+        aiTestAgent: { configured: aiProviderConnection.configured, provider: 'openai', source: aiProviderConnection.source, model: aiProviderConnection.model, screenshotDefault: false },
+        aiProductUnderstanding: { configured: aiProviderConnection.configured, provider: 'openai', source: aiProviderConnection.source, model: aiProviderConnection.model, defaultEnabled: false, screenshotInput: false },
       });
     }
-    const safeLegacyPost = pathname === '/api/workspace-candidates' || pathname === '/api/system/pick-directory' || pathname === '/api/connect/check' || /^\/api\/agents\/(codex|claude_code|antigravity)\/check$/.test(pathname);
+    if (method === 'GET' && pathname === '/api/ai-provider') return ok(openAiConnectionStatus());
+    if (method === 'POST' && pathname === '/api/ai-provider/connect') {
+      const parsed = aiProviderConnectionRequestSchema.safeParse(body);
+      if (!parsed.success) return validationFailure('AI_PROVIDER_CONNECTION_INVALID', parsed.error.issues);
+      return ok(await connectOpenAiSession(parsed.data));
+    }
+    if (method === 'POST' && pathname === '/api/ai-provider/disconnect') {
+      const parsed = aiProviderDisconnectRequestSchema.safeParse(body);
+      if (!parsed.success) return validationFailure('AI_PROVIDER_DISCONNECT_INVALID', parsed.error.issues);
+      return ok(disconnectOpenAiSession());
+    }
+    const safeLegacyPost = pathname === '/api/workspace-candidates' || pathname === '/api/system/pick-directory' || pathname === '/api/connect/check' || pathname === '/api/ai-provider/connect' || pathname === '/api/ai-provider/disconnect' || /^\/api\/agents\/(codex|claude_code|antigravity)\/check$/.test(pathname);
     if (isLegacyDataRoot(cwd) && method !== 'GET' && !safeLegacyPost) return fail(409, 'LEGACY_DATA_READ_ONLY', '旧 .evalpilot 当前只能查看；请先运行 evalpilot migrate --confirmed。');
     if (method === 'GET' && pathname === '/api/guidance') { const query = new URLSearchParams(search); return ok(await buildGuidedFlow(cwd, query.get('projectId') ?? undefined)); }
     if (method === 'GET' && pathname === '/api/agents') return ok(await detectAgentConnections(PUBLIC_ALPHA_DIRECT_FIX_ENABLED));
@@ -150,9 +164,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
         const input = recordBody(body);
         if (input?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '生成评测集前需要明确确认。');
         if (input.allowRemoteModel === true) {
-          const apiKey = process.env.EVALPILOT_OPENAI_API_KEY?.trim();
-          if (!apiKey) return fail(409, 'AI_PROVIDER_NOT_CONFIGURED', '尚未配置 AI 产品理解能力。可以取消 AI 深度理解，先使用本地确定性方式生成。');
-          const provider = new OpenAiProvider({ apiKey, model: process.env.EVALPILOT_OPENAI_MODEL?.trim() || 'gpt-5-mini' });
+          const provider = configuredEvaluationProvider();
           return ok(await generateAdaptiveFoundation({ projectId, outputDir: config.outputDir, provider, allowRemoteModel: true }));
         }
         return ok(await generateAdaptiveFoundation({ projectId, outputDir: config.outputDir }));
@@ -196,11 +208,11 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
     const query = new URLSearchParams(search); const requestedProjectId = query.get('projectId') ?? undefined; const config = await configForProject(cwd, requestedProjectId);
     if (method === 'POST' && /^\/api\/eval-cases\/[^/]+\/run$/.test(pathname)) {
       const input = recordBody(body); if (input?.confirmed !== true || input.allowRemoteModel !== true) return fail(409, 'CONFIRMATION_REQUIRED', '运行 AI Test Agent 前必须确认远程模型和最小化页面文本传输。');
-      const apiKey = process.env.EVALPILOT_OPENAI_API_KEY?.trim(); if (!apiKey) return fail(409, 'AI_PROVIDER_NOT_CONFIGURED', '尚未配置实验 AI Provider。请在启动 Dashboard 前设置 EVALPILOT_OPENAI_API_KEY。');
+      const provider = configuredEvaluationProvider();
       const caseId = decodeURIComponent(pathname.slice('/api/eval-cases/'.length, -'/run'.length)); const evalCase = await findAdaptiveCase(config.outputDir, caseId); if (!evalCase) return fail(404, 'EVAL_CASE_NOT_FOUND', `没有找到评测案例：${caseId}`);
       const [model, manifest, allCases] = await Promise.all([latestProductModel(config.outputDir), loadEvalSetManifest(config.outputDir), listAdaptiveCases(config.outputDir)]); if (!model) return fail(409, 'PRODUCT_MODEL_REQUIRED', '请先生成评测集，再运行 AI Test Agent。');
       const capability = model.capabilities.find((item) => item.capabilityId === evalCase.capabilityId); const entry = capability?.entryPoints[0] ?? config.targetUrl; let startingUrl: string; try { startingUrl = new URL(entry, config.targetUrl).toString(); } catch { return fail(422, 'STARTING_URL_INVALID', '该案例没有可用的公开起始页面。'); }
-      const provider = new OpenAiProvider({ apiKey, model: process.env.EVALPILOT_OPENAI_MODEL?.trim() || 'gpt-5-mini' }); const browser = await chromium.launch({ headless: true });
+      const browser = await chromium.launch({ headless: true });
       let targetAppGitSha: string | null = null; try { targetAppGitSha = (await execFileAsync('git', ['-C', config.projectRoot, 'rev-parse', 'HEAD'], { encoding: 'utf8', timeout: 4_000 })).stdout.trim() || null; } catch { targetAppGitSha = null; }
       try { const page = await browser.newPage(); return ok(await runAdaptiveCase({ page, provider, outputDir: config.outputDir, evalCase, productModel: model, existingCases: allCases, startingUrl, evalSetVersion: manifest.version, targetAppGitSha, allowRemoteModel: true, allowScreenshotToProvider: input.allowScreenshot === true })); }
       finally { await browser.close(); }

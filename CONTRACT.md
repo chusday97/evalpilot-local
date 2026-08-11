@@ -175,6 +175,21 @@ Dashboard 不得直接读写 YAML/JSONL；所有写操作经 Core 校验并原�
 
 目标服务启动、Agent 修改和修复应用必须分别确认。Public Alpha 只生成任务包；后续恢复 Codex 直修时仍必须在独立 Git worktree 中以 `workspace-write` 运行，禁止无沙箱执行。
 
+### 4.7 进程内 AI Provider 连接
+
+| 方法 | 路径 | 请求 | 返回 |
+|---|---|---|---|
+| GET | `/api/ai-provider` | 无 | `AiProviderConnectionStatus` |
+| POST | `/api/ai-provider/connect` | `{ provider: "openai", apiKey, model?, confirmed: true }` | `AiProviderConnectionStatus` |
+| POST | `/api/ai-provider/disconnect` | `{ confirmed: true }` | `AiProviderConnectionStatus` |
+
+- `AiProviderConnectionStatus.source` 为 `session | environment | null`。页面内连接优先于环境变量；断开页面内连接后可回退到环境变量。
+- 页面提交的 OpenAI API Key 只保存在当前 Dashboard 服务进程内存中，不写入数据目录、项目、日志、响应、错误详情或浏览器持久存储；服务重启后自动清除。
+- 连接前仅向 OpenAI 模型读取接口验证凭证和指定模型是否可访问，不生成评测内容。生产环境只允许官方 OpenAI API；测试环境只允许显式配置的 loopback 地址。
+- 验证失败不得替换已有的会话连接。接口只返回可操作的人话错误，不返回远端响应正文或 Key 片段。
+- `disconnect` 只影响之后创建的 Provider；已经启动的单次评测持有自己的 Provider 实例，按原评测流程结束。
+- 环境变量 `EVALPILOT_OPENAI_API_KEY` 与 `EVALPILOT_OPENAI_MODEL` 继续兼容。由环境提供的连接不能在页面中删除，只能停止服务并修改启动环境。
+
 ### 4.3 v0.3 核心实体与迁移
 
 - `ProjectRegistry`：`version, activeProjectId, projects`，位于 `.evalpilot/projects.json`。
