@@ -1,6 +1,6 @@
 import type { EvalCase, ProductModel, ProductTask } from '../../types.js';
 import { buildDeterministicOracle } from '../eval-set/oracle-builder.js';
-import { compileExecutableScenario, type ExecutableScenario, type ScenarioBlocker } from './scenario-compiler.js';
+import { compileExecutableScenario, scenarioReadinessFromBlockers, type ExecutableScenario, type ScenarioBlocker, type ScenarioBlockerType } from './scenario-compiler.js';
 
 export interface AutoSetupPlan {
   setupId: string;
@@ -96,12 +96,30 @@ function setupCaseFor(targetCase: EvalCase, setupTask: ProductTask, model: Produ
   };
 }
 
+function setupScenarioWithSatisfiedBlockers(scenario: ExecutableScenario, satisfiedBlockerTypes: ScenarioBlockerType[]): ExecutableScenario {
+  const allowedSatisfied = new Set(satisfiedBlockerTypes.filter((type) => type === 'needs_auth'));
+  if (!allowedSatisfied.size) return scenario;
+  const removed = scenario.blockers.filter((blocker) => allowedSatisfied.has(blocker.type));
+  if (!removed.length) return scenario;
+  const removedValues = new Set(removed.map((blocker) => blocker.sourceValue));
+  const blockers = scenario.blockers.filter((blocker) => !allowedSatisfied.has(blocker.type));
+  return {
+    ...scenario,
+    blockers,
+    readiness: scenarioReadinessFromBlockers(blockers),
+    preconditions: scenario.preconditions.map((precondition) => removedValues.has(precondition.text)
+      ? { ...precondition, status: 'satisfied', reason: '该认证条件由组合 Prerequisite Planner 已验证的 Auth Fixture 满足。' }
+      : precondition),
+  };
+}
+
 export function resolveScenarioSetup(input: {
   scenario: ExecutableScenario;
   evalCase: EvalCase;
   productModel: ProductModel;
   targetUrl: string;
   generatedAt?: string;
+  satisfiedBlockerTypes?: ScenarioBlockerType[];
 }): ScenarioSetupResolution {
   if (input.scenario.readiness === 'ready') return { caseId: input.evalCase.caseId, status: 'not_required', plan: null, blockers: [], reason: 'Scenario 已具备执行条件。' };
   if (!input.scenario.blockers.length || input.scenario.blockers.some((blocker) => blocker.type !== 'needs_setup')) {
@@ -117,7 +135,8 @@ export function resolveScenarioSetup(input: {
   if (!setupCase.oracle.deterministicAssertions.length) {
     return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: '前置任务没有足够的 verified 确定性成功信号，不能证明 Setup 已完成。' };
   }
-  const setupScenario = compileExecutableScenario({ evalCase: setupCase, productModel: input.productModel, targetUrl: input.targetUrl, generatedAt });
+  const compiledSetupScenario = compileExecutableScenario({ evalCase: setupCase, productModel: input.productModel, targetUrl: input.targetUrl, generatedAt });
+  const setupScenario = setupScenarioWithSatisfiedBlockers(compiledSetupScenario, input.satisfiedBlockerTypes ?? []);
   if (setupScenario.readiness !== 'ready') {
     return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: `前置任务本身也不具备安全执行条件：${setupScenario.blockers.map((item) => item.summary).join('；')}` };
   }
