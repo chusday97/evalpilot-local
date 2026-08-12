@@ -60,13 +60,16 @@ export function observeTaskState(input: ObserveTaskStateInput): TaskStateObserva
 }
 
 export function gateVerificationByTaskState(verification: StepVerification, taskState: TaskStateObservation): StepVerification {
-  if (taskState.state !== 'pending' && taskState.state !== 'progressing') return verification;
+  const evidenceRefs = [...new Set([...verification.evidenceRefs, ...taskState.evidenceRefs])];
+  if (taskState.state !== 'pending' && taskState.state !== 'progressing') {
+    return { ...verification, evidenceRefs };
+  }
   const label = taskState.state === 'pending' ? '任务仍在等待结果' : '任务仍在持续产生进展';
   return {
     ...verification,
     status: 'inconclusive',
     observed: `${label}，当前证据不足以判定成功或失败。${verification.observed ? ` ${verification.observed}` : ''}`,
-    evidenceRefs: [...new Set([...verification.evidenceRefs, ...taskState.evidenceRefs])],
+    evidenceRefs,
     confidence: Math.min(verification.confidence, taskState.confidence),
   };
 }
