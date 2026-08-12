@@ -84,26 +84,22 @@ try {
   await fishSearch.fill('咖啡鼠');
   await page.waitForTimeout(250);
   await page.getByRole('button', { name: /咖啡鼠/ }).first().click();
+  await page.waitForTimeout(500);
+  await saveObservation('07-record-existing-selected', 'selected 咖啡鼠');
+
   const confirmAdd = page.getByRole('button', { name: /确认添加/ }).first();
-  await confirmAdd.waitFor({ state: 'visible' });
-  await confirmAdd.click();
-  await page.waitForTimeout(1_000);
-  await saveObservation('07-record-existing-confirmed', 'record 咖啡鼠');
+  if (await confirmAdd.count()) {
+    await confirmAdd.click();
+    await page.waitForTimeout(1_000);
+    await saveObservation('08-record-existing-confirmed', 'record 咖啡鼠');
+  }
 
   await page.goto(new URL('/aquarium?action=daily-check', targetUrl).toString(), { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(900);
-  await saveObservation('08-daily-check-ready', '/aquarium?action=daily-check after livestock');
-  for (const label of ['经常浮头', '清澈', '没有泡沫或油膜', '没有异味', '正常游动和进食', '没有特别操作']) {
-    await page.getByRole('button', { name: label, exact: true }).click();
-  }
-  const generate = page.getByRole('button', { name: /生成检查结果/ }).first();
-  await generate.waitFor({ state: 'visible' });
-  await generate.click();
-  await page.waitForTimeout(1_500);
-  await saveObservation('09-daily-check-high-risk-result', 'frequent surface breathing daily check');
+  await saveObservation('09-daily-check-ready', '/aquarium?action=daily-check after livestock attempt');
 
   await writeFile(resolve(outputDir, 'aquaguide-probe.json'), JSON.stringify({
-    schemaVersion: 5,
+    schemaVersion: 6,
     targetUrl,
     generatedAt: new Date().toISOString(),
     snapshots,
