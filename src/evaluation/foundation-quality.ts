@@ -71,18 +71,21 @@ export function shouldRegenerateFoundation(input: {
   sourceFingerprint: string;
   persistedFingerprint: string | null;
   qualityState: FoundationQualityState | null;
+  providerId: string;
+  model: string;
 }): boolean {
   if (!input.hasProductModel || !input.hasEvalSet) return true;
   if (!input.persistedFingerprint || input.persistedFingerprint !== input.sourceFingerprint) return true;
   if (!input.qualityState) return true;
   if (input.qualityState.sourceFingerprint !== input.sourceFingerprint) return true;
+  if (input.qualityState.providerId !== input.providerId || input.qualityState.model !== input.model) return true;
   return input.qualityState.quality === 'degraded' || input.qualityState.retryRecommended;
 }
 
 export function foundationQualityMessage(state: FoundationQualityState): string {
   if (state.quality === 'degraded') {
     const warning = state.warnings[0] ? ` ${state.warnings[0]}` : '';
-    return `产品理解使用了降级模式，本次案例可信度受限；下次模型可用时会自动重建。${warning}`;
+    return `AI 产品理解没有成功，本次不会使用降级案例继续浏览器评测；下次模型可用时会自动重建。${warning}`;
   }
   return state.warnings.length
     ? `AI 产品理解已完成，但有 ${state.warnings.length} 条生成提醒。`
