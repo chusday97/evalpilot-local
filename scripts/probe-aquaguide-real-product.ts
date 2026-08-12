@@ -60,8 +60,6 @@ try {
   await page.waitForTimeout(900);
   await saveObservation('03-tank-settings-open', '/aquarium -> 建立或完善鱼缸');
 
-  // Probe-only product-specific manipulation: it proves AquaGuide itself can complete the contract.
-  // The real acceptance runner must still act through EvalPilot's Observer/Actor/ActionExecutor path.
   const sizeInputs = page.locator('input[type="number"]');
   if (await sizeInputs.count() < 3) throw new Error('AquaGuide settings did not expose three dimension inputs.');
   await sizeInputs.nth(0).fill('60');
@@ -82,7 +80,7 @@ try {
   await page.goto(new URL('/aquarium?action=record-existing', targetUrl).toString(), { waitUntil: 'domcontentloaded' });
   await page.waitForTimeout(900);
   await saveObservation('06-record-existing-route', '/aquarium?action=record-existing');
-  const fishSearch = page.getByPlaceholder(/搜索鱼、虾、螺等/).first();
+  const fishSearch = page.getByPlaceholder(/搜索鱼、虾、螺/).first();
   await fishSearch.fill('咖啡鼠');
   await page.waitForTimeout(250);
   await page.getByRole('button', { name: /咖啡鼠/ }).first().click();
