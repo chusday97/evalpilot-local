@@ -13,6 +13,8 @@ import { analyzeCoverage } from '../eval-set/coverage-analyzer.js';
 import { saveCoverageMatrix } from '../eval-set/coverage-store.js';
 import { listProductModelVersions, loadProductModel } from '../product-model/product-model-store.js';
 import { buildAdaptiveEvaluationReport } from '../report/adaptive-report.js';
+import { resolveAuthSessionFixture, type AuthSessionFixture } from '../scenario/auth-session-fixture.js';
+import { verifyAuthSession, type AuthSessionCheck } from '../scenario/auth-session-verifier.js';
 import { materializeSyntheticFileFixtures, resolveSyntheticFileFixtures, type SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
 import { compileExecutableScenarios, planScenarioExecution, scenarioBlockerSummary } from '../scenario/scenario-compiler.js';
 import { resolveScenarioSetups } from '../scenario/setup-resolver.js';
@@ -37,6 +39,7 @@ interface OrchestratorHooks {
 interface OrchestratorDependencies {
   provider?: AiProvider;
   launchBrowser?: () => Promise<Browser>;
+  authStorageStatePath?: string | null;
 }
 
 export function configuredEvaluationProvider(): AiProvider {
@@ -117,20 +120,20 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const scenarios = compileExecutableScenarios({ cases: selection.cases, productModel: foundation.model, targetUrl: config.targetUrl, generatedAt: scenarioGeneratedAt });
   const executionPlan = planScenarioExecution(scenarios);
   const setupResolutions = resolveScenarioSetups({ scenarios, cases: selection.cases, productModel: foundation.model, targetUrl: config.targetUrl, generatedAt: scenarioGeneratedAt });
-  const setupPlans = setupResolutions.flatMap((resolution) => resolution.status === 'auto_setup' && resolution.plan ? [resolution.plan] : []);
+  const setupPlans = setupResolutions.flatMap((resolutionItem) => resolutionItem.status === 'auto_setup' && resolutionItem.plan ? [resolutionItem.plan] : []);
   const setupPlanByCaseId = new Map(setupPlans.map((plan) => [plan.targetCaseId, plan]));
-  const setupResolutionSummaries = setupResolutions.map((resolution) => ({
-    caseId: resolution.caseId,
-    status: resolution.status,
-    blockers: resolution.blockers,
-    reason: resolution.reason,
-    plan: resolution.plan ? {
-      setupId: resolution.plan.setupId,
-      targetCaseId: resolution.plan.targetCaseId,
-      targetTaskId: resolution.plan.targetTaskId,
-      setupTaskId: resolution.plan.setupTaskId,
-      setupScenarioId: resolution.plan.setupScenario.scenarioId,
-      reason: resolution.plan.reason,
+  const setupResolutionSummaries = setupResolutions.map((resolutionItem) => ({
+    caseId: resolutionItem.caseId,
+    status: resolutionItem.status,
+    blockers: resolutionItem.blockers,
+    reason: resolutionItem.reason,
+    plan: resolutionItem.plan ? {
+      setupId: resolutionItem.plan.setupId,
+      targetCaseId: resolutionItem.plan.targetCaseId,
+      targetTaskId: resolutionItem.plan.targetTaskId,
+      setupTaskId: resolutionItem.plan.setupTaskId,
+      setupScenarioId: resolutionItem.plan.setupScenario.scenarioId,
+      reason: resolutionItem.plan.reason,
     } : null,
   }));
 
@@ -155,13 +158,31 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
     fixtures: resolutionItem.plan?.fixtures.map((fixture) => ({ fixtureId: fixture.fixtureId, kind: fixture.kind, filename: fixture.filename, mimeType: fixture.mimeType })) ?? [],
   }));
 
+  const authStorageStatePath = dependencies.authStorageStatePath ?? process.env.EVALPILOT_AUTH_STATE ?? null;
+  const authResolutions = await Promise.all(scenarios.map((scenario) => resolveAuthSessionFixture({ scenario, targetUrl: config.targetUrl, projectRoot: config.projectRoot, storageStatePath: authStorageStatePath })));
+  const authFixturesByCaseId = new Map<string, AuthSessionFixture>();
+  for (const authResolution of authResolutions) if (authResolution.status === 'ready' && authResolution.fixture) authFixturesByCaseId.set(authResolution.caseId, authResolution.fixture);
+  const authFixtureCaseIds = [...authFixturesByCaseId.keys()];
+  const authResolutionSummaries = authResolutions.map((authResolution) => ({
+    caseId: authResolution.caseId,
+    status: authResolution.status,
+    reason: authResolution.reason,
+    blockers: authResolution.blockers,
+    fixture: authResolution.fixture ? {
+      source: authResolution.fixture.source,
+      targetOrigin: authResolution.fixture.targetOrigin,
+      cookieCount: authResolution.fixture.cookieCount,
+      originCount: authResolution.fixture.originCount,
+    } : null,
+  }));
+
   const autoSetupCaseIds = setupPlans.map((plan) => plan.targetCaseId);
-  const effectiveReadyCaseIds = [...new Set([...executionPlan.readyCaseIds, ...autoSetupCaseIds, ...fileFixtureCaseIds])];
+  const effectiveReadyCaseIds = [...new Set([...executionPlan.readyCaseIds, ...autoSetupCaseIds, ...fileFixtureCaseIds, ...authFixtureCaseIds])];
   const effectiveReadyCaseIdSet = new Set(effectiveReadyCaseIds);
   const effectiveBlockedScenarios = scenarios.filter((scenario) => !effectiveReadyCaseIdSet.has(scenario.caseId));
   const effectiveBlockedCaseIds = effectiveBlockedScenarios.map((scenario) => scenario.caseId);
   await writeJsonAtomic(resolve(evaluationDirectory, 'scenario-preflight.json'), {
-    schemaVersion: 3,
+    schemaVersion: 4,
     evaluationId: input.evaluationId,
     generatedAt: scenarioGeneratedAt,
     readyCaseIds: effectiveReadyCaseIds,
@@ -169,15 +190,18 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
     directReadyCaseIds: executionPlan.readyCaseIds,
     autoSetupCaseIds,
     fileFixtureCaseIds,
+    authFixtureCaseIds,
     setupResolutions: setupResolutionSummaries,
     fileFixtureResolutions: fileFixtureResolutionSummaries,
+    authResolutions: authResolutionSummaries,
     scenarios,
   });
-  if (executionPlan.allBlocked && autoSetupCaseIds.length === 0 && fileFixtureCaseIds.length === 0) {
+  if (executionPlan.allBlocked && autoSetupCaseIds.length === 0 && fileFixtureCaseIds.length === 0 && authFixtureCaseIds.length === 0) {
     const detail = scenarioBlockerSummary(effectiveBlockedScenarios);
     const setupDetail = setupResolutions.filter((item) => item.status === 'blocked').map((item) => `${item.caseId}: ${item.reason}`).join(' | ');
     const fileDetail = fileFixtureResolutions.filter((item) => item.status === 'blocked' && item.blockers.some((blocker) => blocker.type === 'needs_test_data')).map((item) => `${item.caseId}: ${item.reason}`).join(' | ');
-    throw new EvalPilotError(`所选评测任务当前都不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${[detail, setupDetail, fileDetail].filter(Boolean).join(' | ')}`, 'EVALUATION_SCENARIO_NOT_READY');
+    const authDetail = authResolutions.filter((item) => item.status === 'blocked' && item.blockers.some((blocker) => blocker.type === 'needs_auth')).map((item) => `${item.caseId}: ${item.reason}`).join(' | ');
+    throw new EvalPilotError(`所选评测任务当前都不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${[detail, setupDetail, fileDetail, authDetail].filter(Boolean).join(' | ')}`, 'EVALUATION_SCENARIO_NOT_READY');
   }
 
   await hooks.prepared?.(selection, foundation.model, foundation.quality);
@@ -191,20 +215,30 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const packets = [];
   const challengeCases: EvalCase[] = [];
   const setupExecutions: AutoSetupExecutionResult[] = [];
+  const authChecks: Array<{ caseId: string; check: AuthSessionCheck }> = [];
   const setupExecutionDirectory = resolve(evaluationDirectory, 'setup-executions');
+  const authCheckDirectory = resolve(evaluationDirectory, 'auth-checks');
   if (setupPlans.length) await ensureDirectory(setupExecutionDirectory);
+  if (authFixtureCaseIds.length) await ensureDirectory(authCheckDirectory);
   const commit = await targetCommit(config.projectRoot);
   try {
     for (const [index, evalCase] of runnableCases.entries()) {
       const scenario = scenarioByCaseId.get(evalCase.caseId);
       const setupPlan = setupPlanByCaseId.get(evalCase.caseId) ?? null;
       const fileFixtures = fileFixturesByCaseId.get(evalCase.caseId) ?? [];
-      if (!scenario || (scenario.readiness !== 'ready' && !setupPlan && fileFixtures.length === 0)) throw new EvalPilotError(`案例“${evalCase.title}”未通过 Scenario Preflight。`, 'EVALUATION_SCENARIO_NOT_READY');
-      const context = await browser.newContext();
+      const authFixture = authFixturesByCaseId.get(evalCase.caseId) ?? null;
+      if (!scenario || (scenario.readiness !== 'ready' && !setupPlan && fileFixtures.length === 0 && !authFixture)) throw new EvalPilotError(`案例“${evalCase.title}”未通过 Scenario Preflight。`, 'EVALUATION_SCENARIO_NOT_READY');
+      const context = await browser.newContext(authFixture ? { storageState: authFixture.storageState } : undefined);
       try {
         const page = await context.newPage();
-        let setupPassed = true;
-        if (setupPlan) {
+        let prerequisitesPassed = true;
+        if (authFixture) {
+          const authCheck = await verifyAuthSession(page, scenario.startingUrl);
+          authChecks.push({ caseId: evalCase.caseId, check: authCheck });
+          await writeJsonAtomic(resolve(authCheckDirectory, `${evalCase.caseId}.json`), { schemaVersion: 1, caseId: evalCase.caseId, ...authCheck });
+          prerequisitesPassed = authCheck.status === 'ready';
+        }
+        if (setupPlan && prerequisitesPassed) {
           const setupExecution = await runAutoSetup({
             page,
             provider,
@@ -218,9 +252,9 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
           });
           setupExecutions.push(setupExecution);
           await writeJsonAtomic(resolve(setupExecutionDirectory, `${evalCase.caseId}.json`), setupExecution);
-          setupPassed = setupExecution.status === 'passed';
+          prerequisitesPassed = setupExecution.status === 'passed';
         }
-        if (setupPassed) {
+        if (prerequisitesPassed) {
           const outcome = await runAdaptiveCase({
             page,
             provider,
@@ -256,6 +290,14 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
       evaluationId: input.evaluationId,
       generatedAt: new Date().toISOString(),
       executions: setupExecutions,
+    });
+  }
+  if (authChecks.length) {
+    await writeJsonAtomic(resolve(evaluationDirectory, 'auth-summary.json'), {
+      schemaVersion: 1,
+      evaluationId: input.evaluationId,
+      generatedAt: new Date().toISOString(),
+      checks: authChecks,
     });
   }
   const currentCases = await loadEvalSetCases(config.outputDir);
