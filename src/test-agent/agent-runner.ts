@@ -3,6 +3,7 @@ import type { Page } from 'playwright';
 import type { AgentActionResult, AgentDecision, AiTestAgentRun, EvalCase, EvidencePacket, InteractionAction, PageObservation, ReflectionDecision, StepEvidence, StepVerification, WaitPolicy } from '../../types.js';
 import type { AiProvider } from '../ai/provider.js';
 import { ensureDirectory, pathExists, writeJsonAtomic } from '../utils/file-system.js';
+import { actorPromptV1 } from '../prompts/actor.v1.js';
 import { chooseAgentAction } from './actor.js';
 import { executeAgentAction } from './action-executor.js';
 import { calculateEvidenceCompleteness, saveAgentEvidence } from './evidence-packet.js';
@@ -22,6 +23,7 @@ import { captureTaskStateSignals } from './task-state-signals.js';
 import { gateVerificationByTaskState } from './task-state-monitor.js';
 import { classifyOperation } from './operation-classifier.js';
 import { consumesPersonaAttempt, waitForProgressAwareOutcome, waitPolicyFor } from './progress-aware-wait.js';
+import { initialActionBudget, maybeExtendActionBudget, pageStateFingerprint, repeatedStateCount, runtimeTaskProgress } from './task-progress.js';
 
 interface AgentRunnerOptions {
   outputDir: string;
@@ -69,6 +71,8 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
   const networkEvidence: string[] = [];
   const coreNetworkFailures: string[] = [];
   const uncaughtErrors: string[] = [];
+  const decisionStateFingerprints: string[] = [];
+  let actionBudget = initialActionBudget(options.maxSteps);
   let activeRequests = 0;
   let networkResponseCount = 0;
   const onConsole = (message: { type(): string; text(): string }) => { if (message.type() === 'error') consoleEvidence.push(message.text()); };
@@ -104,7 +108,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
   }
   try {
     if (page.url() !== options.startingUrl) await page.goto(options.startingUrl, { waitUntil: 'domcontentloaded' });
-    for (let step = 0; step < (options.maxSteps ?? 8); step += 1) {
+    for (let step = 0; step < actionBudget.current; step += 1) {
       const stepIndex = step + 1;
       const stepLabel = String(stepIndex).padStart(3, '0');
       const beforeScreenshotPath = resolve(screenshotDirectory, `step-${stepLabel}-before.png`);
@@ -113,6 +117,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       screenshots.push(beforeScreenshotPath);
       const before = await observePage(page, [beforeScreenshotPath], `observation-${stepLabel}-before`);
       observations.push(before);
+      const progress = runtimeTaskProgress({ evalCase, observation: before, verifications, budget: actionBudget, currentStep: step, failedAttempts });
       const consoleStart = consoleEvidence.length;
       const networkStart = networkEvidence.length;
       const coreNetworkFailureStart = coreNetworkFailures.length;
@@ -120,7 +125,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       let decision: AgentDecision;
       try {
         decision = await chooseAgentAction({
-          provider, evalCase, observation: before, history: decisions, verifications,
+          provider, evalCase, observation: before, history: decisions, verifications, progress,
           screenshotDataUrl: `data:image/png;base64,${beforeBuffer.toString('base64')}`,
           allowRemoteModel: provider.info.remote ? Boolean(options.allowRemoteModel) : true,
           allowScreenshot: provider.info.remote ? Boolean(options.allowScreenshotToProvider) : true,
@@ -132,6 +137,17 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
         break;
       }
       decision = { ...decision, decisionId: `decision-${stepLabel}` };
+      const decisionStateFingerprint = `${pageStateFingerprint(before)}::${decision.action}:${decision.targetElementId ?? 'none'}`;
+      const repeatedAttempts = repeatedStateCount(decisionStateFingerprints, decisionStateFingerprint);
+      decisionStateFingerprints.push(decisionStateFingerprint);
+      const previousTaskState = stepEvidence.at(-1)?.taskState?.state;
+      if (repeatedAttempts >= 3 && verifications.at(-1)?.status !== 'confirmed' && previousTaskState !== 'pending' && previousTaskState !== 'progressing') {
+        finalObservation = before;
+        failureSource = 'evaluator';
+        error = '评测器连续多次在同一页面状态尝试同一个操作且没有形成新证据，已停止本次循环。';
+        status = 'inconclusive';
+        break;
+      }
       let actionResult: AgentActionResult | null = null;
       if (decision.action === 'fill') {
         const field = before.formFields.find((item) => item.elementId === decision.targetElementId);
@@ -216,6 +232,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
         taskState,
         taskWait,
       });
+      actionBudget = maybeExtendActionBudget({ budget: actionBudget, stepIndex, taskState, verification });
       const retryAttempts = decisions.filter((item) => item.action === decision.action && item.targetElementId === decision.targetElementId).length;
       const deterministicReflection = reflectOnStep({ evalCase, decision, result: actionResult, verification, taskState, failedAttempts, retryAttempts });
       const semanticReflection = options.useSemanticReflector
@@ -229,6 +246,12 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
     }
   } catch (runError) {
     status = 'inconclusive'; failureSource = 'evaluator'; error = runError instanceof Error ? runError.message : String(runError);
+  }
+  if (status === 'inconclusive' && !error && decisions.length >= actionBudget.current) {
+    failureSource = 'evaluator';
+    error = actionBudget.current < actionBudget.hard
+      ? `评测器在 ${actionBudget.current} 个操作内没有观察到足够进展，因此没有继续扩大操作预算。`
+      : `评测器达到 ${actionBudget.hard} 个安全操作上限，任务仍未完成。`;
   }
   if (!finalObservation) {
     const finalScreenshotPath = resolve(screenshotDirectory, 'final.png');
@@ -263,7 +286,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
   };
   const packetWithoutCompleteness = {
     runId, caseId: evalCase.caseId, targetAppCommit: options.targetAppCommit ?? null,
-    actorModel: provider.info.model, actorPromptVersion: '1.0.0', startedAt: started.toISOString(), completedAt,
+    actorModel: provider.info.model, actorPromptVersion: actorPromptV1.version, startedAt: started.toISOString(), completedAt,
     actions: interactions, observations, stepVerifications: verifications, stepEvidence, screenshots, tracePath,
     consoleEvidence, networkEvidence, finalState: { url: page.url(), visibleTextSummary: resolvedFinalObservation.visibleStateSummary.slice(0, 1_000) },
     versions: {
@@ -274,7 +297,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       evalPilotVersion: packageVersion(),
       actorModel: provider.info.model,
       judgeModel: options.judgeModel ?? provider.info.model,
-      actorPromptVersion: '1.0.0',
+      actorPromptVersion: actorPromptV1.version,
       judgePromptVersion: semanticJudgePromptV1.version,
       verifierPromptVersion: verifierPromptV1.version,
       reflectorPromptVersion: options.useSemanticReflector ? reflectorPromptV1.version : null,
