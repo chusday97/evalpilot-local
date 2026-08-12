@@ -72,10 +72,10 @@ describe('Executable Scenario compiler', () => {
     expect(plan).toMatchObject({ readyCaseIds: [], blockedCaseIds: ['case-auth', 'case-existing'], canRunAny: false, allBlocked: true });
   });
 
-  it('keeps the all-blocked gate before browser launch and filters mixed runs to ready cases', async () => {
+  it('keeps the prerequisite all-blocked gate before browser launch and filters mixed runs to ready cases', async () => {
     const source = await readFile(new URL('../src/evaluation/evaluation-orchestrator.ts', import.meta.url), 'utf8');
-    const planIndex = source.indexOf('planScenarioExecution');
-    const blockerIndex = source.indexOf('executionPlan.allBlocked');
+    const planIndex = source.indexOf('planScenarioPrerequisiteSet');
+    const blockerIndex = source.indexOf('if (!readyCaseIds.length)');
     const browserIndex = source.indexOf('chromium.launch');
     expect(planIndex).toBeGreaterThan(-1); expect(blockerIndex).toBeGreaterThan(planIndex); expect(browserIndex).toBeGreaterThan(blockerIndex);
     expect(source).toContain('runnableCases = selection.cases.filter');
