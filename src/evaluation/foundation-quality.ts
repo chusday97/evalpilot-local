@@ -11,6 +11,7 @@ export interface FoundationQualityState {
   schemaVersion: 1;
   sourceFingerprint: string;
   generationMode: FoundationGenerationMode;
+  oracleFallbackCount: number;
   quality: FoundationQuality;
   providerId: string | null;
   model: string | null;
@@ -23,6 +24,7 @@ const foundationQualityStateSchema = z.object({
   schemaVersion: z.literal(1),
   sourceFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
   generationMode: z.enum(['ai', 'deterministic', 'deterministic_fallback']),
+  oracleFallbackCount: z.number().int().nonnegative(),
   quality: z.enum(['ready', 'degraded']),
   providerId: z.string().nullable(),
   model: z.string().nullable(),
@@ -47,15 +49,18 @@ export async function saveFoundationQualityState(outputDir: string, state: Found
 export function foundationQualityFromGeneration(input: {
   sourceFingerprint: string;
   generationMode: FoundationGenerationMode;
+  oracleFallbackCount?: number;
   warnings: string[];
   provider: AiProvider | null;
   generatedAt: string;
 }): FoundationQualityState {
-  const quality: FoundationQuality = input.generationMode === 'ai' ? 'ready' : 'degraded';
+  const oracleFallbackCount = input.oracleFallbackCount ?? 0;
+  const quality: FoundationQuality = input.generationMode === 'ai' && oracleFallbackCount === 0 ? 'ready' : 'degraded';
   return foundationQualityStateSchema.parse({
     schemaVersion: 1,
     sourceFingerprint: input.sourceFingerprint,
     generationMode: input.generationMode,
+    oracleFallbackCount,
     quality,
     providerId: input.provider?.info.providerId ?? null,
     model: input.provider?.info.model ?? null,
@@ -84,10 +89,13 @@ export function shouldRegenerateFoundation(input: {
 
 export function foundationQualityMessage(state: FoundationQualityState): string {
   if (state.quality === 'degraded') {
+    const stage = state.generationMode !== 'ai'
+      ? 'AI 产品理解没有成功'
+      : `${state.oracleFallbackCount} 个 Oracle 没有成功由 AI 构建`;
     const warning = state.warnings[0] ? ` ${state.warnings[0]}` : '';
-    return `AI 产品理解没有成功，本次不会使用降级案例继续浏览器评测；下次模型可用时会自动重建。${warning}`;
+    return `${stage}，本次不会使用降级案例继续浏览器评测；下次模型可用时会自动重建。${warning}`;
   }
   return state.warnings.length
-    ? `AI 产品理解已完成，但有 ${state.warnings.length} 条生成提醒。`
-    : 'AI 产品理解已完成。';
+    ? `AI 产品理解和 Oracle 已完成，但有 ${state.warnings.length} 条生成提醒。`
+    : 'AI 产品理解和 Oracle 已完成。';
 }
