@@ -23,7 +23,7 @@ function observation(overrides: Partial<PageObservation> = {}): PageObservation 
 }
 
 function verification(status: StepVerification['status']): StepVerification {
-  return { verificationId: 'verification-1', status, expected: 'Created', observed: status, evidenceRefs: [], confidence: 1 };
+  return { verificationId: 'verification-1', status, expectation: 'Created', observed: status, evidenceRefs: [], confidence: 1 };
 }
 
 function taskState(state: TaskStateObservation['state']): TaskStateObservation {
