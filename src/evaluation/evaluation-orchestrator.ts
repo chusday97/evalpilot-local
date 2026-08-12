@@ -14,6 +14,8 @@ import { saveCoverageMatrix } from '../eval-set/coverage-store.js';
 import { listProductModelVersions, loadProductModel } from '../product-model/product-model-store.js';
 import { buildAdaptiveEvaluationReport } from '../report/adaptive-report.js';
 import { compileExecutableScenarios, planScenarioExecution, scenarioBlockerSummary } from '../scenario/scenario-compiler.js';
+import { resolveScenarioSetups } from '../scenario/setup-resolver.js';
+import { runAutoSetup, type AutoSetupExecutionResult } from '../scenario/setup-runner.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
 import { EvalPilotError } from '../utils/errors.js';
 import { ensureDirectory, pathExists, writeJsonAtomic } from '../utils/file-system.js';
@@ -113,22 +115,48 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const scenarioGeneratedAt = new Date().toISOString();
   const scenarios = compileExecutableScenarios({ cases: selection.cases, productModel: foundation.model, targetUrl: config.targetUrl, generatedAt: scenarioGeneratedAt });
   const executionPlan = planScenarioExecution(scenarios);
+  const setupResolutions = resolveScenarioSetups({ scenarios, cases: selection.cases, productModel: foundation.model, targetUrl: config.targetUrl, generatedAt: scenarioGeneratedAt });
+  const setupPlans = setupResolutions.flatMap((resolution) => resolution.status === 'auto_setup' && resolution.plan ? [resolution.plan] : []);
+  const setupPlanByCaseId = new Map(setupPlans.map((plan) => [plan.targetCaseId, plan]));
+  const setupResolutionSummaries = setupResolutions.map((resolution) => ({
+    caseId: resolution.caseId,
+    status: resolution.status,
+    blockers: resolution.blockers,
+    reason: resolution.reason,
+    plan: resolution.plan ? {
+      setupId: resolution.plan.setupId,
+      targetCaseId: resolution.plan.targetCaseId,
+      targetTaskId: resolution.plan.targetTaskId,
+      setupTaskId: resolution.plan.setupTaskId,
+      setupScenarioId: resolution.plan.setupScenario.scenarioId,
+      reason: resolution.plan.reason,
+    } : null,
+  }));
+  const autoSetupCaseIds = setupPlans.map((plan) => plan.targetCaseId);
+  const effectiveReadyCaseIds = [...new Set([...executionPlan.readyCaseIds, ...autoSetupCaseIds])];
+  const effectiveReadyCaseIdSet = new Set(effectiveReadyCaseIds);
+  const effectiveBlockedScenarios = scenarios.filter((scenario) => !effectiveReadyCaseIdSet.has(scenario.caseId));
+  const effectiveBlockedCaseIds = effectiveBlockedScenarios.map((scenario) => scenario.caseId);
   await writeJsonAtomic(resolve(evaluationDirectory, 'scenario-preflight.json'), {
-    schemaVersion: 1,
+    schemaVersion: 2,
     evaluationId: input.evaluationId,
     generatedAt: scenarioGeneratedAt,
-    readyCaseIds: executionPlan.readyCaseIds,
-    blockedCaseIds: executionPlan.blockedCaseIds,
+    readyCaseIds: effectiveReadyCaseIds,
+    blockedCaseIds: effectiveBlockedCaseIds,
+    directReadyCaseIds: executionPlan.readyCaseIds,
+    autoSetupCaseIds,
+    setupResolutions: setupResolutionSummaries,
     scenarios,
   });
-  if (executionPlan.allBlocked) {
-    const detail = scenarioBlockerSummary(executionPlan.blocked);
-    throw new EvalPilotError(`所选评测任务当前都不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${detail}`, 'EVALUATION_SCENARIO_NOT_READY');
+  if (executionPlan.allBlocked && autoSetupCaseIds.length === 0) {
+    const detail = scenarioBlockerSummary(effectiveBlockedScenarios);
+    const setupDetail = setupResolutions.filter((item) => item.status === 'blocked').map((item) => `${item.caseId}: ${item.reason}`).join(' | ');
+    throw new EvalPilotError(`所选评测任务当前都不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${[detail, setupDetail].filter(Boolean).join(' | ')}`, 'EVALUATION_SCENARIO_NOT_READY');
   }
 
   await hooks.prepared?.(selection, foundation.model, foundation.quality);
   const scenarioByCaseId = new Map(scenarios.map((scenario) => [scenario.caseId, scenario]));
-  const runnableCaseIds = new Set(executionPlan.readyCaseIds);
+  const runnableCaseIds = new Set(effectiveReadyCaseIds);
   const runnableCases = selection.cases.filter((evalCase) => runnableCaseIds.has(evalCase.caseId));
   const browser = await (dependencies.launchBrowser?.() ?? chromium.launch({ headless: true }));
   const results = [];
@@ -136,32 +164,55 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const badcases = [];
   const packets = [];
   const challengeCases: EvalCase[] = [];
+  const setupExecutions: AutoSetupExecutionResult[] = [];
+  const setupExecutionDirectory = resolve(evaluationDirectory, 'setup-executions');
+  if (setupPlans.length) await ensureDirectory(setupExecutionDirectory);
   const commit = await targetCommit(config.projectRoot);
   try {
     for (const [index, evalCase] of runnableCases.entries()) {
       const scenario = scenarioByCaseId.get(evalCase.caseId);
-      if (!scenario || scenario.readiness !== 'ready') throw new EvalPilotError(`案例“${evalCase.title}”未通过 Scenario Preflight。`, 'EVALUATION_SCENARIO_NOT_READY');
+      const setupPlan = setupPlanByCaseId.get(evalCase.caseId) ?? null;
+      if (!scenario || (scenario.readiness !== 'ready' && !setupPlan)) throw new EvalPilotError(`案例“${evalCase.title}”未通过 Scenario Preflight。`, 'EVALUATION_SCENARIO_NOT_READY');
       const context = await browser.newContext();
       try {
         const page = await context.newPage();
-        const outcome = await runAdaptiveCase({
-          page,
-          provider,
-          outputDir: config.outputDir,
-          evalCase,
-          productModel: foundation.model,
-          existingCases: foundation.cases,
-          startingUrl: scenario.startingUrl,
-          evalSetVersion: foundation.version,
-          targetAppGitSha: commit,
-          allowRemoteModel: true,
-          allowScreenshotToProvider: input.allowScreenshot,
-        });
-        results.push(outcome.result);
-        if (outcome.finding) findings.push(outcome.finding);
-        if (outcome.badcase) badcases.push(outcome.badcase);
-        challengeCases.push(...(outcome.passAnalysis?.challengeCandidates ?? []));
-        packets.push(evidencePacketSchema.parse(JSON.parse(await readFile(outcome.agentRun.evidencePacketPath, 'utf8'))));
+        let setupPassed = true;
+        if (setupPlan) {
+          const setupExecution = await runAutoSetup({
+            page,
+            provider,
+            outputDir: config.outputDir,
+            plan: setupPlan,
+            productModel: foundation.model,
+            evalSetVersion: foundation.version,
+            targetAppGitSha: commit,
+            allowRemoteModel: true,
+            allowScreenshotToProvider: input.allowScreenshot,
+          });
+          setupExecutions.push(setupExecution);
+          await writeJsonAtomic(resolve(setupExecutionDirectory, `${evalCase.caseId}.json`), setupExecution);
+          setupPassed = setupExecution.status === 'passed';
+        }
+        if (setupPassed) {
+          const outcome = await runAdaptiveCase({
+            page,
+            provider,
+            outputDir: config.outputDir,
+            evalCase,
+            productModel: foundation.model,
+            existingCases: foundation.cases,
+            startingUrl: scenario.startingUrl,
+            evalSetVersion: foundation.version,
+            targetAppGitSha: commit,
+            allowRemoteModel: true,
+            allowScreenshotToProvider: input.allowScreenshot,
+          });
+          results.push(outcome.result);
+          if (outcome.finding) findings.push(outcome.finding);
+          if (outcome.badcase) badcases.push(outcome.badcase);
+          challengeCases.push(...(outcome.passAnalysis?.challengeCandidates ?? []));
+          packets.push(evidencePacketSchema.parse(JSON.parse(await readFile(outcome.agentRun.evidencePacketPath, 'utf8'))));
+        }
       } finally {
         await context.close();
       }
@@ -171,6 +222,14 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
     await browser.close();
   }
 
+  if (setupExecutions.length) {
+    await writeJsonAtomic(resolve(evaluationDirectory, 'setup-summary.json'), {
+      schemaVersion: 1,
+      evaluationId: input.evaluationId,
+      generatedAt: new Date().toISOString(),
+      executions: setupExecutions,
+    });
+  }
   const currentCases = await loadEvalSetCases(config.outputDir);
   const coverage = analyzeCoverage({ model: foundation.model, cases: currentCases, results, evidencePackets: packets });
   await saveCoverageMatrix(config.outputDir, coverage);
