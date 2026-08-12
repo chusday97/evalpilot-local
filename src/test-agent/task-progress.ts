@@ -86,8 +86,9 @@ export function maybeExtendActionBudget(input: {
 
 export function pageStateFingerprint(observation: PageObservation): string {
   const elements = observation.interactableElements.slice(0, 20).map((element) => `${element.tagName}:${element.label}:${element.disabled}`).join('|');
+  const fields = observation.formFields.slice(0, 20).map((field) => `${field.elementId}:${field.currentValuePresent}:${field.disabled}`).join('|');
   const areas = observation.primaryAreas.slice(0, 6).join('|');
-  return `${observation.pageUrl}::${areas}::${elements}::${observation.visibleStateSummary.slice(0, 500)}`;
+  return `${observation.pageUrl}::${areas}::${elements}::${fields}::${observation.visibleStateSummary.slice(0, 500)}`;
 }
 
 export function repeatedStateCount(history: string[], nextFingerprint: string): number {
