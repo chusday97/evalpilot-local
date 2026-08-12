@@ -1,6 +1,6 @@
 import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { AdaptiveRunSummary, Badcase, CandidateFinding, CoverageMatrix, EvalCase, EvalSetDashboardSummary, EvalSetType, ProductModel } from '../../types.js';
+import type { AdaptiveRunSummary, Badcase, CandidateFinding, CoverageMatrix, EvalCase, EvalSetDashboardSummary, EvalSetType, EvidencePacket, ProductModel } from '../../types.js';
 import type { AiProvider } from '../ai/provider.js';
 import { listProductModelVersions, loadProductModel } from '../product-model/product-model-store.js';
 import { loadLatestCoverageMatrix } from '../eval-set/coverage-store.js';
@@ -13,6 +13,16 @@ import { generateEvaluationFoundation } from '../evaluation/evaluation-foundatio
 import { evidencePacketSchema } from '../test-agent/schemas.js';
 
 const emptyCounts: Record<EvalSetType, number> = { baseline: 0, regression: 0, challenge: 0, exploratory: 0 };
+
+type AdaptiveRunDiagnosticSummary = AdaptiveRunSummary & {
+  evidenceComplete: boolean;
+  evidenceMissing: string[];
+  deterministicChecks: Awaited<ReturnType<typeof loadEvalCaseResult>>['deterministic']['checks'];
+  deterministicHardFailure: boolean;
+  semanticVerdict: Awaited<ReturnType<typeof loadEvalCaseResult>>['semantic']['verdict'];
+  semanticUnknowns: string[];
+  finalState: EvidencePacket['finalState'] | null;
+};
 
 export async function latestProductModel(outputDir: string): Promise<ProductModel | null> {
   const versions = await listProductModelVersions(outputDir);
@@ -34,7 +44,7 @@ export async function listAdaptiveCases(outputDir: string): Promise<EvalCase[]> 
 }
 
 export async function findAdaptiveCase(outputDir: string, caseId: string): Promise<EvalCase | null> {
-  const manifest = await pathExists(evalSetManifestPath(outputDir) ? outputDir : outputDir) ? await loadEvalSetManifest(outputDir) : null;
+  const manifest = await pathExists(evalSetManifestPath(outputDir)) ? await loadEvalSetManifest(outputDir) : null;
   const reference = manifest?.cases.find((item) => item.caseId === caseId);
   return reference ? loadEvalCase(outputDir, reference.setType, reference.caseId) : null;
 }
@@ -79,7 +89,7 @@ export async function listAdaptiveRuns(outputDir: string): Promise<AdaptiveRunSu
     const packet = await pathExists(packetPath)
       ? evidencePacketSchema.parse(JSON.parse(await readFile(packetPath, 'utf8')))
       : null;
-    summaries.push({
+    const summary: AdaptiveRunDiagnosticSummary = {
       runId,
       caseId: result.caseId,
       caseTitle: evalCase?.title ?? null,
@@ -96,15 +106,8 @@ export async function listAdaptiveRuns(outputDir: string): Promise<AdaptiveRunSu
       semanticVerdict: result.semantic.verdict,
       semanticUnknowns: result.semantic.unknowns,
       finalState: packet?.finalState ?? null,
-    } as AdaptiveRunSummary & {
-      evidenceComplete: boolean;
-      evidenceMissing: string[];
-      deterministicChecks: typeof result.deterministic.checks;
-      deterministicHardFailure: boolean;
-      semanticVerdict: typeof result.semantic.verdict;
-      semanticUnknowns: string[];
-      finalState: typeof packet extends null ? null : unknown;
-    });
+    };
+    summaries.push(summary);
   }
   return summaries;
 }
