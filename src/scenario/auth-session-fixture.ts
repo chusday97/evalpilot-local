@@ -1,4 +1,4 @@
-import { lstat, readFile } from 'node:fs/promises';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import { isAbsolute, relative, resolve } from 'node:path';
 import type { ExecutableScenario, ScenarioBlocker } from './scenario-compiler.js';
 
@@ -93,16 +93,22 @@ export async function resolveAuthSessionFixture(input: {
     return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: 'Scenario 同时包含非认证 blocker，第一版不会组合猜测认证之外的前置状态。' };
   }
   const sourcePath = input.storageStatePath?.trim() ?? '';
-  if (!sourcePath) return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: '缺少显式本地 Auth Fixture。EvalPilot 不会自动填写账号密码。' };
+  if (!sourcePath) return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: '缺少显式本地 Auth Fixture。EvalPilot 不会自动填写账号密码；可通过 EVALPILOT_AUTH_STATE 提供 Playwright storageState 的绝对路径。' };
   if (!isAbsolute(sourcePath)) return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: 'Auth Fixture 必须使用显式绝对路径，避免从项目目录猜测敏感文件。' };
-  if (within(input.projectRoot, sourcePath)) return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: 'Auth Fixture 不能存放在被测项目仓库内，避免 Cookie/Token 被误提交。' };
 
   let metadata;
   try { metadata = await lstat(sourcePath); }
   catch { return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: '指定的 Auth Fixture 不存在或不可读取。' }; }
   if (!metadata.isFile() || metadata.isSymbolicLink()) return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: 'Auth Fixture 必须是普通文件，不能使用符号链接。' };
   if (metadata.size <= 0 || metadata.size > maxStorageStateBytes) return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: 'Auth Fixture 文件大小异常，未加载。' };
+  if (typeof process.getuid === 'function' && metadata.uid !== process.getuid()) return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: 'Auth Fixture 不属于当前用户，未加载。' };
   if (process.platform !== 'win32' && (metadata.mode & 0o077) !== 0) return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: 'Auth Fixture 权限过宽；请限制为仅当前用户可读写（例如 chmod 600）。' };
+  try {
+    const [realProjectRoot, realSourcePath] = await Promise.all([realpath(input.projectRoot), realpath(sourcePath)]);
+    if (within(realProjectRoot, realSourcePath)) return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: 'Auth Fixture 不能存放在被测项目仓库内，避免 Cookie/Token 被误提交。' };
+  } catch {
+    return { caseId: input.scenario.caseId, status: 'blocked', fixture: null, blockers: input.scenario.blockers, reason: '无法确认 Auth Fixture 与项目仓库的真实路径关系，已停止加载。' };
+  }
 
   let raw: unknown;
   try { raw = JSON.parse(await readFile(sourcePath, 'utf8')); }
