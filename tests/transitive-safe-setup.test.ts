@@ -95,7 +95,7 @@ function executionDiagnostic(execution: Awaited<ReturnType<typeof runAutoSetup>>
       status: step.status,
       agentStatus: step.agentStatus,
       blockedRemoteRequests: step.blockedRemoteRequests,
-      deterministic: step.deterministic.checks.map((check) => ({ verdict: check.verdict, assertionId: check.assertionId, observed: check.observed })),
+      deterministic: step.deterministic.checks,
       summary: step.summary,
     })),
   }, null, 2);
