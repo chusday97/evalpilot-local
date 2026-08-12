@@ -27,16 +27,24 @@ describe('result page next action contract', () => {
     expect(source).toContain('如果还有前置条件、评测器失败或未运行任务，请按上方唯一下一步处理');
   });
 
-  it('keeps code-fix language behind the confirmed decision state', async () => {
+  it('keeps legacy issue evidence out of the fix execution path', async () => {
     const presenter = await readFile(new URL('../dashboard/src/next-action-presenter.ts', import.meta.url), 'utf8');
     const issuesPage = await readFile(new URL('../dashboard/src/GuidedPages.tsx', import.meta.url), 'utf8');
     const issueDetail = await readFile(new URL('../dashboard/src/IssueDetail.tsx', import.meta.url), 'utf8');
+    const engine = await readFile(new URL('../src/decision/next-action-engine.ts', import.meta.url), 'utf8');
+
     expect(presenter).toContain("['create_fix_task', 'retest_fix', 'add_to_regression']");
     expect(presenter).toContain('当前不要生成代码修复任务');
     expect(presenter).toContain('确认之前不要创建代码修复任务');
-    expect(issuesPage).toContain("const repairAllowed = nextAction.data?.type === 'create_fix_task'");
-    expect(issuesPage).toContain('{repairAllowed && <Button tone="secondary" onClick={() => setFix(issue)}>生成 Codex 修复任务</Button>}');
-    expect(issueDetail).toContain('{onFix && <Button onClick={onFix}>生成 Codex 修复任务</Button>}');
+
+    expect(issuesPage).not.toContain('issueId: fix.issueId');
+    expect(issuesPage).not.toContain('setFix(');
+    expect(issuesPage).not.toContain('生成 Codex 修复任务');
+    expect(issueDetail).not.toContain('生成 Codex 修复任务');
+    expect(issueDetail).toContain('只有已确认 Product Failure 才会通过上方 Next Action 进入修复');
+
+    expect(engine).toContain("type: 'create_fix_task'");
+    expect(engine).toContain("route: detailRoute('/findings'");
   });
 
   it('reads blocked prerequisite summaries from the redacted preflight snapshot', async () => {
