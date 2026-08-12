@@ -20,7 +20,7 @@ import { ensureDirectory, pathExists, writeJsonAtomic } from '../utils/file-syst
 import { configForProject } from '../projects/project-registry.js';
 import { runAdaptiveCase } from './adaptive-evaluation-service.js';
 import { evaluationSourceFingerprint, generateEvaluationFoundation, loadEvaluationFoundationState, saveEvaluationFoundationState } from './evaluation-foundation.js';
-import { foundationQualityFromGeneration, loadFoundationQualityState, saveFoundationQualityState, shouldRegenerateFoundation, type FoundationQualityState } from './foundation-quality.js';
+import { foundationQualityFromGeneration, foundationQualityMessage, loadFoundationQualityState, saveFoundationQualityState, shouldRegenerateFoundation, type FoundationQualityState } from './foundation-quality.js';
 import { evaluationOrchestratorInputSchema, evaluationOrchestratorResultSchema } from './schemas.js';
 import { selectEvaluationCases } from './evaluation-selector.js';
 
@@ -57,6 +57,8 @@ async function ensureFoundation(projectId: string, outputDir: string, provider: 
     sourceFingerprint,
     persistedFingerprint: state?.sourceFingerprint ?? null,
     qualityState: persistedQuality,
+    providerId: provider.info.providerId,
+    model: provider.info.model,
   });
   let quality = persistedQuality;
   if (regenerate) {
@@ -97,12 +99,16 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const config = await configForProject(cwd, input.projectId);
   const provider = dependencies.provider ?? configuredEvaluationProvider();
   const foundation = await ensureFoundation(input.projectId, config.outputDir, provider);
-  const selection = selectEvaluationCases({ model: foundation.model, cases: foundation.cases, depth: input.depth, capabilityIds: input.capabilityIds });
-  if (!selection.cases.length) throw new EvalPilotError('所选功能没有可运行的评测案例。请重新整理案例或调整功能范围。', 'EVALUATION_CASE_NOT_FOUND');
-
   const evaluationDirectory = resolve(config.outputDir, 'evaluations', input.evaluationId);
   await ensureDirectory(evaluationDirectory);
   await writeJsonAtomic(resolve(evaluationDirectory, 'foundation-quality.json'), foundation.quality);
+  if (foundation.quality.quality === 'degraded') {
+    throw new EvalPilotError(foundationQualityMessage(foundation.quality), 'PRODUCT_MODEL_REQUIRED');
+  }
+
+  const selection = selectEvaluationCases({ model: foundation.model, cases: foundation.cases, depth: input.depth, capabilityIds: input.capabilityIds });
+  if (!selection.cases.length) throw new EvalPilotError('所选功能没有可运行的评测案例。请重新整理案例或调整功能范围。', 'EVALUATION_CASE_NOT_FOUND');
+
   const scenarioGeneratedAt = new Date().toISOString();
   const scenarios = compileExecutableScenarios({ cases: selection.cases, productModel: foundation.model, targetUrl: config.targetUrl, generatedAt: scenarioGeneratedAt });
   const executionPlan = planScenarioExecution(scenarios);
