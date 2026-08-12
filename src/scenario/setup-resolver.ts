@@ -80,7 +80,7 @@ function setupCaseFor(targetCase: EvalCase, setupTask: ProductTask, model: Produ
     hypothesis: `先完成“${setupTask.name}”可为目标案例建立可验证的本地测试状态`,
     persona: targetCase.persona,
     goal: setupTask.goal,
-    knownInformation: targetCase.knownInformation,
+    knownInformation: {},
     preconditions: setupTask.preconditions,
     oracle,
     coverageDimensions: [],
