@@ -5,13 +5,14 @@ import { projectScenarioBlockers, type ExecutableScenario, type ScenarioBlocker,
 import { resolveScenarioSetupChain, type AutoSetupPlan } from './setup-resolver.js';
 
 export type PrerequisiteStep = 'auth' | 'setup' | 'file_fixture' | 'target';
+export type ChainAwareSetupPlan = AutoSetupPlan & { chainSteps?: AutoSetupPlan[] };
 
 export interface PrerequisitePlan {
   caseId: string;
   status: 'not_required' | 'ready' | 'blocked';
   executionOrder: PrerequisiteStep[];
   authFixture: AuthSessionFixture | null;
-  setupPlan: AutoSetupPlan | null;
+  setupPlan: ChainAwareSetupPlan | null;
   setupPlans: AutoSetupPlan[];
   fileFixturePlan: SyntheticFileFixturePlan | null;
   unresolvedBlockers: ScenarioBlocker[];
@@ -39,6 +40,17 @@ function blockersOf(scenario: ExecutableScenario, type: ScenarioBlockerType): Sc
 
 function uniqueBlockers(blockers: ScenarioBlocker[]): ScenarioBlocker[] {
   return [...new Map(blockers.map((blocker) => [blocker.blockerId, blocker])).values()];
+}
+
+function chainAwareSetupPlan(caseId: string, setupPlans: AutoSetupPlan[]): ChainAwareSetupPlan | null {
+  if (!setupPlans.length) return null;
+  if (setupPlans.length === 1) return setupPlans[0]!;
+  const finalStep = setupPlans.at(-1)!;
+  return Object.assign({}, finalStep, {
+    setupId: `setup-chain-${caseId}`,
+    reason: `按顺序执行 ${setupPlans.length} 个 verified Setup 步骤。`,
+    chainSteps: setupPlans,
+  });
 }
 
 export async function planScenarioPrerequisites(input: {
@@ -112,7 +124,7 @@ export async function planScenarioPrerequisites(input: {
   const unhandledAutomatable = input.scenario.blockers.filter((blocker) => !plannerTypes.includes(blocker.type) && !nonAutomatableTypes.includes(blocker.type));
   unresolved.push(...unhandledAutomatable);
   const unresolvedBlockers = uniqueBlockers(unresolved);
-  const setupPlan = setupPlans.length === 1 ? setupPlans[0]! : null;
+  const setupPlan = chainAwareSetupPlan(input.evalCase.caseId, setupPlans);
   const executionOrder: PrerequisiteStep[] = [
     ...(authFixture ? ['auth' as const] : []),
     ...setupPlans.map(() => 'setup' as const),
@@ -169,7 +181,7 @@ export function summarizePrerequisitePlan(plan: PrerequisitePlan): PrerequisiteP
     unresolvedBlockers: plan.unresolvedBlockers,
     reasons: plan.reasons,
     auth: plan.authFixture ? { source: plan.authFixture.source, targetOrigin: plan.authFixture.targetOrigin, cookieCount: plan.authFixture.cookieCount, originCount: plan.authFixture.originCount } : null,
-    setup: plan.setupPlan ? summarizeSetup(plan.setupPlan) : null,
+    setup: plan.setupPlans.length === 1 && plan.setupPlan ? summarizeSetup(plan.setupPlan) : null,
     setupChain: plan.setupPlans.map(summarizeSetup),
     fileFixtures: fixtureMaterializationFailed ? [] : plan.fileFixturePlan?.fixtures.map((fixture) => ({ fixtureId: fixture.fixtureId, kind: fixture.kind, filename: fixture.filename, mimeType: fixture.mimeType })) ?? [],
   };
