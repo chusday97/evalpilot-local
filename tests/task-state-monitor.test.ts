@@ -46,9 +46,15 @@ describe('Task State Monitor', () => {
     expect(observe({ actionResult: { ...actionResult, status: 'blocked_by_safety', summary: '需要真实凭证' } })).toMatchObject({ state: 'blocked', confidence: 1 });
   });
 
+  it('keeps action screenshots attached even when task state does not gate the verdict', () => {
+    const verification: StepVerification = { verificationId: 'verification-001', expectation: '输入已填写', observed: '输入框已有值', status: 'confirmed', evidenceRefs: [], confidence: 0.9 };
+    const taskState = { ...observe(), state: 'interacting' as const, evidenceRefs: ['before.png', 'after.png'] };
+    expect(gateVerificationByTaskState(verification, taskState)).toMatchObject({ status: 'confirmed', evidenceRefs: ['before.png', 'after.png'] });
+  });
+
   it.each(['pending', 'progressing'] as const)('gates %s verification to inconclusive', (state) => {
     const verification: StepVerification = { verificationId: 'verification-001', expectation: '报告已生成', observed: '暂未出现', status: 'not_confirmed', evidenceRefs: ['after.png'], confidence: 0.9 };
     const taskState = { ...observe(), state };
-    expect(gateVerificationByTaskState(verification, taskState)).toMatchObject({ status: 'inconclusive', observed: expect.stringContaining('当前证据不足以判定成功或失败') });
+    expect(gateVerificationByTaskState(verification, taskState)).toMatchObject({ status: 'inconclusive', observed: expect.stringContaining('当前证据不足以判定成功或失败'), evidenceRefs: expect.arrayContaining(['before.png', 'after.png']) });
   });
 });
