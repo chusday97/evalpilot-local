@@ -33,7 +33,7 @@ async function saveObservation(probeId: string, requestedRoute: string) {
   process.stdout.write(`\n[${probeId}] requested=${requestedRoute} actual=${observation.pageUrl}\n`);
   process.stdout.write(`purpose: ${observation.pagePurpose}\n`);
   process.stdout.write(`fields: ${observation.formFields.map((field) => `${field.elementId}:${field.label}:${field.inputType}:required=${field.required}`).join(' | ') || 'none'}\n`);
-  process.stdout.write(`actions: ${observation.interactableElements.slice(0, 80).map((element) => `${element.elementId}:${element.label}`).join(' | ') || 'none'}\n`);
+  process.stdout.write(`actions: ${observation.interactableElements.slice(0, 100).map((element) => `${element.elementId}:${element.label}`).join(' | ') || 'none'}\n`);
 }
 
 async function navigateAndCapture(probeId: string, route: string, settleMs = 1_200) {
@@ -54,19 +54,31 @@ try {
   }
   await saveObservation('02-create-after-onboarding', '/welcome -> 建立第一个鱼缸');
 
-  // Capture the real settings surface needed to turn the empty draft into a usable tank.
   const settingsEntry = page.getByRole('button', { name: /建立或完善鱼缸|打开设置/ }).first();
   await settingsEntry.waitFor({ state: 'visible' });
   await settingsEntry.click();
   await page.waitForTimeout(900);
   await saveObservation('03-tank-settings-open', '/aquarium -> 建立或完善鱼缸');
 
-  // Navigation resets the settings modal while preserving the aquarium created in the same browser context.
-  await navigateAndCapture('04-record-existing-route', '/aquarium?action=record-existing', 1_200);
-  await navigateAndCapture('05-daily-check-route', '/aquarium?action=daily-check', 1_200);
+  // Probe-only direct filling is intentionally product-specific. It exposes whether the generic Observer
+  // gives enough labels to a normal Agent; it is not used by the acceptance runner as a selector shortcut.
+  const sizeInputs = page.locator('input[type="number"]');
+  if (await sizeInputs.count() >= 3) {
+    await sizeInputs.nth(0).fill('60');
+    await sizeInputs.nth(1).fill('30');
+    await sizeInputs.nth(2).fill('30');
+  }
+  const parameterPanel = page.getByRole('button', { name: /参数.*水体未记录|水体未记录.*目标温度未记录/ }).first();
+  await parameterPanel.waitFor({ state: 'visible' });
+  await parameterPanel.click();
+  await page.waitForTimeout(600);
+  await saveObservation('04-water-parameters-open', '/aquarium -> settings -> parameters');
+
+  await navigateAndCapture('05-record-existing-route', '/aquarium?action=record-existing', 1_200);
+  await navigateAndCapture('06-daily-check-route', '/aquarium?action=daily-check', 1_200);
 
   await writeFile(resolve(outputDir, 'aquaguide-probe.json'), JSON.stringify({
-    schemaVersion: 3,
+    schemaVersion: 4,
     targetUrl,
     generatedAt: new Date().toISOString(),
     snapshots,
