@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import type { EvaluationNextAction } from '../../types.js';
 import { apiRequest } from './api.js';
 import { IssueDetail } from './IssueDetail.js';
+import { presentNextAction } from './next-action-presenter.js';
 
 type Json = Record<string, any>;
 type Navigate = (target: string) => void;
@@ -30,6 +32,26 @@ function AutoAdvance({ title, detail, continueLabel, onContinue, onStay }: { tit
 }
 function formatDuration(value: number | null): string { if (!value) return '—'; const seconds = Math.round(value / 1000); return `${Math.floor(seconds / 60)}分${seconds % 60}秒`; }
 function query(name: string): string { return new URLSearchParams(window.location.search).get(name) ?? ''; }
+function NextActionPanel({ action, go }: { action: EvaluationNextAction | null | undefined; go: Navigate }) {
+  if (!action) return null;
+  const presented = presentNextAction(action);
+  return <section id="evaluation-next-action" className="recommendation-card next-action-panel" aria-live="polite">
+    <div>
+      <span className="eyebrow">{presented.eyebrow}</span>
+      <h2>{presented.now}</h2>
+      <div className="recommendation-facts">
+        <span><b>发生了什么</b>{presented.whatHappened}</span>
+        <span><b>为什么</b>{presented.why}</span>
+        <span><b>现在做什么</b>{presented.now}</span>
+        {presented.doNot && <span><b>现在不要做</b>{presented.doNot}</span>}
+      </div>
+    </div>
+    <div className="card-actions">
+      {action.primaryCta && <Button onClick={() => go(action.primaryCta!.route)}>{action.primaryCta.label}</Button>}
+      {(action.secondaryCtas ?? []).slice(0, 1).map((cta) => <Button tone="secondary" key={`${cta.route}-${cta.label}`} onClick={() => go(cta.route)}>{cta.label}</Button>)}
+    </div>
+  </section>;
+}
 function CoveragePanel({ coverage }: { coverage: Json | null | undefined }) {
   if (!coverage) return <section className="coverage-panel legacy"><div><span className="eyebrow">功能覆盖证据</span><h2>这是一条旧记录，无法证明具体测过哪些功能</h2><p>旧版只保存了名称，没有逐功能运行证据，因此不会据此显示“可以继续”。</p></div></section>;
   const items = [
@@ -43,7 +65,7 @@ function CoveragePanel({ coverage }: { coverage: Json | null | undefined }) {
   return <section className={`coverage-panel ${coverage.complete && coverage.failedCount === 0 && coverage.blockedCount === 0 ? 'complete' : 'incomplete'}`}>
     <div className="coverage-heading"><div><span className="eyebrow">功能覆盖证据</span><h2>实际运行 {coverage.executedCount} / {coverage.plannedCount} 个计划功能</h2><p>“发现”不等于“测过”；只有进入真实运行并完成用户任务，才会计入通过。</p></div><Badge tone={coverage.notRunCount > 0 ? 'warning' : 'success'}>{coverage.notRunCount > 0 ? `${coverage.notRunCount} 个未运行` : '计划已跑完'}</Badge></div>
     <div className="coverage-matrix">{items.map(([label, value, detail]) => <article key={String(label)}><span>{String(label)}</span><strong>{String(value)}</strong><small>{String(detail)}</small></article>)}</div>
-    {(coverage.notRunCount > 0 || coverage.failedCount > 0 || coverage.blockedCount > 0) && <p className="coverage-warning">还有未运行、失败或阻塞的功能，本次不能给出整体通过结论。</p>}
+    {(coverage.notRunCount > 0 || coverage.failedCount > 0 || coverage.blockedCount > 0) && <p className="coverage-warning">本轮仍有未运行、失败或阻塞的功能，因此整体结论尚未形成。请先处理上方“下一步”指出的第一个阻塞原因。</p>}
   </section>;
 }
 
@@ -100,12 +122,11 @@ function Confirm({ title, children, busy, onClose, onConfirm, confirmLabel }: { 
 export function GuidedIssuesPage({ active, go }: { active: Json | null; go: Navigate }) {
   const initialEvaluation = query('evaluationId'); const initialIssue = query('issueId'); const [evaluationId, setEvaluationId] = useState(initialEvaluation); const [feature, setFeature] = useState('all'); const [depth, setDepth] = useState('all'); const [result, setResult] = useState('all');
   const records = useApi<Json[]>(active ? `/evaluation-records?projectId=${encodeURIComponent(active.projectId)}` : null); const effectiveId = records.data?.some((item) => item.evaluationId === evaluationId) ? evaluationId : records.data?.[0]?.evaluationId ?? '';
-  const issues = useApi<Json[]>(active ? `/issues?projectId=${encodeURIComponent(active.projectId)}${effectiveId ? `&evaluationId=${encodeURIComponent(effectiveId)}` : ''}` : null); const report = useApi<Json>(active && effectiveId ? `/reports/latest?projectId=${encodeURIComponent(active.projectId)}&evaluationId=${encodeURIComponent(effectiveId)}` : null);
-  const [detail, setDetail] = useState<Json | null>(null); const [dismiss, setDismiss] = useState<Json | null>(null); const [fix, setFix] = useState<Json | null>(null); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null);
+  const issues = useApi<Json[]>(active ? `/issues?projectId=${encodeURIComponent(active.projectId)}${effectiveId ? `&evaluationId=${encodeURIComponent(effectiveId)}` : ''}` : null); const report = useApi<Json>(active && effectiveId ? `/reports/latest?projectId=${encodeURIComponent(active.projectId)}&evaluationId=${encodeURIComponent(effectiveId)}` : null); const nextAction = useApi<EvaluationNextAction>(active && effectiveId ? `/evaluations/${encodeURIComponent(effectiveId)}/next-action?projectId=${encodeURIComponent(active.projectId)}` : null);
+  const [detail, setDetail] = useState<Json | null>(null); const [dismiss, setDismiss] = useState<Json | null>(null); const [busy, setBusy] = useState(false); const [error, setError] = useState<string | null>(null); const [message, setMessage] = useState<string | null>(null);
   useEffect(() => { if (records.data?.length && !records.data.some((item) => item.evaluationId === evaluationId)) setEvaluationId(records.data[0].evaluationId); }, [records.data, evaluationId]);
   useEffect(() => { if (initialIssue && issues.data?.length) { const selected = issues.data.find((item) => item.issueId === initialIssue); if (selected) setDetail(selected); } }, [initialIssue, issues.data]);
   async function dismissIssue() { if (!dismiss) return; setBusy(true); setError(null); try { await apiRequest(`/issues/${dismiss.issueId}/dismiss`, { method: 'POST', body: JSON.stringify({ confirmed: true }) }); setDismiss(null); issues.reload(); setMessage('已标记为暂不处理，历史证据仍会保留。'); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } finally { setBusy(false); } }
-  async function createFix() { if (!fix || !active || !effectiveId) return; setBusy(true); setError(null); try { const task = await apiRequest<Json>('/fix-tasks', { method: 'POST', body: JSON.stringify({ projectId: active.projectId, evaluationId: effectiveId, issueId: fix.issueId, confirmed: true }) }); setFix(null); go(`/fixes?fixTaskId=${encodeURIComponent(task.fixTaskId)}#fix-handoff`); } catch (cause) { setError(cause instanceof Error ? cause.message : String(cause)); } finally { setBusy(false); } }
   if (!active) return <><PageHeader step="03 / 问题" title="先连接一个项目" intro="连接后才能查看评测问题。"/><Empty title="没有当前项目" detail="返回项目页选择项目。" action={<Button onClick={() => go('/projects')}>去连接项目</Button>}/></>;
   if (records.loading || issues.loading) return <Skeleton rows={6}/>; if (records.error || issues.error) return <ErrorPanel message={records.error ?? issues.error ?? '问题读取失败'} retry={() => { records.reload(); issues.reload(); }}/>;
   const selectedRecord = records.data?.find((item) => item.evaluationId === effectiveId); const visible = (issues.data ?? []).filter((item) => !item.dismissed); const worst = [...visible].sort((a, b) => Number(a.severity.slice(1)) - Number(b.severity.slice(1)))[0]; const completed = selectedRecord?.verdict === 'can_continue'; const needsAttention = selectedRecord?.verdict === 'needs_attention'; const features = [...new Set((records.data ?? []).flatMap((item) => item.capabilityNames ?? []))]; const filtered = (records.data ?? []).filter((item) => (feature === 'all' || item.capabilityNames?.includes(feature)) && (depth === 'all' || item.depth === depth) && (result === 'all' || item.verdict === result));
@@ -141,20 +162,20 @@ export function GuidedIssuesPage({ active, go }: { active: Json | null; go: Navi
         </button>
       </article>)}</div>
     </section>
+    {nextAction.loading ? <Skeleton rows={2}/> : nextAction.error ? <section className="state-card"><span className="state-icon">!</span><div><h2>下一步暂时没有读取成功</h2><p>{nextAction.error}</p><Button tone="secondary" onClick={nextAction.reload}>重新读取下一步</Button></div></section> : <NextActionPanel action={nextAction.data} go={go}/>} 
     <CoveragePanel coverage={selectedRecord?.coverage}/>
     <section id="evaluation-summary" className="report-hero">
       <div>
         <span className="eyebrow">本次结论</span>
         <h2>{completed ? '计划功能均已运行并形成闭环' : needsAttention ? '存在明确问题或功能尚未测完' : '现有证据还不能得出整体结论'}</h2>
-        <p>{worst ? `最需要先处理：${issueLabels[worst.type] ?? worst.type}` : completed ? '本轮没有发现严重问题，计划功能均有真实运行证据。' : '没有严重问题不等于已经测完，请先补齐功能级运行证据。'}</p>
+        <p>{worst ? `最需要先处理：${issueLabels[worst.type] ?? worst.type}` : completed ? '本轮没有发现严重问题，计划功能均有真实运行证据。' : '没有严重问题不等于已经测完；具体阻塞原因和下一步以上方决策卡为准。'}</p>
         {(selectedRecord?.notApplicableCount ?? 0) > 0 && <p>{selectedRecord?.notApplicableCount} 项检查因项目没有对应能力而跳过，不计为失败。</p>}
       </div>
       <div className={`signal ${completed ? 'good' : 'warn'}`}>{completed ? '可以继续' : needsAttention ? '需要处理' : '证据不足'}</div>
     </section>
-    {!visible.length ? <Empty title="当前没有待处理问题" detail="可以补测未运行功能；没有问题不代表所有页面或真实用户满意度已经被证明。" action={<Button onClick={() => go('/evaluate#recommended-evaluation')}>继续评测功能</Button>}/> : <section className="issue-board">{visible.map((issue) => <article className="issue-card" key={issue.issueId}><div className="card-heading"><Badge tone={issue.severity === 'P0' || issue.severity === 'P1' ? 'danger' : 'warning'}>{issue.severity === 'P0' || issue.severity === 'P1' ? '严重问题' : '一般问题'}</Badge><Badge>{issue.confidence === 'high' ? '证据充分' : issue.confidence === 'medium' ? '部分证据' : '需要人工确认'}</Badge></div><h2>{issueLabels[issue.type] ?? issue.type}</h2><p><b>发生了什么：</b>{issue.failureOrAbandonmentPoint ?? issue.actualPath?.at(-1) ?? '用户没有完成目标'}</p><p><b>发生位置：</b>{issue.location?.page ?? '旧记录未定位到具体页面'} · {issue.location?.target ?? issue.location?.stepLabel ?? '尚未定位到具体控件'}</p><p><b>建议改法：</b>{issue.resolutionSteps?.[0] ?? issue.recommendation}</p><div className="card-actions"><Button onClick={() => setDetail(issue)}>查看分步证据和解决方法</Button><Button tone="secondary" onClick={() => setDismiss(issue)}>暂不处理</Button><Button tone="secondary" onClick={() => setFix(issue)}>生成 Codex 修复任务</Button></div></article>)}</section>}
-    {detail && <IssueDetail issue={detail} onClose={() => setDetail(null)} onDismiss={() => { setDismiss(detail); setDetail(null); }} onFix={() => { setFix(detail); setDetail(null); }}/>}
+    {!visible.length ? <Empty title="当前没有已确认的产品问题" detail="没有问题不等于整体通过；如果还有前置条件、评测器失败或未运行任务，请按上方唯一下一步处理。"/> : <section className="issue-board">{visible.map((issue) => <article className="issue-card" key={issue.issueId}><div className="card-heading"><Badge tone={issue.severity === 'P0' || issue.severity === 'P1' ? 'danger' : 'warning'}>{issue.severity === 'P0' || issue.severity === 'P1' ? '严重问题' : '一般问题'}</Badge><Badge>{issue.confidence === 'high' ? '证据充分' : issue.confidence === 'medium' ? '部分证据' : '需要人工确认'}</Badge></div><h2>{issueLabels[issue.type] ?? issue.type}</h2><p><b>发生了什么：</b>{issue.failureOrAbandonmentPoint ?? issue.actualPath?.at(-1) ?? '用户没有完成目标'}</p><p><b>发生位置：</b>{issue.location?.page ?? '旧记录未定位到具体页面'} · {issue.location?.target ?? issue.location?.stepLabel ?? '尚未定位到具体控件'}</p><p><b>建议改法：</b>{issue.resolutionSteps?.[0] ?? issue.recommendation}</p><div className="card-actions"><Button onClick={() => setDetail(issue)}>查看分步证据和解决方法</Button><Button tone="secondary" onClick={() => setDismiss(issue)}>暂不处理</Button></div></article>)}</section>}
+    {detail && <IssueDetail issue={detail} onClose={() => setDetail(null)} onDismiss={() => { setDismiss(detail); setDetail(null); }}/>} 
     {dismiss && <Confirm title="暂不处理这个问题？" busy={busy} onClose={() => setDismiss(null)} onConfirm={dismissIssue} confirmLabel="确认暂不处理"><p>问题会从待办列表隐藏，但证据和历史记录仍会保留。</p></Confirm>}
-    {fix && <Confirm title="生成 Codex 修复任务？" busy={busy} onClose={() => setFix(null)} onConfirm={createFix} confirmLabel="确认生成任务"><p><b>{issueLabels[fix.type] ?? fix.type}</b></p><p>{fix.resolutionSteps?.[0] ?? fix.recommendation}</p><p>EvalPilot 只会生成包含问题位置、证据和验收标准的 <span className="mono">task.md</span> 与 <span className="mono">task.json</span>，当前不会自动修改你的代码。</p></Confirm>}
     <Toast message={message}/>
   </>;
 }

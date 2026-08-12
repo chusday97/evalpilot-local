@@ -128,17 +128,10 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.getByRole('button', { name: '查看分步证据和解决方法' }).click();
     expect(await page.getByText('问题发生在这里').isVisible()).toBe(true);
     expect(await page.getByText('尚未定位到具体代码文件').isVisible()).toBe(true);
+    expect(await page.getByText(/这里的建议本身不是修复授权/).isVisible()).toBe(true);
+    expect(await page.getByRole('button', { name: '生成 Codex 修复任务' }).count()).toBe(0);
     await page.getByRole('button', { name: '返回问题列表' }).last().click();
-    await page.getByRole('button', { name: '生成 Codex 修复任务' }).first().click();
-    expect(await page.getByRole('dialog', { name: '生成 Codex 修复任务？' }).isVisible()).toBe(true);
-    expect(await page.getByText(/当前不会自动修改你的代码/).isVisible()).toBe(true);
-    await page.getByRole('button', { name: '确认生成任务' }).click();
-    await page.waitForTimeout(1_000);
-    if (!/\/fixes\?fixTaskId=.+#fix-handoff$/.test(page.url())) throw new Error((await page.locator('body').innerText()).slice(0, 2_000));
-    expect(await page.getByRole('heading', { name: '修复任务已准备好' }).isVisible()).toBe(true);
-    for (const step of ['在 Codex 中打开当前项目', '使用生成的修复任务', '让 Codex 修改并运行测试', '完成后返回 EvalPilot', '点击“复测修复结果”']) expect(await page.getByText(step, { exact: true }).isVisible()).toBe(true);
-    expect(await page.getByRole('button', { name: '让 Codex 直接修复' }).count()).toBe(0);
-    const handoffUrl = page.url();
+    expect(await page.getByRole('button', { name: '生成 Codex 修复任务' }).count()).toBe(0);
     await page.goto(`${baseUrl}/eval-set`, { waitUntil: 'networkidle' });
     await page.getByRole('heading', { name: '评测集 v2', exact: true }).first().waitFor({ state: 'visible' });
     for (const [label, heading] of [['运行', '已确认 1 个产品问题，需要处理后复测。'], ['发现', '问题发现'], ['回归', '回归与评测集演进']] as const) {
@@ -193,7 +186,7 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${baseUrl}/home`, { waitUntil: 'networkidle' });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    for (const path of ['/evaluate', '/eval-set', '/runs?evaluationId=evaluation-adaptive-result', '/findings', '/regression', new URL(handoffUrl).pathname + new URL(handoffUrl).search + new URL(handoffUrl).hash]) {
+    for (const path of ['/evaluate', '/eval-set', '/runs?evaluationId=evaluation-adaptive-result', '/findings', '/regression', '/fixes']) {
       await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
       expect(await page.evaluate(() => ({ root: document.documentElement.scrollWidth, viewport: window.innerWidth, buttons: [...document.querySelectorAll('main button')].filter((button) => { const rect = button.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && (rect.right > window.innerWidth + 1 || rect.left < -1); }).length }))).toEqual({ root: 390, viewport: 390, buttons: 0 });
     }

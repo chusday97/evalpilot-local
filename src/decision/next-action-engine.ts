@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { EvaluationNextAction } from '../../types.js';
 import { badcasePath, loadBadcase } from '../badcase/badcase-store.js';
@@ -10,10 +11,11 @@ import { EvalPilotError } from '../utils/errors.js';
 import { pathExists } from '../utils/file-system.js';
 import { readSchemaJson } from '../utils/schema-file.js';
 import { evaluationNextActionSchema } from './schemas.js';
-import type { EvaluationDecisionInput } from './types.js';
+import type { EvaluationDecisionInput, EvaluationPrerequisiteBlocker, EvaluationPrerequisiteType } from './types.js';
 
 const unique = (values: string[]): string[] => [...new Set(values)];
 const detailRoute = (path: string, key: string, id: string): string => `${path}?${key}=${encodeURIComponent(id)}`;
+const prerequisiteOrder: EvaluationPrerequisiteType[] = ['needs_human_input', 'unsupported', 'needs_auth', 'needs_setup', 'needs_test_data'];
 
 function action(value: EvaluationNextAction): EvaluationNextAction {
   return evaluationNextActionSchema.parse({
@@ -45,6 +47,57 @@ function confirmedLineage(input: EvaluationDecisionInput): {
     (item.sourceType === 'confirmed_finding' && item.findingId !== null && findingIds.has(item.findingId))
     || (item.sourceType === 'badcase' && item.badcaseId !== null && badcaseIds.has(item.badcaseId)));
   return { findings, badcases, fixTasks };
+}
+
+function prerequisiteNextAction(input: EvaluationDecisionInput): EvaluationNextAction | null {
+  const blockers = input.prerequisiteBlockers ?? [];
+  if (!blockers.length) return null;
+  const ordered = [...blockers].sort((a, b) => prerequisiteOrder.indexOf(a.type) - prerequisiteOrder.indexOf(b.type));
+  const first = ordered[0]!;
+  const sameType = ordered.filter((item) => item.type === first.type);
+  const caseIds = unique(sameType.map((item) => item.caseId));
+  const caseRoute = detailRoute('/eval-set', 'caseId', caseIds[0]!);
+  const count = caseIds.length;
+  const suffix = `当前没有足够证据认定这些任务是产品 Bug，因此不要生成代码修复任务。`;
+
+  if (first.type === 'needs_human_input') {
+    return action({
+      type: 'provide_human_input', title: '先补充真实业务判断',
+      explanation: `${count} 个评测任务在运行前被人工业务条件阻塞。${first.summary} 补充真实期望后再评测；${suffix}`,
+      targetCaseIds: caseIds, targetFindingIds: [], targetBadcaseIds: [],
+      primaryCta: { label: '查看待确认条件', route: caseRoute }, secondaryCtas: [],
+    });
+  }
+  if (first.type === 'unsupported') {
+    return action({
+      type: 'provide_human_input', title: '先修正不可执行的评测任务',
+      explanation: `${count} 个评测任务缺少可安全执行的入口或引用了已经失效的 Product Task。先修正评测定义，再重新运行；${suffix}`,
+      targetCaseIds: caseIds, targetFindingIds: [], targetBadcaseIds: [],
+      primaryCta: { label: '查看受阻案例', route: caseRoute }, secondaryCtas: [],
+    });
+  }
+  if (first.type === 'needs_auth') {
+    return action({
+      type: 'provide_human_input', title: '先准备测试登录态',
+      explanation: `${count} 个评测任务需要登录态，但本轮没有可安全复用的本地 Auth Fixture。请在本机准备只包含目标域的 Playwright storageState，并通过 EVALPILOT_AUTH_STATE 指向该文件，然后重新评测；密码、Cookie 和 Token 不会发送给模型。${suffix}`,
+      targetCaseIds: caseIds, targetFindingIds: [], targetBadcaseIds: [],
+      primaryCta: { label: '查看需要登录态的案例', route: caseRoute }, secondaryCtas: [],
+    });
+  }
+  if (first.type === 'needs_setup') {
+    return action({
+      type: 'provide_human_input', title: '先补齐可验证的前置状态',
+      explanation: `${count} 个评测任务依赖已有对象或历史状态，但 EvalPilot 还不能安全证明或自动建立该状态。先把前置 Journey、成功信号或测试状态定义清楚，再重新评测；${suffix}`,
+      targetCaseIds: caseIds, targetFindingIds: [], targetBadcaseIds: [],
+      primaryCta: { label: '查看缺少前置状态的案例', route: caseRoute }, secondaryCtas: [],
+    });
+  }
+  return action({
+    type: 'provide_human_input', title: '先准备兼容的安全测试数据',
+    explanation: `${count} 个评测任务需要测试文件或测试数据，但当前无法安全生成与页面要求兼容的 Fixture。先确认输入格式或提供可安全合成的数据约束，再重新评测；EvalPilot 不会读取模型指定的任意本地文件路径。${suffix}`,
+    targetCaseIds: caseIds, targetFindingIds: [], targetBadcaseIds: [],
+    primaryCta: { label: '查看需要测试数据的案例', route: caseRoute }, secondaryCtas: [],
+  });
 }
 
 /** Returns exactly one report-level recommendation using the precedence defined in CONTRACT.md. */
@@ -109,6 +162,9 @@ export function decideEvaluationNextAction(input: EvaluationDecisionInput): Eval
     });
   }
 
+  const prerequisite = prerequisiteNextAction(input);
+  if (prerequisite) return prerequisite;
+
   const humanInputCases = input.selectedCases.filter((evalCase) => evalCase.needsHumanReview && (!input.results.some((result) => result.caseId === evalCase.caseId) || input.results.some((result) => result.caseId === evalCase.caseId && result.verdict === 'inconclusive')));
   if (humanInputCases.length) {
     return action({
@@ -153,6 +209,33 @@ export function decideEvaluationNextAction(input: EvaluationDecisionInput): Eval
   });
 }
 
+function prerequisiteBlockersFromPreflight(raw: unknown): EvaluationPrerequisiteBlocker[] {
+  if (!raw || typeof raw !== 'object') return [];
+  const plans = (raw as { prerequisitePlans?: unknown }).prerequisitePlans;
+  if (!Array.isArray(plans)) return [];
+  const allowed = new Set<EvaluationPrerequisiteType>(prerequisiteOrder);
+  const blockers: EvaluationPrerequisiteBlocker[] = [];
+  for (const planValue of plans) {
+    if (!planValue || typeof planValue !== 'object') continue;
+    const plan = planValue as { caseId?: unknown; status?: unknown; reasons?: unknown; unresolvedBlockers?: unknown };
+    if (plan.status !== 'blocked' || typeof plan.caseId !== 'string' || !Array.isArray(plan.unresolvedBlockers)) continue;
+    const reasons = Array.isArray(plan.reasons) ? plan.reasons.filter((item): item is string => typeof item === 'string') : [];
+    for (const blockerValue of plan.unresolvedBlockers) {
+      if (!blockerValue || typeof blockerValue !== 'object') continue;
+      const blocker = blockerValue as { type?: unknown; summary?: unknown; sourceValue?: unknown };
+      if (typeof blocker.type !== 'string' || !allowed.has(blocker.type as EvaluationPrerequisiteType)) continue;
+      blockers.push({
+        caseId: plan.caseId,
+        type: blocker.type as EvaluationPrerequisiteType,
+        summary: typeof blocker.summary === 'string' ? blocker.summary : '该案例缺少可安全执行的前置条件。',
+        sourceValue: typeof blocker.sourceValue === 'string' ? blocker.sourceValue : '',
+        reasons,
+      });
+    }
+  }
+  return blockers;
+}
+
 export async function nextActionForEvaluation(cwd: string, evaluationId: string, projectId: string): Promise<EvaluationNextAction> {
   // Keep dashboard and fix services out of the pure decision module's initialization graph.
   const [{ listEvaluations }, { listFixTasks }] = await Promise.all([
@@ -181,5 +264,11 @@ export async function nextActionForEvaluation(cwd: string, evaluationId: string,
   const badcases = [];
   for (const badcaseId of session.badcaseIds) if (await pathExists(badcasePath(config.outputDir, badcaseId))) badcases.push(await loadBadcase(config.outputDir, badcaseId));
   const fixTasks = (await listFixTasks(cwd, projectId)).filter((item) => item.evaluationId === evaluationId || (item.findingId !== null && session.findingIds.includes(item.findingId)) || (item.badcaseId !== null && session.badcaseIds.includes(item.badcaseId)));
-  return decideEvaluationNextAction({ evaluationId, evaluationStatus: session.status, selectedCases, results, findings, badcases, fixTasks, evidencePackets });
+  const preflightPath = resolve(config.outputDir, 'evaluations', evaluationId, 'scenario-preflight.json');
+  let prerequisiteBlockers: EvaluationPrerequisiteBlocker[] = [];
+  if (await pathExists(preflightPath)) {
+    try { prerequisiteBlockers = prerequisiteBlockersFromPreflight(JSON.parse(await readFile(preflightPath, 'utf8'))); }
+    catch { prerequisiteBlockers = []; }
+  }
+  return decideEvaluationNextAction({ evaluationId, evaluationStatus: session.status, selectedCases, results, findings, badcases, fixTasks, evidencePackets, prerequisiteBlockers });
 }
