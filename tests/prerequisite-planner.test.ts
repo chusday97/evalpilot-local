@@ -90,7 +90,7 @@ describe('Prerequisite Planner', () => {
     expect(plan.unresolvedBlockers.some((blocker) => blocker.type === 'needs_setup')).toBe(true);
   });
 
-  it('never hides a human prerequisite behind otherwise resolvable automation', async () => {
+  it('short-circuits before reading fixtures when a human prerequisite is present', async () => {
     const targetUrl = 'http://127.0.0.1:41043/';
     const auth = await authState(targetUrl);
     const productModel = model();
@@ -99,8 +99,11 @@ describe('Prerequisite Planner', () => {
     const plan = await planScenarioPrerequisites({ scenario, evalCase: caseValue, productModel, targetUrl, projectRoot: auth.projectRoot, authStorageStatePath: auth.path, generatedAt: now });
 
     expect(plan.status).toBe('blocked');
-    expect(plan.authFixture).not.toBeNull();
-    expect(plan.fileFixturePlan).not.toBeNull();
+    expect(plan.authFixture).toBeNull();
+    expect(plan.setupPlan).toBeNull();
+    expect(plan.fileFixturePlan).toBeNull();
+    expect(plan.executionOrder).toEqual(['target']);
+    expect(plan.reasons).toContain('Scenario 包含需要人工确认或当前不支持的前置条件，Planner 在读取任何本地 Fixture 前停止。');
     expect(plan.unresolvedBlockers.some((blocker) => blocker.type === 'needs_human_input')).toBe(true);
   });
 });
