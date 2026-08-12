@@ -33,7 +33,7 @@ async function saveObservation(probeId: string, requestedRoute: string) {
   process.stdout.write(`\n[${probeId}] requested=${requestedRoute} actual=${observation.pageUrl}\n`);
   process.stdout.write(`purpose: ${observation.pagePurpose}\n`);
   process.stdout.write(`fields: ${observation.formFields.map((field) => `${field.elementId}:${field.label}:${field.inputType}:required=${field.required}`).join(' | ') || 'none'}\n`);
-  process.stdout.write(`actions: ${observation.interactableElements.slice(0, 100).map((element) => `${element.elementId}:${element.label}`).join(' | ') || 'none'}\n`);
+  process.stdout.write(`actions: ${observation.interactableElements.slice(0, 120).map((element) => `${element.elementId}:${element.label}`).join(' | ') || 'none'}\n`);
 }
 
 async function navigateAndCapture(probeId: string, route: string, settleMs = 1_200) {
@@ -60,25 +60,52 @@ try {
   await page.waitForTimeout(900);
   await saveObservation('03-tank-settings-open', '/aquarium -> 建立或完善鱼缸');
 
-  // Probe-only direct filling is intentionally product-specific. It exposes whether the generic Observer
-  // gives enough labels to a normal Agent; it is not used by the acceptance runner as a selector shortcut.
+  // Probe-only product-specific manipulation: it proves AquaGuide itself can complete the contract.
+  // The real acceptance runner must still act through EvalPilot's Observer/Actor/ActionExecutor path.
   const sizeInputs = page.locator('input[type="number"]');
-  if (await sizeInputs.count() >= 3) {
-    await sizeInputs.nth(0).fill('60');
-    await sizeInputs.nth(1).fill('30');
-    await sizeInputs.nth(2).fill('30');
-  }
+  if (await sizeInputs.count() < 3) throw new Error('AquaGuide settings did not expose three dimension inputs.');
+  await sizeInputs.nth(0).fill('60');
+  await sizeInputs.nth(1).fill('30');
+  await sizeInputs.nth(2).fill('30');
+
   const parameterPanel = page.getByRole('button', { name: /参数.*水体未记录|水体未记录.*目标温度未记录/ }).first();
   await parameterPanel.waitFor({ state: 'visible' });
   await parameterPanel.click();
   await page.waitForTimeout(600);
   await saveObservation('04-water-parameters-open', '/aquarium -> settings -> parameters');
 
-  await navigateAndCapture('05-record-existing-route', '/aquarium?action=record-existing', 1_200);
-  await navigateAndCapture('06-daily-check-route', '/aquarium?action=daily-check', 1_200);
+  await page.getByRole('button', { name: /淡水.*常见观赏鱼/ }).first().click();
+  await page.getByRole('button', { name: '保存设置', exact: true }).click();
+  await page.waitForTimeout(1_000);
+  await saveObservation('05-usable-tank-saved', 'save 60x30x30 freshwater settings');
+
+  await page.goto(new URL('/aquarium?action=record-existing', targetUrl).toString(), { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(900);
+  await saveObservation('06-record-existing-route', '/aquarium?action=record-existing');
+  const fishSearch = page.getByPlaceholder(/搜索鱼、虾、螺等/).first();
+  await fishSearch.fill('咖啡鼠');
+  await page.waitForTimeout(250);
+  await page.getByRole('button', { name: /咖啡鼠/ }).first().click();
+  const confirmAdd = page.getByRole('button', { name: /确认添加/ }).first();
+  await confirmAdd.waitFor({ state: 'visible' });
+  await confirmAdd.click();
+  await page.waitForTimeout(1_000);
+  await saveObservation('07-record-existing-confirmed', 'record 咖啡鼠');
+
+  await page.goto(new URL('/aquarium?action=daily-check', targetUrl).toString(), { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(900);
+  await saveObservation('08-daily-check-ready', '/aquarium?action=daily-check after livestock');
+  for (const label of ['经常浮头', '清澈', '没有泡沫或油膜', '没有异味', '正常游动和进食', '没有特别操作']) {
+    await page.getByRole('button', { name: label, exact: true }).click();
+  }
+  const generate = page.getByRole('button', { name: /生成检查结果/ }).first();
+  await generate.waitFor({ state: 'visible' });
+  await generate.click();
+  await page.waitForTimeout(1_500);
+  await saveObservation('09-daily-check-high-risk-result', 'frequent surface breathing daily check');
 
   await writeFile(resolve(outputDir, 'aquaguide-probe.json'), JSON.stringify({
-    schemaVersion: 4,
+    schemaVersion: 5,
     targetUrl,
     generatedAt: new Date().toISOString(),
     snapshots,
