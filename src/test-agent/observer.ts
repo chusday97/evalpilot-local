@@ -41,6 +41,9 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
       const input = node as HTMLInputElement;
       const select = node as HTMLSelectElement;
       const labels = 'labels' in input && input.labels ? Array.from(input.labels).map((item) => item.textContent?.trim() ?? '').filter(Boolean) : [];
+      const options = element.tagName === 'SELECT'
+        ? [...new Set(Array.from(select.options).flatMap((option) => [option.value.trim(), option.text.trim()]).filter(Boolean))]
+        : [];
       return {
         tagName: element.tagName.toLowerCase(),
         role: element.getAttribute('role'),
@@ -52,7 +55,7 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
         inputType: input.type || element.tagName.toLowerCase(),
         required: 'required' in input ? Boolean(input.required) : false,
         currentValuePresent: 'value' in input ? String(input.value ?? '').length > 0 : false,
-        options: element.tagName === 'SELECT' ? Array.from(select.options).map((option) => option.value || option.text).filter(Boolean) : [],
+        options,
       };
     }));
 
