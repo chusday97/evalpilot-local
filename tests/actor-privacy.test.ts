@@ -3,15 +3,52 @@ import type { EvalCase, PageObservation } from '../types.js';
 import { MockAiProvider } from '../src/ai/mock-provider.js';
 import { chooseAgentAction } from '../src/test-agent/actor.js';
 
-const evalCase = {
+const now = '2026-08-12T07:00:00.000Z';
+
+const evalCase: EvalCase = {
   caseId: 'case-privacy',
-  persona: { personaId: 'persona-test', name: '测试用户', behaviorPolicy: [] },
+  projectId: 'project-privacy',
+  setType: 'baseline',
+  status: 'stable',
+  origin: { type: 'human', note: 'Actor privacy fixture' },
+  capabilityId: 'cap-privacy',
+  taskId: 'task-privacy',
+  title: '验证远程 Actor 截图隐私',
+  hypothesis: '关闭截图授权时 Actor 仍可仅基于 DOM 文本决策',
+  persona: { personaId: 'persona-test', name: '测试用户', behaviorPolicy: ['只执行安全操作'] },
   goal: '完成安全任务',
   knownInformation: {},
-  oracle: { expectedOutcome: ['完成'], mustObserve: ['完成'], mustNotObserve: [], inconclusiveWhen: [] },
-} as EvalCase;
+  preconditions: ['页面已打开'],
+  oracle: {
+    expectedOutcome: ['完成'],
+    mustObserve: ['完成'],
+    mustNotObserve: [],
+    businessRules: [],
+    semanticRubric: ['用户可完成安全任务'],
+    deterministicAssertions: [],
+    inconclusiveWhen: ['证据不足'],
+  },
+  coverageDimensions: [{ dimension: 'capability', value: 'cap-privacy' }],
+  riskLevel: 'P1',
+  generationReason: '隐私契约回归',
+  version: 1,
+  stats: {
+    passCount: 0,
+    failCount: 0,
+    inconclusiveCount: 0,
+    latestResult: null,
+    latestRunId: null,
+    uniqueCoverageContribution: 1,
+    lastExecutedAt: null,
+  },
+  regressionMetadata: null,
+  retirementReason: null,
+  needsHumanReview: false,
+  createdAt: now,
+  updatedAt: now,
+};
 
-const observation = {
+const observation: PageObservation = {
   observationId: 'observation-1',
   pageUrl: 'http://127.0.0.1:3000/',
   pagePurpose: '测试页',
@@ -22,7 +59,7 @@ const observation = {
   formFields: [],
   evidenceRefs: ['local-before.png'],
   confidence: 1,
-} as PageObservation;
+};
 
 const progress = {
   currentFocus: 'trigger_or_continue_task' as const,
