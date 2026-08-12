@@ -1,0 +1,77 @@
+name: AquaGuide Real Acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/aquaguide-real-acceptance.yml'
+      - 'scripts/run-aquaguide-real-acceptance.ts'
+      - 'src/acceptance/**'
+      - 'src/scenario/**'
+      - 'src/test-agent/**'
+      - 'src/judge/**'
+      - 'acceptance/real-products/aquaguide.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout EvalPilot
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned AquaGuide
+        uses: actions/checkout@v4
+        with:
+          repository: chusday97/aquaguide-tank-guide
+          ref: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+          path: real-products/aquaguide
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install EvalPilot
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Install AquaGuide
+        working-directory: real-products/aquaguide
+        run: npm ci
+
+      - name: Start AquaGuide web
+        working-directory: real-products/aquaguide
+        run: |
+          npm run dev:web > ../../aquaguide-vite.log 2>&1 &
+          echo $! > ../../aquaguide-vite.pid
+
+      - name: Wait for AquaGuide
+        run: |
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent http://127.0.0.1:3000/ >/dev/null; then
+              exit 0
+            fi
+            sleep 0.25
+          done
+          cat aquaguide-vite.log || true
+          exit 1
+
+      - name: Run EvalPilot real acceptance
+        run: npx tsx scripts/run-aquaguide-real-acceptance.ts --project-root real-products/aquaguide --url http://127.0.0.1:3000 --output real-product-acceptance-output
+
+      - name: Upload real acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aquaguide-real-acceptance
+          path: |
+            real-product-acceptance-output/
+            aquaguide-vite.log
+          if-no-files-found: warn
