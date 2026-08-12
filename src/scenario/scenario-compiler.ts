@@ -40,9 +40,9 @@ export interface ExecutableScenario {
 }
 
 const trivialPreconditionPatterns = [
-  /(?:page|app|application|site|fixture).*(?:open|opened|available|running|reachable)/i,
+  /(?:page|app|application|site|fixture|project|service|dev server|server).*(?:open|opened|available|running|reachable|started)/i,
   /(?:页面|网页|应用|站点|测试页).*(?:已打开|可访问|已启动|运行中)/,
-  /(?:项目|服务|dev server|server).*(?:已启动|running|started)/i,
+  /(?:项目|服务).*(?:已启动|可访问|运行中)/,
 ];
 
 const authPatterns = [
@@ -61,8 +61,9 @@ const humanInputPatterns = [
 ];
 
 const setupPatterns = [
-  /\b(?:existing|already created|previous|pre-existing|saved|draft|record|project|item|profile)\b/i,
-  /(?:已有|已创建|预先存在|之前创建|已保存|草稿|记录|项目|对象|资料)/,
+  /\b(?:existing|already created|previous|pre-existing|saved)\s+(?:project|item|profile|record|draft|object|data)\b/i,
+  /\b(?:draft|record|project|item|profile|object)\s+(?:exists|already exists|has been created|has been saved)\b/i,
+  /(?:已有|已创建|预先存在|之前创建|已保存).*(?:草稿|记录|项目|对象|资料|数据)?/,
 ];
 
 function matchesAny(value: string, patterns: RegExp[]): boolean {
