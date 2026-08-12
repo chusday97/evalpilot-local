@@ -86,6 +86,21 @@ function provider(): MockAiProvider {
   });
 }
 
+function executionDiagnostic(execution: Awaited<ReturnType<typeof runAutoSetup>>): string {
+  return JSON.stringify({
+    status: execution.status,
+    summary: execution.summary,
+    steps: execution.steps?.map((step) => ({
+      setupTaskId: step.setupTaskId,
+      status: step.status,
+      agentStatus: step.agentStatus,
+      blockedRemoteRequests: step.blockedRemoteRequests,
+      deterministic: step.deterministic.checks.map((check) => ({ verdict: check.verdict, assertionId: check.assertionId, observed: check.observed })),
+      summary: step.summary,
+    })),
+  }, null, 2);
+}
+
 describe('Transitive Safe Setup', () => {
   it('plans every verified prior task in the unique linear journey instead of blocking on two predecessors', async () => {
     const productModel = model();
@@ -119,7 +134,7 @@ describe('Transitive Safe Setup', () => {
       const page = await context.newPage();
       const execution = await runAutoSetup({ page, provider: provider(), outputDir: await mkdtemp(join(tmpdir(), 'evalpilot-transitive-output-')), plan: plan.setupPlan!, productModel, evalSetVersion: 1, allowRemoteModel: true, allowScreenshotToProvider: false, now: () => new Date(now) });
 
-      expect(execution.status).toBe('passed');
+      expect(execution.status, executionDiagnostic(execution)).toBe('passed');
       expect(execution.steps?.map((step) => [step.setupTaskId, step.status])).toEqual([['task-create', 'passed'], ['task-record', 'passed']]);
       expect(await page.evaluate(() => [localStorage.getItem('created'), localStorage.getItem('recorded')])).toEqual(['1', '1']);
       await page.reload();
