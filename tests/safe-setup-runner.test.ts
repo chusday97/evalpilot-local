@@ -42,10 +42,11 @@ function targetCase(): EvalCase {
   };
 }
 
-async function fixtureServer(): Promise<{ url: string; close: () => Promise<void> }> {
+async function fixtureServer(remoteBusinessRequest = false): Promise<{ url: string; close: () => Promise<void> }> {
+  const remoteAttempt = remoteBusinessRequest ? "fetch('https://example.com/api/setup',{method:'POST',body:'test'}).catch(()=>{});" : '';
   const server = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(`<!doctype html><html><body><main><h1>Projects</h1><label>Project name <input name="project_name"></label><button id="create" onclick="localStorage.setItem('project','created');document.querySelector('main').innerHTML='<h1>Created</h1><p>Project ready</p>'">Create</button></main></body></html>`);
+    response.end(`<!doctype html><html><body><main><h1>Projects</h1><label>Project name <input name="project_name"></label><button id="create" onclick="${remoteAttempt}localStorage.setItem('project','created');document.querySelector('main').innerHTML='<h1>Created</h1><p>Project ready</p>'">Create</button></main></body></html>`);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
@@ -53,38 +54,62 @@ async function fixtureServer(): Promise<{ url: string; close: () => Promise<void
   return { url: `http://127.0.0.1:${address.port}`, close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())) };
 }
 
+function setupProvider(): MockAiProvider {
+  return new MockAiProvider((request) => {
+    if (request.task === 'semantic_verifier') return { status: 'confirmed', observed: '可见状态符合预期。', confirmedFacts: ['页面状态发生预期变化'], unknowns: [], evidenceRefs: [], confidence: 0.95 };
+    const prompt = JSON.parse(request.userPrompt) as { observation: { visibleStateSummary: string; formFields: Array<{ elementId: string; currentValuePresent: boolean }>; interactableElements: Array<{ elementId: string; label: string }> } };
+    if (prompt.observation.visibleStateSummary.includes('Project ready')) return { intentSummary: 'Setup 已完成', action: 'finish', targetElementId: null, value: null, expectedResult: 'Created 可见', confidence: 1 };
+    const field = prompt.observation.formFields[0];
+    if (field && !field.currentValuePresent) return { intentSummary: '填写测试项目名', action: 'fill', targetElementId: field.elementId, value: 'EvalPilot Setup', expectedResult: '项目名称已填写', confidence: 1 };
+    const button = prompt.observation.interactableElements.find((item) => item.label === 'Create');
+    return { intentSummary: '创建测试项目', action: 'click', targetElementId: button?.elementId ?? null, value: null, expectedResult: 'Created 可见', confidence: 1 };
+  });
+}
+
+async function setupPlan(url: string) {
+  const model = productModel();
+  const evalCase = targetCase();
+  const scenario = compileExecutableScenario({ evalCase, productModel: model, targetUrl: url, generatedAt: now });
+  const resolution = resolveScenarioSetup({ scenario, evalCase, productModel: model, targetUrl: url, generatedAt: now });
+  expect(resolution.status).toBe('auto_setup');
+  expect(resolution.plan).not.toBeNull();
+  return { model, plan: resolution.plan! };
+}
+
 describe('Safe Setup Runner', () => {
   browserIt('creates verified local state and keeps it available in the same browser context', async () => {
     const fixture = await fixtureServer();
     try {
-      const model = productModel();
-      const evalCase = targetCase();
-      const scenario = compileExecutableScenario({ evalCase, productModel: model, targetUrl: fixture.url, generatedAt: now });
-      const resolution = resolveScenarioSetup({ scenario, evalCase, productModel: model, targetUrl: fixture.url, generatedAt: now });
-      expect(resolution.status).toBe('auto_setup');
-      expect(resolution.plan).not.toBeNull();
-
-      const provider = new MockAiProvider((request) => {
-        if (request.task === 'semantic_verifier') return { status: 'confirmed', observed: '可见状态符合预期。', confirmedFacts: ['页面状态发生预期变化'], unknowns: [], evidenceRefs: [], confidence: 0.95 };
-        const prompt = JSON.parse(request.userPrompt) as { observation: { visibleStateSummary: string; formFields: Array<{ elementId: string; currentValuePresent: boolean }>; interactableElements: Array<{ elementId: string; label: string }> } };
-        if (prompt.observation.visibleStateSummary.includes('Project ready')) return { intentSummary: 'Setup 已完成', action: 'finish', targetElementId: null, value: null, expectedResult: 'Created 可见', confidence: 1 };
-        const field = prompt.observation.formFields[0];
-        if (field && !field.currentValuePresent) return { intentSummary: '填写测试项目名', action: 'fill', targetElementId: field.elementId, value: 'EvalPilot Setup', expectedResult: '项目名称已填写', confidence: 1 };
-        const button = prompt.observation.interactableElements.find((item) => item.label === 'Create');
-        return { intentSummary: '创建测试项目', action: 'click', targetElementId: button?.elementId ?? null, value: null, expectedResult: 'Created 可见', confidence: 1 };
-      });
-
+      const { model, plan } = await setupPlan(fixture.url);
       browser = await chromium.launch({ headless: true });
       const context = await browser.newContext();
       const page = await context.newPage();
-      const result = await runAutoSetup({ page, provider, outputDir: await mkdtemp(join(tmpdir(), 'evalpilot-safe-setup-')), plan: resolution.plan!, productModel: model, evalSetVersion: 1, allowRemoteModel: true, allowScreenshotToProvider: false, now: () => new Date(now) });
+      const result = await runAutoSetup({ page, provider: setupProvider(), outputDir: await mkdtemp(join(tmpdir(), 'evalpilot-safe-setup-')), plan, productModel: model, evalSetVersion: 1, allowRemoteModel: true, allowScreenshotToProvider: false, now: () => new Date(now) });
 
       expect(result.status).toBe('passed');
+      expect(result.blockedRemoteRequests).toEqual([]);
       expect(result.deterministic.checks).toEqual([expect.objectContaining({ verdict: 'pass' })]);
       expect(await page.evaluate(() => localStorage.getItem('project'))).toBe('created');
       await page.reload();
       expect(await page.evaluate(() => localStorage.getItem('project'))).toBe('created');
       await context.close();
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  browserIt('fails setup when a localhost frontend tries to call a non-local business API', async () => {
+    const fixture = await fixtureServer(true);
+    try {
+      const { model, plan } = await setupPlan(fixture.url);
+      browser = await chromium.launch({ headless: true });
+      const page = await browser.newPage();
+      const result = await runAutoSetup({ page, provider: setupProvider(), outputDir: await mkdtemp(join(tmpdir(), 'evalpilot-safe-setup-remote-')), plan, productModel: model, evalSetVersion: 1, allowRemoteModel: true, allowScreenshotToProvider: false, now: () => new Date(now) });
+
+      expect(result.status).toBe('failed');
+      expect(result.deterministic.checks).toEqual([expect.objectContaining({ verdict: 'pass' })]);
+      expect(result.blockedRemoteRequests).toEqual([expect.stringContaining('https://example.com/api/setup')]);
+      expect(result.summary).toContain('非本地环境');
     } finally {
       await fixture.close();
     }
