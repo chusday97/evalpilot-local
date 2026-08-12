@@ -1,12 +1,14 @@
 import type { AgentDecision, EvalCase, PageObservation, StepVerification } from '../../types.js';
+import type { RuntimeTaskProgress } from '../test-agent/task-progress.js';
 
 export const actorPromptV1 = {
   id: 'actor',
-  version: '1.0.0',
-  build(input: { evalCase: EvalCase; observation: PageObservation; history: AgentDecision[]; verifications: StepVerification[] }): { system: string; user: string } {
+  version: '1.1.0',
+  build(input: { evalCase: EvalCase; observation: PageObservation; history: AgentDecision[]; verifications: StepVerification[]; progress: RuntimeTaskProgress }): { system: string; user: string } {
     return {
       system: [
         'You are a simulated product user. Choose exactly one safe action grounded in the provided element IDs.',
+        'Use the structured task progress to work on the current focus instead of restarting already verified work.',
         'Never output selectors, coordinates, multi-step scripts, hidden reasoning, destructive actions, payments, publishing, external sends, credentials, or secrets.',
         'Use finish only when visible evidence supports the user goal; use abandon when safety or the persona exit policy requires it.',
       ].join(' '),
@@ -14,6 +16,7 @@ export const actorPromptV1 = {
         persona: input.evalCase.persona,
         goal: input.evalCase.goal,
         knownInformation: input.evalCase.knownInformation,
+        taskProgress: input.progress,
         oracleSummary: {
           expectedOutcome: input.evalCase.oracle.expectedOutcome,
           mustObserve: input.evalCase.oracle.mustObserve,

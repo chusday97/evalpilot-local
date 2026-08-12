@@ -2,6 +2,7 @@ import type { AiProvider } from '../ai/provider.js';
 import type { AgentDecision, EvalCase, PageObservation, StepVerification } from '../../types.js';
 import { actorPromptV1 } from '../prompts/actor.v1.js';
 import { agentDecisionSchema } from './schemas.js';
+import type { RuntimeTaskProgress } from './task-progress.js';
 
 export async function chooseAgentAction(input: {
   provider: AiProvider;
@@ -9,6 +10,7 @@ export async function chooseAgentAction(input: {
   observation: PageObservation;
   history: AgentDecision[];
   verifications: StepVerification[];
+  progress: RuntimeTaskProgress;
   screenshotDataUrl: string | null;
   allowRemoteModel: boolean;
   allowScreenshot: boolean;
