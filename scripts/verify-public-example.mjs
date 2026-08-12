@@ -57,7 +57,7 @@ function mockStructuredOutput(schemaName, userPrompt) {
         successConditions: ['已添加'],
         successSignals: [{
           signalId: 'signal-task-added',
-          type: 'text_visible',
+          kind: 'text_visible',
           target: '已添加',
           description: '页面显示已添加结果',
           evidenceStatus,
@@ -76,7 +76,7 @@ function mockStructuredOutput(schemaName, userPrompt) {
     };
   }
   if (schemaName === 'oracle_builder_output') {
-    const signal = input.task?.successSignals?.find((item) => item.type !== 'semantic') ?? input.task?.successSignals?.[0];
+    const signal = input.task?.successSignals?.find((item) => item.kind !== 'semantic') ?? input.task?.successSignals?.[0];
     const target = signal?.target ?? input.task?.successConditions?.[0] ?? '已添加';
     return {
       expectedOutcome: [target],
