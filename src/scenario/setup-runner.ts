@@ -51,6 +51,7 @@ async function runSingleAutoSetup(input: {
   allowRemoteModel?: boolean;
   allowScreenshotToProvider?: boolean;
   now?: () => Date;
+  forceStartingNavigation?: boolean;
 }): Promise<AutoSetupExecutionResult> {
   const blockedRemoteRequests: string[] = [];
   const routeHandler = async (route: Route) => {
@@ -65,6 +66,14 @@ async function runSingleAutoSetup(input: {
   await input.page.route('**/*', routeHandler);
   let agentRun: Awaited<ReturnType<typeof runAiTestAgent>>;
   try {
+    // A chained setup step is a new executable scenario even when it shares the same URL as
+    // the previous step. Re-enter its declared starting URL so the app can render from the
+    // persisted Browser Context state instead of leaving the next Agent on the prior step's
+    // terminal DOM. The route guard is already active, so this refresh cannot bypass the
+    // loopback-only business-request boundary.
+    if (input.forceStartingNavigation) {
+      await input.page.goto(input.plan.setupScenario.startingUrl, { waitUntil: 'domcontentloaded' });
+    }
     agentRun = await runAiTestAgent(input.page, input.plan.setupCase, input.provider, {
       outputDir: input.outputDir,
       startingUrl: input.plan.setupScenario.startingUrl,
@@ -122,8 +131,12 @@ export async function runAutoSetup(input: {
   }
 
   const steps: AutoSetupExecutionResult[] = [];
-  for (const step of chain) {
-    const execution = await runSingleAutoSetup({ ...input, plan: step });
+  for (const [index, step] of chain.entries()) {
+    const execution = await runSingleAutoSetup({
+      ...input,
+      plan: step,
+      forceStartingNavigation: index > 0,
+    });
     steps.push(execution);
     if (execution.status !== 'passed') {
       return {
