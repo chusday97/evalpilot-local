@@ -13,7 +13,7 @@ import { analyzeCoverage } from '../eval-set/coverage-analyzer.js';
 import { saveCoverageMatrix } from '../eval-set/coverage-store.js';
 import { listProductModelVersions, loadProductModel } from '../product-model/product-model-store.js';
 import { buildAdaptiveEvaluationReport } from '../report/adaptive-report.js';
-import { compileExecutableScenarios, scenarioBlockerSummary } from '../scenario/scenario-compiler.js';
+import { compileExecutableScenarios, planScenarioExecution, scenarioBlockerSummary } from '../scenario/scenario-compiler.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
 import { EvalPilotError } from '../utils/errors.js';
 import { ensureDirectory, pathExists, writeJsonAtomic } from '../utils/file-system.js';
@@ -79,22 +79,24 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   await ensureDirectory(evaluationDirectory);
   const scenarioGeneratedAt = new Date().toISOString();
   const scenarios = compileExecutableScenarios({ cases: selection.cases, productModel: foundation.model, targetUrl: config.targetUrl, generatedAt: scenarioGeneratedAt });
+  const executionPlan = planScenarioExecution(scenarios);
   await writeJsonAtomic(resolve(evaluationDirectory, 'scenario-preflight.json'), {
     schemaVersion: 1,
     evaluationId: input.evaluationId,
     generatedAt: scenarioGeneratedAt,
-    readyCaseIds: scenarios.filter((scenario) => scenario.readiness === 'ready').map((scenario) => scenario.caseId),
-    blockedCaseIds: scenarios.filter((scenario) => scenario.readiness !== 'ready').map((scenario) => scenario.caseId),
+    readyCaseIds: executionPlan.readyCaseIds,
+    blockedCaseIds: executionPlan.blockedCaseIds,
     scenarios,
   });
-  const blockedScenarios = scenarios.filter((scenario) => scenario.readiness !== 'ready');
-  if (blockedScenarios.length) {
-    const detail = scenarioBlockerSummary(blockedScenarios);
-    throw new EvalPilotError(`有 ${blockedScenarios.length} 个评测任务还不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${detail}`, 'EVALUATION_SCENARIO_NOT_READY');
+  if (executionPlan.allBlocked) {
+    const detail = scenarioBlockerSummary(executionPlan.blocked);
+    throw new EvalPilotError(`所选评测任务当前都不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${detail}`, 'EVALUATION_SCENARIO_NOT_READY');
   }
 
   await hooks.prepared?.(selection, foundation.model);
   const scenarioByCaseId = new Map(scenarios.map((scenario) => [scenario.caseId, scenario]));
+  const runnableCaseIds = new Set(executionPlan.readyCaseIds);
+  const runnableCases = selection.cases.filter((evalCase) => runnableCaseIds.has(evalCase.caseId));
   const browser = await (dependencies.launchBrowser?.() ?? chromium.launch({ headless: true }));
   const results = [];
   const findings = [];
@@ -103,7 +105,7 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const challengeCases: EvalCase[] = [];
   const commit = await targetCommit(config.projectRoot);
   try {
-    for (const [index, evalCase] of selection.cases.entries()) {
+    for (const [index, evalCase] of runnableCases.entries()) {
       const scenario = scenarioByCaseId.get(evalCase.caseId);
       if (!scenario || scenario.readiness !== 'ready') throw new EvalPilotError(`案例“${evalCase.title}”未通过 Scenario Preflight。`, 'EVALUATION_SCENARIO_NOT_READY');
       const context = await browser.newContext();
@@ -130,7 +132,7 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
       } finally {
         await context.close();
       }
-      await hooks.caseCompleted?.(index + 1, selection.cases.length, evalCase);
+      await hooks.caseCompleted?.(index + 1, runnableCases.length, evalCase);
     }
   } finally {
     await browser.close();
