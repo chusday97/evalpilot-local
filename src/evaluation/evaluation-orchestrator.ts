@@ -118,6 +118,20 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const setupResolutions = resolveScenarioSetups({ scenarios, cases: selection.cases, productModel: foundation.model, targetUrl: config.targetUrl, generatedAt: scenarioGeneratedAt });
   const setupPlans = setupResolutions.flatMap((resolution) => resolution.status === 'auto_setup' && resolution.plan ? [resolution.plan] : []);
   const setupPlanByCaseId = new Map(setupPlans.map((plan) => [plan.targetCaseId, plan]));
+  const setupResolutionSummaries = setupResolutions.map((resolution) => ({
+    caseId: resolution.caseId,
+    status: resolution.status,
+    blockers: resolution.blockers,
+    reason: resolution.reason,
+    plan: resolution.plan ? {
+      setupId: resolution.plan.setupId,
+      targetCaseId: resolution.plan.targetCaseId,
+      targetTaskId: resolution.plan.targetTaskId,
+      setupTaskId: resolution.plan.setupTaskId,
+      setupScenarioId: resolution.plan.setupScenario.scenarioId,
+      reason: resolution.plan.reason,
+    } : null,
+  }));
   const autoSetupCaseIds = setupPlans.map((plan) => plan.targetCaseId);
   const effectiveReadyCaseIds = [...new Set([...executionPlan.readyCaseIds, ...autoSetupCaseIds])];
   const effectiveReadyCaseIdSet = new Set(effectiveReadyCaseIds);
@@ -131,7 +145,7 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
     blockedCaseIds: effectiveBlockedCaseIds,
     directReadyCaseIds: executionPlan.readyCaseIds,
     autoSetupCaseIds,
-    setupResolutions,
+    setupResolutions: setupResolutionSummaries,
     scenarios,
   });
   if (executionPlan.allBlocked && autoSetupCaseIds.length === 0) {
