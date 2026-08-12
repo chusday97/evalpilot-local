@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { GroundedField, PageObservation } from '../types.js';
 import { executeAgentAction } from '../src/test-agent/action-executor.js';
+import { readFieldInputConstraints } from '../src/test-agent/field-input-constraints.js';
 import { generateSafeInput } from '../src/test-agent/safe-input-generator.js';
 
 function field(overrides: Partial<GroundedField> = {}): GroundedField {
@@ -49,6 +50,33 @@ describe('task-aware safe input', () => {
   it('does not accept remote email proposals', () => {
     const result = generateSafeInput(field({ fieldName: 'email', label: 'Email', inputType: 'email' }), {}, 'https://example.com', 'demo@example.com');
     expect(result).toMatchObject({ status: 'blocked_by_safety', value: null });
+  });
+
+  it('rejects an out-of-range Actor value and generates a legal number', () => {
+    const result = generateSafeInput(field(), {}, 'http://127.0.0.1:3000', '60', { min: 20, max: 50, minLength: null, maxLength: null, step: 5, pattern: null });
+    expect(result).toMatchObject({ status: 'ready', value: '20', origin: 'synthetic_generated' });
+  });
+
+  it('does not let invalid knownInformation override a valid Actor value', () => {
+    const result = generateSafeInput(field(), { volume: 80 }, 'http://127.0.0.1:3000', '40', { min: 20, max: 50, minLength: null, maxLength: null, step: 5, pattern: null });
+    expect(result).toMatchObject({ status: 'ready', value: '40' });
+  });
+
+  it('fits synthetic text to basic minlength and maxlength constraints', () => {
+    const result = generateSafeInput(field({ fieldName: 'name', label: 'Name', inputType: 'text' }), {}, 'http://127.0.0.1:3000', null, { min: null, max: null, minLength: 5, maxLength: 8, step: null, pattern: null });
+    expect(result.status).toBe('ready');
+    expect(result.value?.length).toBeGreaterThanOrEqual(5);
+    expect(result.value?.length).toBeLessThanOrEqual(8);
+  });
+});
+
+describe('live field constraints', () => {
+  it('reads min/max/step and length constraints from the grounded DOM element', async () => {
+    const evaluate = vi.fn().mockResolvedValue({ min: 20, max: 50, minLength: 3, maxLength: 8, step: 5, pattern: '[0-9]+' });
+    const locator = { filter: vi.fn().mockReturnThis(), nth: vi.fn().mockReturnThis(), evaluate };
+    const page = { locator: vi.fn(() => locator) } as any;
+    const constraints = await readFieldInputConstraints(page, field());
+    expect(constraints).toEqual({ min: 20, max: 50, minLength: 3, maxLength: 8, step: 5, pattern: '[0-9]+' });
   });
 });
 

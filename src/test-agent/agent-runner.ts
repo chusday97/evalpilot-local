@@ -6,6 +6,7 @@ import { ensureDirectory, pathExists, writeJsonAtomic } from '../utils/file-syst
 import { chooseAgentAction } from './actor.js';
 import { executeAgentAction } from './action-executor.js';
 import { calculateEvidenceCompleteness, saveAgentEvidence } from './evidence-packet.js';
+import { readFieldInputConstraints } from './field-input-constraints.js';
 import { observePage } from './observer.js';
 import { reflectOnStep } from './reflector.js';
 import { generateSafeInput } from './safe-input-generator.js';
@@ -136,7 +137,8 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
         const field = before.formFields.find((item) => item.elementId === decision.targetElementId);
         if (!field) decision = { ...decision, value: null };
         else {
-          const safeInput = generateSafeInput(field, evalCase.knownInformation, page.url(), decision.value);
+          const constraints = await readFieldInputConstraints(page, field);
+          const safeInput = generateSafeInput(field, evalCase.knownInformation, page.url(), decision.value, constraints);
           if (safeInput.status === 'blocked_by_safety') {
             decision = { ...decision, value: null };
             actionResult = { status: 'blocked_by_safety', action: 'fill', targetElementId: decision.targetElementId, summary: safeInput.reason, evidenceRefs: [beforeScreenshotPath] };
