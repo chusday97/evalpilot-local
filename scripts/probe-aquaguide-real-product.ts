@@ -32,8 +32,8 @@ async function saveObservation(probeId: string, requestedRoute: string) {
   snapshots.push({ probeId, route: requestedRoute, observation });
   process.stdout.write(`\n[${probeId}] requested=${requestedRoute} actual=${observation.pageUrl}\n`);
   process.stdout.write(`purpose: ${observation.pagePurpose}\n`);
-  process.stdout.write(`fields: ${observation.formFields.map((field) => `${field.elementId}:${field.label}:${field.inputType}`).join(' | ') || 'none'}\n`);
-  process.stdout.write(`actions: ${observation.interactableElements.slice(0, 40).map((element) => `${element.elementId}:${element.label}`).join(' | ') || 'none'}\n`);
+  process.stdout.write(`fields: ${observation.formFields.map((field) => `${field.elementId}:${field.label}:${field.inputType}:required=${field.required}`).join(' | ') || 'none'}\n`);
+  process.stdout.write(`actions: ${observation.interactableElements.slice(0, 80).map((element) => `${element.elementId}:${element.label}`).join(' | ') || 'none'}\n`);
 }
 
 async function navigateAndCapture(probeId: string, route: string, settleMs = 1_200) {
@@ -44,10 +44,8 @@ async function navigateAndCapture(probeId: string, route: string, settleMs = 1_2
 }
 
 try {
-  // First prove what happens when EvalPilot uses the deep link on a pristine user state.
   await navigateAndCapture('01-create-deeplink-pristine', '/aquarium?action=create', 1_800);
 
-  // Follow the actual product onboarding instead of injecting localStorage to bypass it.
   if (new URL(page.url()).pathname === '/welcome') {
     const buildTank = page.getByRole('button', { name: /建立第一个鱼缸/ }).first();
     await buildTank.waitFor({ state: 'visible' });
@@ -56,12 +54,19 @@ try {
   }
   await saveObservation('02-create-after-onboarding', '/welcome -> 建立第一个鱼缸');
 
-  // Keep the same browser context so these routes see the real state created above.
-  await navigateAndCapture('03-record-existing-route', '/aquarium?action=record-existing', 1_200);
-  await navigateAndCapture('04-daily-check-route', '/aquarium?action=daily-check', 1_200);
+  // Capture the real settings surface needed to turn the empty draft into a usable tank.
+  const settingsEntry = page.getByRole('button', { name: /建立或完善鱼缸|打开设置/ }).first();
+  await settingsEntry.waitFor({ state: 'visible' });
+  await settingsEntry.click();
+  await page.waitForTimeout(900);
+  await saveObservation('03-tank-settings-open', '/aquarium -> 建立或完善鱼缸');
+
+  // Navigation resets the settings modal while preserving the aquarium created in the same browser context.
+  await navigateAndCapture('04-record-existing-route', '/aquarium?action=record-existing', 1_200);
+  await navigateAndCapture('05-daily-check-route', '/aquarium?action=daily-check', 1_200);
 
   await writeFile(resolve(outputDir, 'aquaguide-probe.json'), JSON.stringify({
-    schemaVersion: 2,
+    schemaVersion: 3,
     targetUrl,
     generatedAt: new Date().toISOString(),
     snapshots,
