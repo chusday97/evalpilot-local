@@ -97,7 +97,7 @@ function setupCaseFor(targetCase: EvalCase, setupTask: ProductTask, model: Produ
 }
 
 function setupScenarioWithSatisfiedBlockers(scenario: ExecutableScenario, satisfiedBlockerTypes: ScenarioBlockerType[]): ExecutableScenario {
-  const allowedSatisfied = new Set(satisfiedBlockerTypes.filter((type) => type === 'needs_auth'));
+  const allowedSatisfied: Set<ScenarioBlockerType> = new Set(satisfiedBlockerTypes.filter((type) => type === 'needs_auth'));
   if (!allowedSatisfied.size) return scenario;
   const removed = scenario.blockers.filter((blocker) => allowedSatisfied.has(blocker.type));
   if (!removed.length) return scenario;
