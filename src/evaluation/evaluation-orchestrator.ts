@@ -13,6 +13,7 @@ import { analyzeCoverage } from '../eval-set/coverage-analyzer.js';
 import { saveCoverageMatrix } from '../eval-set/coverage-store.js';
 import { listProductModelVersions, loadProductModel } from '../product-model/product-model-store.js';
 import { buildAdaptiveEvaluationReport } from '../report/adaptive-report.js';
+import { materializeSyntheticFileFixtures, resolveSyntheticFileFixtures, type SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
 import { compileExecutableScenarios, planScenarioExecution, scenarioBlockerSummary } from '../scenario/scenario-compiler.js';
 import { resolveScenarioSetups } from '../scenario/setup-resolver.js';
 import { runAutoSetup, type AutoSetupExecutionResult } from '../scenario/setup-runner.js';
@@ -132,26 +133,51 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
       reason: resolution.plan.reason,
     } : null,
   }));
+
+  const fileFixtureResolutions = scenarios.map((scenario) => resolveSyntheticFileFixtures({ scenario, targetUrl: config.targetUrl }));
+  const fileFixtureDirectory = resolve(evaluationDirectory, 'synthetic-fixtures');
+  const fileFixturesByCaseId = new Map<string, SyntheticFileFixture[]>();
+  for (const resolutionItem of fileFixtureResolutions) {
+    if (resolutionItem.status !== 'ready' || !resolutionItem.plan) continue;
+    try {
+      const fixtures = await materializeSyntheticFileFixtures(resolutionItem.plan, resolve(fileFixtureDirectory, resolutionItem.caseId));
+      fileFixturesByCaseId.set(resolutionItem.caseId, fixtures);
+    } catch (materializeError) {
+      throw new EvalPilotError(`无法安全生成案例 ${resolutionItem.caseId} 的合成文件 Fixture：${materializeError instanceof Error ? materializeError.message : String(materializeError)}`, 'EVALUATION_SCENARIO_NOT_READY');
+    }
+  }
+  const fileFixtureCaseIds = [...fileFixturesByCaseId.keys()];
+  const fileFixtureResolutionSummaries = fileFixtureResolutions.map((resolutionItem) => ({
+    caseId: resolutionItem.caseId,
+    status: resolutionItem.status,
+    reason: resolutionItem.reason,
+    blockers: resolutionItem.blockers,
+    fixtures: resolutionItem.plan?.fixtures.map((fixture) => ({ fixtureId: fixture.fixtureId, kind: fixture.kind, filename: fixture.filename, mimeType: fixture.mimeType })) ?? [],
+  }));
+
   const autoSetupCaseIds = setupPlans.map((plan) => plan.targetCaseId);
-  const effectiveReadyCaseIds = [...new Set([...executionPlan.readyCaseIds, ...autoSetupCaseIds])];
+  const effectiveReadyCaseIds = [...new Set([...executionPlan.readyCaseIds, ...autoSetupCaseIds, ...fileFixtureCaseIds])];
   const effectiveReadyCaseIdSet = new Set(effectiveReadyCaseIds);
   const effectiveBlockedScenarios = scenarios.filter((scenario) => !effectiveReadyCaseIdSet.has(scenario.caseId));
   const effectiveBlockedCaseIds = effectiveBlockedScenarios.map((scenario) => scenario.caseId);
   await writeJsonAtomic(resolve(evaluationDirectory, 'scenario-preflight.json'), {
-    schemaVersion: 2,
+    schemaVersion: 3,
     evaluationId: input.evaluationId,
     generatedAt: scenarioGeneratedAt,
     readyCaseIds: effectiveReadyCaseIds,
     blockedCaseIds: effectiveBlockedCaseIds,
     directReadyCaseIds: executionPlan.readyCaseIds,
     autoSetupCaseIds,
+    fileFixtureCaseIds,
     setupResolutions: setupResolutionSummaries,
+    fileFixtureResolutions: fileFixtureResolutionSummaries,
     scenarios,
   });
-  if (executionPlan.allBlocked && autoSetupCaseIds.length === 0) {
+  if (executionPlan.allBlocked && autoSetupCaseIds.length === 0 && fileFixtureCaseIds.length === 0) {
     const detail = scenarioBlockerSummary(effectiveBlockedScenarios);
     const setupDetail = setupResolutions.filter((item) => item.status === 'blocked').map((item) => `${item.caseId}: ${item.reason}`).join(' | ');
-    throw new EvalPilotError(`所选评测任务当前都不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${[detail, setupDetail].filter(Boolean).join(' | ')}`, 'EVALUATION_SCENARIO_NOT_READY');
+    const fileDetail = fileFixtureResolutions.filter((item) => item.status === 'blocked' && item.blockers.some((blocker) => blocker.type === 'needs_test_data')).map((item) => `${item.caseId}: ${item.reason}`).join(' | ');
+    throw new EvalPilotError(`所选评测任务当前都不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${[detail, setupDetail, fileDetail].filter(Boolean).join(' | ')}`, 'EVALUATION_SCENARIO_NOT_READY');
   }
 
   await hooks.prepared?.(selection, foundation.model, foundation.quality);
@@ -172,7 +198,8 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
     for (const [index, evalCase] of runnableCases.entries()) {
       const scenario = scenarioByCaseId.get(evalCase.caseId);
       const setupPlan = setupPlanByCaseId.get(evalCase.caseId) ?? null;
-      if (!scenario || (scenario.readiness !== 'ready' && !setupPlan)) throw new EvalPilotError(`案例“${evalCase.title}”未通过 Scenario Preflight。`, 'EVALUATION_SCENARIO_NOT_READY');
+      const fileFixtures = fileFixturesByCaseId.get(evalCase.caseId) ?? [];
+      if (!scenario || (scenario.readiness !== 'ready' && !setupPlan && fileFixtures.length === 0)) throw new EvalPilotError(`案例“${evalCase.title}”未通过 Scenario Preflight。`, 'EVALUATION_SCENARIO_NOT_READY');
       const context = await browser.newContext();
       try {
         const page = await context.newPage();
@@ -206,6 +233,7 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
             targetAppGitSha: commit,
             allowRemoteModel: true,
             allowScreenshotToProvider: input.allowScreenshot,
+            fileFixtures,
           });
           results.push(outcome.result);
           if (outcome.finding) findings.push(outcome.finding);
