@@ -141,10 +141,10 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       const repeatedAttempts = repeatedStateCount(decisionStateFingerprints, decisionStateFingerprint);
       decisionStateFingerprints.push(decisionStateFingerprint);
       const previousTaskState = stepEvidence.at(-1)?.taskState?.state;
-      if (repeatedAttempts >= 3 && verifications.at(-1)?.status !== 'confirmed' && previousTaskState !== 'pending' && previousTaskState !== 'progressing') {
+      if (repeatedAttempts >= 4 && verifications.at(-1)?.status !== 'confirmed' && previousTaskState !== 'pending' && previousTaskState !== 'progressing') {
         finalObservation = before;
         failureSource = 'evaluator';
-        error = '评测器连续多次在同一页面状态尝试同一个操作且没有形成新证据，已停止本次循环。';
+        error = '评测器已经连续三次在同一页面状态执行同一个操作且没有形成新证据，已阻止第四次重复尝试。';
         status = 'inconclusive';
         break;
       }
