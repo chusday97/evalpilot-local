@@ -1,0 +1,58 @@
+schemaVersion: 1
+product:
+  name: AquaGuide
+  repository: chusday97/aquaguide-tank-guide
+  commit: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+  startCommand: npm run dev
+  targetUrl: http://localhost:3000
+  contractSources:
+    - README.md
+    - src/services/navigation/task-routes.ts
+    - scripts/test-aquarium-creation-semantics.ts
+    - scripts/test-atomic-livestock-addition.ts
+    - scripts/test-daily-check-contract.ts
+thresholds:
+  requiredPasses: 3
+  maxEvaluatorFailures: 0
+  maxPrerequisiteBlocks: 0
+  maxNotRun: 0
+tasks:
+  - acceptanceTaskId: aqua-create-usable-freshwater-tank
+    name: 创建一个可用淡水鱼缸
+    goalIncludes:
+      - 创建
+      - 鱼缸
+    routeIncludes: /aquarium
+    expectedPrerequisite: none
+    acceptanceIntent: >-
+      用户从创建入口建立新鱼缸；在填写 60×30×30 尺寸并选择 Freshwater 后，
+      产品应形成至少 usable 的真实鱼缸状态，而不是只显示一个未保存的草稿。
+    evidenceBasis:
+      - scripts/test-aquarium-creation-semantics.ts: usable = dimensions + Freshwater
+
+  - acceptanceTaskId: aqua-record-existing-livestock
+    name: 向已有鱼缸记录生物
+    goalIncludes:
+      - 记录
+      - 生物
+    routeIncludes: /aquarium
+    expectedPrerequisite: setup
+    acceptanceIntent: >-
+      用户在已有鱼缸中记录现有生物。写入必须完成为一个真实业务动作；
+      失败不能留下半条记录，重试不能造成重复添加。
+    evidenceBasis:
+      - scripts/test-atomic-livestock-addition.ts: failed batch rolls back and replay remains idempotent
+
+  - acceptanceTaskId: aqua-daily-check-risk-triage
+    name: 完成每日检查并得到风险分级
+    goalIncludes:
+      - 每日
+      - 检查
+    routeIncludes: /aquarium
+    expectedPrerequisite: setup
+    acceptanceIntent: >-
+      用户对已有鱼缸完成每日检查。出现“经常浮头”时必须形成高风险结果并给出立即动作；
+      即使 AI 解释不可用或试图降级，本地确定性风险也必须保持权威。
+    evidenceBasis:
+      - scripts/test-daily-check-contract.ts: frequent breathing warning => high risk
+      - scripts/test-daily-check-contract.ts: AI must not downgrade deterministic high risk
