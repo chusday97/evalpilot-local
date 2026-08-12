@@ -22,7 +22,7 @@ export async function chooseAgentAction(input: {
     systemPrompt: prompt.system,
     userPrompt: prompt.user,
     schemaName: 'agent_decision',
-    imageDataUrls: input.screenshotDataUrl ? [input.screenshotDataUrl] : [],
+    imageDataUrls: input.allowScreenshot && input.screenshotDataUrl ? [input.screenshotDataUrl] : [],
     privacy: { allowRemoteModel: input.allowRemoteModel, allowScreenshot: input.allowScreenshot, visibleTextOnly: true, redactionApplied: true },
     metadata: { caseId: input.evalCase.caseId, promptVersion: actorPromptV1.version },
   }, agentDecisionSchema);
