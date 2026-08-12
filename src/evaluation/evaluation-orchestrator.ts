@@ -67,6 +67,7 @@ async function ensureFoundation(projectId: string, outputDir: string, provider: 
     quality = foundationQualityFromGeneration({
       sourceFingerprint,
       generationMode: generated.generationMode,
+      oracleFallbackCount: generated.oracleFallbackCount,
       warnings: generated.warnings,
       provider,
       generatedAt,
