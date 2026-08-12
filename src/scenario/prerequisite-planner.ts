@@ -154,6 +154,7 @@ export async function planScenarioPrerequisiteSet(input: {
 }
 
 export function summarizePrerequisitePlan(plan: PrerequisitePlan): PrerequisitePlanSummary {
+  const fixtureMaterializationFailed = plan.reasons.some((reason) => reason.includes('合成 Fixture 无法安全写入'));
   return {
     caseId: plan.caseId,
     status: plan.status,
@@ -162,6 +163,6 @@ export function summarizePrerequisitePlan(plan: PrerequisitePlan): PrerequisiteP
     reasons: plan.reasons,
     auth: plan.authFixture ? { source: plan.authFixture.source, targetOrigin: plan.authFixture.targetOrigin, cookieCount: plan.authFixture.cookieCount, originCount: plan.authFixture.originCount } : null,
     setup: plan.setupPlan ? { setupId: plan.setupPlan.setupId, setupTaskId: plan.setupPlan.setupTaskId, setupScenarioId: plan.setupPlan.setupScenario.scenarioId } : null,
-    fileFixtures: plan.fileFixturePlan?.fixtures.map((fixture) => ({ fixtureId: fixture.fixtureId, kind: fixture.kind, filename: fixture.filename, mimeType: fixture.mimeType })) ?? [],
+    fileFixtures: fixtureMaterializationFailed ? [] : plan.fileFixturePlan?.fixtures.map((fixture) => ({ fixtureId: fixture.fixtureId, kind: fixture.kind, filename: fixture.filename, mimeType: fixture.mimeType })) ?? [],
   };
 }
