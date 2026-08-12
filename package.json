@@ -15,7 +15,7 @@
     "test": "vitest run",
     "test:browser": "EVALPILOT_BROWSER_TEST=1 vitest run tests/browser-evidence.test.ts",
     "test:runner": "EVALPILOT_BROWSER_TEST=1 vitest run tests/runner-browser.test.ts",
-    "test:ai-agent": "EVALPILOT_BROWSER_TEST=1 vitest run tests/ai-test-agent.test.ts tests/evidence-gate.test.ts tests/hybrid-judge.test.ts tests/safe-setup-runner.test.ts tests/synthetic-file-upload.test.ts tests/auth-session-fixture.test.ts tests/combined-prerequisite-browser.test.ts",
+    "test:ai-agent": "EVALPILOT_BROWSER_TEST=1 vitest run tests/ai-test-agent.test.ts tests/evidence-gate.test.ts tests/hybrid-judge.test.ts tests/safe-setup-runner.test.ts tests/synthetic-file-upload.test.ts tests/auth-session-fixture.test.ts tests/combined-prerequisite-browser.test.ts && tsx scripts/verify-task-state-browser-serialization.ts",
     "test:semantic-verifier": "EVALPILOT_BROWSER_TEST=1 vitest run tests/semantic-verifier.test.ts tests/semantic-verifier-browser.test.ts",
     "test:product-understanding": "vitest run tests/product-task-understanding.test.ts",
     "test:dashboard": "EVALPILOT_DASHBOARD_TEST=1 vitest run tests/dashboard-browser.test.ts tests/project-workspace.test.ts",
@@ -36,31 +36,15 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/chusday97/evalpilot-local.git"
-  },
-  "homepage": "https://github.com/chusday97/evalpilot-local#readme",
-  "bugs": {
-    "url": "https://github.com/chusday97/evalpilot-local/issues"
+    "url": "https://github.com/chusday97/evalpilot-local"
   },
   "keywords": [
     "ai-evaluation",
-    "ux-testing",
     "playwright",
-    "local-first",
-    "codex"
+    "ux-testing",
+    "agent",
+    "local-first"
   ],
-  "files": [
-    "dist/**/*.js",
-    "dist-dashboard/",
-    "skills/evalpilot/",
-    "README.md",
-    "LICENSE",
-    "SECURITY.md"
-  ],
-  "publishConfig": {
-    "access": "public",
-    "tag": "alpha"
-  },
   "dependencies": {
     "commander": "^15.0.0",
     "playwright": "1.61.1",
