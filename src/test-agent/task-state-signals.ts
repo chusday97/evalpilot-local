@@ -31,39 +31,62 @@ export async function captureTaskStateSignals(page: Page, decision: AgentDecisio
   const tokens = expectedTokens(decision.expectedResult);
   const targetIndex = decision.targetElementId ? Number(decision.targetElementId.slice(1)) - 1 : -1;
   return page.evaluate(({ expected, groundedIndex }) => {
-    const visible = (element: Element): element is HTMLElement => {
+    // IMPORTANT: do not declare helper functions inside this callback. EvalPilot often runs from source
+    // through tsx/esbuild; keep-name transforms can inject `__name(...)` into browser-serialized helpers,
+    // but Playwright does not serialize esbuild's runtime helper. Keep every browser-side operation inline.
+    const bodyText = (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim();
+    const lowerBodyText = bodyText.toLocaleLowerCase();
+    const loading: string[] = [];
+
+    if (Array.from(document.querySelectorAll('[aria-busy="true"]')).some((element) => {
       if (!(element instanceof HTMLElement)) return false;
       const style = getComputedStyle(element);
       return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
-    };
-    const clean = (value: string | null | undefined) => (value ?? '').replace(/\s+/g, ' ').trim();
-    const unique = (values: string[]) => [...new Set(values.filter(Boolean))];
-    const bodyText = clean(document.body?.innerText);
-    const lowerBodyText = bodyText.toLocaleLowerCase();
-    const loading: string[] = [];
-    if (Array.from(document.querySelectorAll('[aria-busy="true"]')).some(visible)) loading.push('页面存在 aria-busy=true');
-    if (Array.from(document.querySelectorAll('[role="progressbar"]')).some(visible)) loading.push('页面显示进度条');
-    if (Array.from(document.querySelectorAll('.loading,.spinner,[data-loading="true"]')).some(visible)) loading.push('页面显示加载动画');
+    })) loading.push('页面存在 aria-busy=true');
+    if (Array.from(document.querySelectorAll('[role="progressbar"]')).some((element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+    })) loading.push('页面显示进度条');
+    if (Array.from(document.querySelectorAll('.loading,.spinner,[data-loading="true"]')).some((element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+    })) loading.push('页面显示加载动画');
+
     const loadingWords = ['loading', 'generating', 'processing', 'uploading', 'thinking', 'searching', '加载中', '生成中', '处理中', '上传中', '思考中', '搜索中'];
     for (const word of loadingWords) if (lowerBodyText.includes(word)) loading.push(`页面显示“${word}”`);
 
-    const statusElements = Array.from(document.querySelectorAll('[role="status"],[aria-live],[data-status],[role="progressbar"],[aria-busy="true"],.loading,.spinner,[data-loading="true"]')).filter(visible);
-    const statusTexts = unique(statusElements.map((element) => clean(element.textContent)).filter(Boolean)).slice(0, 12);
-    const progressValues = unique(statusElements.flatMap((element) => {
+    const statusElements = Array.from(document.querySelectorAll('[role="status"],[aria-live],[data-status],[role="progressbar"],[aria-busy="true"],.loading,.spinner,[data-loading="true"]')).filter((element) => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = getComputedStyle(element);
+      return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+    });
+    const statusTexts = [...new Set(statusElements
+      .map((element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim())
+      .filter(Boolean))].slice(0, 12);
+    const progressValues = [...new Set(statusElements.flatMap((element) => {
       const values = [element.getAttribute('aria-valuenow'), element.getAttribute('data-progress')].filter((value): value is string => Boolean(value));
-      const text = clean(element.textContent);
-      const percentages = text.match(/\b\d{1,3}%/g) ?? [];
-      const fractions = text.match(/\b\d+\s*\/\s*\d+\b/g) ?? [];
-      return [...values, ...percentages, ...fractions];
-    })).slice(0, 12);
+      const text = (element.textContent ?? '').replace(/\s+/g, ' ').trim();
+      return [...values, ...(text.match(/\b\d{1,3}%/g) ?? []), ...(text.match(/\b\d+\s*\/\s*\d+\b/g) ?? [])];
+    }).filter(Boolean))].slice(0, 12);
 
     const completionMarkers = Array.from(document.querySelectorAll('[data-status="complete"],[data-status="completed"],[data-status="success"]'))
-      .filter(visible)
-      .map((element) => clean(element.textContent) || `data-status=${element.getAttribute('data-status')}`)
+      .filter((element) => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+      })
+      .map((element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim() || `data-status=${element.getAttribute('data-status')}`)
       .slice(0, 12);
-    const failureElements = Array.from(document.querySelectorAll('[role="alert"],[data-status="failed"],[data-status="error"],.error'))
-      .filter(visible);
-    const failureSignals = unique(failureElements.map((element) => clean(element.textContent) || '页面显示失败状态')).slice(0, 12);
+    const failureSignals = [...new Set(Array.from(document.querySelectorAll('[role="alert"],[data-status="failed"],[data-status="error"],.error'))
+      .filter((element) => {
+        if (!(element instanceof HTMLElement)) return false;
+        const style = getComputedStyle(element);
+        return style.display !== 'none' && style.visibility !== 'hidden' && element.getClientRects().length > 0;
+      })
+      .map((element) => (element.textContent ?? '').replace(/\s+/g, ' ').trim() || '页面显示失败状态'))].slice(0, 12);
+
     const expectedMatches = expected.filter((token) => lowerBodyText.includes(token));
     const grounded = groundedIndex >= 0
       ? document.querySelectorAll('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').item(groundedIndex)
@@ -73,11 +96,12 @@ export async function captureTaskStateSignals(page: Page, decision: AgentDecisio
       : grounded instanceof HTMLElement
         ? grounded.getAttribute('aria-disabled') === 'true'
         : null;
+
     return {
       visibleText: bodyText.slice(0, 4_000),
       visibleTextLength: bodyText.length,
       nodeCount: document.body?.querySelectorAll('*').length ?? 0,
-      loadingSignals: unique(loading),
+      loadingSignals: [...new Set(loading.filter(Boolean))],
       statusTexts,
       progressValues,
       expectedMatches,
