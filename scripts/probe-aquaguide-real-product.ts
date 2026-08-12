@@ -25,28 +25,43 @@ const snapshots: Array<{
   observation: Awaited<ReturnType<typeof observePage>>;
 }> = [];
 
-async function capture(probeId: string, route: string, settleMs = 1_200) {
-  const url = new URL(route, targetUrl).toString();
-  await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForTimeout(settleMs);
+async function saveObservation(probeId: string, requestedRoute: string) {
   const screenshotPath = resolve(outputDir, `${probeId}.png`);
   await page.screenshot({ path: screenshotPath, fullPage: true });
   const observation = await observePage(page, [`${probeId}.png`], `probe-${probeId}`);
-  snapshots.push({ probeId, route, observation });
-  process.stdout.write(`\n[${probeId}] ${observation.pageUrl}\n`);
+  snapshots.push({ probeId, route: requestedRoute, observation });
+  process.stdout.write(`\n[${probeId}] requested=${requestedRoute} actual=${observation.pageUrl}\n`);
   process.stdout.write(`purpose: ${observation.pagePurpose}\n`);
   process.stdout.write(`fields: ${observation.formFields.map((field) => `${field.elementId}:${field.label}:${field.inputType}`).join(' | ') || 'none'}\n`);
-  process.stdout.write(`actions: ${observation.interactableElements.slice(0, 30).map((element) => `${element.elementId}:${element.label}`).join(' | ') || 'none'}\n`);
+  process.stdout.write(`actions: ${observation.interactableElements.slice(0, 40).map((element) => `${element.elementId}:${element.label}`).join(' | ') || 'none'}\n`);
+}
+
+async function navigateAndCapture(probeId: string, route: string, settleMs = 1_200) {
+  const url = new URL(route, targetUrl).toString();
+  await page.goto(url, { waitUntil: 'domcontentloaded' });
+  await page.waitForTimeout(settleMs);
+  await saveObservation(probeId, route);
 }
 
 try {
-  // Keep one browser context so later probes see the real state created by the first task route.
-  await capture('01-create-route', '/aquarium?action=create', 1_800);
-  await capture('02-record-existing-route', '/aquarium?action=record-existing', 1_200);
-  await capture('03-daily-check-route', '/aquarium?action=daily-check', 1_200);
+  // First prove what happens when EvalPilot uses the deep link on a pristine user state.
+  await navigateAndCapture('01-create-deeplink-pristine', '/aquarium?action=create', 1_800);
+
+  // Follow the actual product onboarding instead of injecting localStorage to bypass it.
+  if (new URL(page.url()).pathname === '/welcome') {
+    const buildTank = page.getByRole('button', { name: /建立第一个鱼缸/ }).first();
+    await buildTank.waitFor({ state: 'visible' });
+    await buildTank.click();
+    await page.waitForTimeout(1_800);
+  }
+  await saveObservation('02-create-after-onboarding', '/welcome -> 建立第一个鱼缸');
+
+  // Keep the same browser context so these routes see the real state created above.
+  await navigateAndCapture('03-record-existing-route', '/aquarium?action=record-existing', 1_200);
+  await navigateAndCapture('04-daily-check-route', '/aquarium?action=daily-check', 1_200);
 
   await writeFile(resolve(outputDir, 'aquaguide-probe.json'), JSON.stringify({
-    schemaVersion: 1,
+    schemaVersion: 2,
     targetUrl,
     generatedAt: new Date().toISOString(),
     snapshots,
