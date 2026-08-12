@@ -36,15 +36,31 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/chusday97/evalpilot-local"
+    "url": "git+https://github.com/chusday97/evalpilot-local.git"
+  },
+  "homepage": "https://github.com/chusday97/evalpilot-local#readme",
+  "bugs": {
+    "url": "https://github.com/chusday97/evalpilot-local/issues"
   },
   "keywords": [
     "ai-evaluation",
-    "playwright",
     "ux-testing",
-    "agent",
-    "local-first"
+    "playwright",
+    "local-first",
+    "codex"
   ],
+  "files": [
+    "dist/**/*.js",
+    "dist-dashboard/",
+    "skills/evalpilot/",
+    "README.md",
+    "LICENSE",
+    "SECURITY.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "tag": "alpha"
+  },
   "dependencies": {
     "commander": "^15.0.0",
     "playwright": "1.61.1",
