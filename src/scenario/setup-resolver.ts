@@ -12,6 +12,14 @@ export interface AutoSetupPlan {
   reason: string;
 }
 
+export interface AutoSetupChainPlan {
+  setupId: string;
+  targetCaseId: string;
+  targetTaskId: string;
+  steps: AutoSetupPlan[];
+  reason: string;
+}
+
 export interface ScenarioSetupResolution {
   caseId: string;
   status: 'not_required' | 'auto_setup' | 'blocked';
@@ -19,6 +27,16 @@ export interface ScenarioSetupResolution {
   blockers: ScenarioBlocker[];
   reason: string;
 }
+
+export interface ScenarioSetupChainResolution {
+  caseId: string;
+  status: 'not_required' | 'auto_setup' | 'blocked';
+  plan: AutoSetupChainPlan | null;
+  blockers: ScenarioBlocker[];
+  reason: string;
+}
+
+const MAX_AUTO_SETUP_STEPS = 3;
 
 const irreversibleSetupPatterns = [
   /\b(?:delete|remove|destroy|purchase|buy|pay|charge|transfer|refund|publish|send|invite|deploy|merge|cancel subscription)\b/i,
@@ -46,17 +64,41 @@ function taskIsSafeForAutomaticSetup(task: ProductTask): boolean {
   );
 }
 
-function setupTaskFor(targetCase: EvalCase, model: ProductModel): { task: ProductTask | null; reason: string } {
-  if (!targetCase.taskId) return { task: null, reason: '目标 Case 没有 Product Task，无法建立明确 Setup 依赖。' };
+function uniqueJourneyForTask(targetCase: EvalCase, model: ProductModel) {
+  if (!targetCase.taskId) return { journey: null, reason: '目标 Case 没有 Product Task，无法建立明确 Setup 依赖。' };
   const journeys = (model.crossPageJourneys ?? []).filter((journey) => journey.taskIds.includes(targetCase.taskId!));
-  if (journeys.length !== 1) return { task: null, reason: journeys.length ? '目标任务存在多个 Journey，自动 Setup 依赖不唯一。' : 'Product Model 没有声明该任务的 Journey 前置步骤。' };
-  const targetIndex = journeys[0]!.taskIds.indexOf(targetCase.taskId);
-  const priorTaskIds = journeys[0]!.taskIds.slice(0, targetIndex);
-  if (priorTaskIds.length !== 1) return { task: null, reason: priorTaskIds.length ? '目标任务之前存在多个步骤，第一版 Setup Resolver 不会猜测哪些步骤可以跳过。' : '目标任务在 Journey 中没有明确前置任务。' };
+  if (journeys.length !== 1) return { journey: null, reason: journeys.length ? '目标任务存在多个 Journey，自动 Setup 依赖不唯一。' : 'Product Model 没有声明该任务的 Journey 前置步骤。' };
+  return { journey: journeys[0]!, reason: '' };
+}
+
+function setupTaskFor(targetCase: EvalCase, model: ProductModel): { task: ProductTask | null; reason: string } {
+  const resolvedJourney = uniqueJourneyForTask(targetCase, model);
+  if (!resolvedJourney.journey || !targetCase.taskId) return { task: null, reason: resolvedJourney.reason };
+  const targetIndex = resolvedJourney.journey.taskIds.indexOf(targetCase.taskId);
+  const priorTaskIds = resolvedJourney.journey.taskIds.slice(0, targetIndex);
+  if (priorTaskIds.length !== 1) return { task: null, reason: priorTaskIds.length ? '目标任务之前存在多个步骤，单步 Setup Resolver 不会猜测哪些步骤可以跳过。' : '目标任务在 Journey 中没有明确前置任务。' };
   const task = model.userTasks.find((item) => item.taskId === priorTaskIds[0]) ?? null;
   if (!task) return { task: null, reason: 'Journey 引用的前置 Product Task 已不存在。' };
   if (!taskIsSafeForAutomaticSetup(task)) return { task: null, reason: '前置任务缺少 verified 可观察成功信号，或包含需要人工确认/高风险操作，不能自动 Setup。' };
-  return { task, reason: `使用 Journey “${journeys[0]!.name}”中唯一的前置任务“${task.name}”准备测试状态。` };
+  return { task, reason: `使用 Journey “${resolvedJourney.journey.name}”中唯一的前置任务“${task.name}”准备测试状态。` };
+}
+
+function setupTasksForChain(targetCase: EvalCase, model: ProductModel): { tasks: ProductTask[] | null; reason: string } {
+  const resolvedJourney = uniqueJourneyForTask(targetCase, model);
+  if (!resolvedJourney.journey || !targetCase.taskId) return { tasks: null, reason: resolvedJourney.reason };
+  const targetIndex = resolvedJourney.journey.taskIds.indexOf(targetCase.taskId);
+  const priorTaskIds = resolvedJourney.journey.taskIds.slice(0, targetIndex);
+  if (!priorTaskIds.length) return { tasks: null, reason: '目标任务在 Journey 中没有明确前置任务。' };
+  if (priorTaskIds.length > MAX_AUTO_SETUP_STEPS) return { tasks: null, reason: `目标任务需要 ${priorTaskIds.length} 个前置步骤，超过自动 Setup 上限 ${MAX_AUTO_SETUP_STEPS}。` };
+  const tasks = priorTaskIds.map((taskId) => model.userTasks.find((item) => item.taskId === taskId) ?? null);
+  const missingIndex = tasks.findIndex((task) => task === null);
+  if (missingIndex >= 0) return { tasks: null, reason: `Journey 引用的前置 Product Task “${priorTaskIds[missingIndex]}”已不存在。` };
+  const unsafe = (tasks as ProductTask[]).find((task) => !taskIsSafeForAutomaticSetup(task));
+  if (unsafe) return { tasks: null, reason: `前置任务“${unsafe.name}”缺少 verified 可观察成功信号，或包含需要人工确认/高风险操作，不能进入自动 Setup 链。` };
+  return {
+    tasks: tasks as ProductTask[],
+    reason: `使用 Journey “${resolvedJourney.journey.name}”的线性前置链：${(tasks as ProductTask[]).map((task) => task.name).join(' → ')}。`,
+  };
 }
 
 function setupCaseFor(targetCase: EvalCase, setupTask: ProductTask, model: ProductModel, generatedAt: string): EvalCase {
@@ -97,7 +139,7 @@ function setupCaseFor(targetCase: EvalCase, setupTask: ProductTask, model: Produ
 }
 
 function setupScenarioWithSatisfiedBlockers(scenario: ExecutableScenario, satisfiedBlockerTypes: ScenarioBlockerType[]): ExecutableScenario {
-  const allowedSatisfied: Set<ScenarioBlockerType> = new Set(satisfiedBlockerTypes.filter((type) => type === 'needs_auth'));
+  const allowedSatisfied: Set<ScenarioBlockerType> = new Set(satisfiedBlockerTypes.filter((type) => type === 'needs_auth' || type === 'needs_setup'));
   if (!allowedSatisfied.size) return scenario;
   const removed = scenario.blockers.filter((blocker) => allowedSatisfied.has(blocker.type));
   if (!removed.length) return scenario;
@@ -108,7 +150,9 @@ function setupScenarioWithSatisfiedBlockers(scenario: ExecutableScenario, satisf
     blockers,
     readiness: scenarioReadinessFromBlockers(blockers),
     preconditions: scenario.preconditions.map((precondition) => removedValues.has(precondition.text)
-      ? { ...precondition, status: 'satisfied', reason: '该认证条件由组合 Prerequisite Planner 已验证的 Auth Fixture 满足。' }
+      ? { ...precondition, status: 'satisfied', reason: precondition.blockerType === 'needs_auth'
+        ? '该认证条件由组合 Prerequisite Planner 已验证的 Auth Fixture 满足。'
+        : '该状态条件由同一唯一 Journey 中已经确定性通过的前置 Setup 步骤满足。' }
       : precondition),
   };
 }
@@ -125,35 +169,67 @@ export function resolveScenarioSetup(input: {
   if (!input.scenario.blockers.length || input.scenario.blockers.some((blocker) => blocker.type !== 'needs_setup')) {
     return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: 'Scenario 包含认证、测试文件、人工条件或不支持项，不能由自动 Setup 处理。' };
   }
-  if (!isLocalTarget(input.targetUrl)) {
-    return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: '自动 Setup 第一版只允许 localhost / loopback 测试目标，避免修改远程真实数据。' };
-  }
+  if (!isLocalTarget(input.targetUrl)) return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: '自动 Setup 只允许 localhost / loopback 测试目标，避免修改远程真实数据。' };
   const resolved = setupTaskFor(input.evalCase, input.productModel);
   if (!resolved.task) return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: resolved.reason };
   const generatedAt = input.generatedAt ?? new Date().toISOString();
   const setupCase = setupCaseFor(input.evalCase, resolved.task, input.productModel, generatedAt);
-  if (!setupCase.oracle.deterministicAssertions.length) {
-    return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: '前置任务没有足够的 verified 确定性成功信号，不能证明 Setup 已完成。' };
-  }
+  if (!setupCase.oracle.deterministicAssertions.length) return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: '前置任务没有足够的 verified 确定性成功信号，不能证明 Setup 已完成。' };
   const compiledSetupScenario = compileExecutableScenario({ evalCase: setupCase, productModel: input.productModel, targetUrl: input.targetUrl, generatedAt });
   const setupScenario = setupScenarioWithSatisfiedBlockers(compiledSetupScenario, input.satisfiedBlockerTypes ?? []);
-  if (setupScenario.readiness !== 'ready') {
-    return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: `前置任务本身也不具备安全执行条件：${setupScenario.blockers.map((item) => item.summary).join('；')}` };
+  if (setupScenario.readiness !== 'ready') return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: `前置任务本身也不具备安全执行条件：${setupScenario.blockers.map((item) => item.summary).join('；')}` };
+  return {
+    caseId: input.evalCase.caseId,
+    status: 'auto_setup',
+    blockers: [],
+    reason: resolved.reason,
+    plan: { setupId: `setup-${input.evalCase.caseId}`, targetCaseId: input.evalCase.caseId, targetTaskId: input.evalCase.taskId!, setupTaskId: resolved.task.taskId, setupCase, setupScenario, reason: resolved.reason },
+  };
+}
+
+export function resolveScenarioSetupChain(input: {
+  scenario: ExecutableScenario;
+  evalCase: EvalCase;
+  productModel: ProductModel;
+  targetUrl: string;
+  generatedAt?: string;
+  satisfiedBlockerTypes?: ScenarioBlockerType[];
+}): ScenarioSetupChainResolution {
+  if (input.scenario.readiness === 'ready') return { caseId: input.evalCase.caseId, status: 'not_required', plan: null, blockers: [], reason: 'Scenario 已具备执行条件。' };
+  if (!input.scenario.blockers.length || input.scenario.blockers.some((blocker) => blocker.type !== 'needs_setup')) {
+    return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: 'Scenario 包含认证、测试文件、人工条件或不支持项，不能由自动 Setup 链处理。' };
+  }
+  if (!isLocalTarget(input.targetUrl)) return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: '自动 Setup 链只允许 localhost / loopback 测试目标，避免修改远程真实数据。' };
+  const resolved = setupTasksForChain(input.evalCase, input.productModel);
+  if (!resolved.tasks || !input.evalCase.taskId) return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: resolved.reason };
+  const generatedAt = input.generatedAt ?? new Date().toISOString();
+  const steps: AutoSetupPlan[] = [];
+  for (const [index, task] of resolved.tasks.entries()) {
+    const setupCase = setupCaseFor(input.evalCase, task, input.productModel, generatedAt);
+    if (!setupCase.oracle.deterministicAssertions.length) return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: `前置任务“${task.name}”没有足够的 verified 确定性成功信号，不能证明 Setup 已完成。` };
+    const compiled = compileExecutableScenario({ evalCase: setupCase, productModel: input.productModel, targetUrl: input.targetUrl, generatedAt });
+    const satisfied: ScenarioBlockerType[] = [
+      ...(input.satisfiedBlockerTypes ?? []),
+      ...(index > 0 ? ['needs_setup' as const] : []),
+    ];
+    const setupScenario = setupScenarioWithSatisfiedBlockers(compiled, satisfied);
+    if (setupScenario.readiness !== 'ready') return { caseId: input.evalCase.caseId, status: 'blocked', plan: null, blockers: input.scenario.blockers, reason: `Setup 链第 ${index + 1} 步“${task.name}”本身不具备安全执行条件：${setupScenario.blockers.map((item) => item.summary).join('；')}` };
+    steps.push({
+      setupId: `setup-${input.evalCase.caseId}-${index + 1}`,
+      targetCaseId: input.evalCase.caseId,
+      targetTaskId: input.evalCase.taskId,
+      setupTaskId: task.taskId,
+      setupCase,
+      setupScenario,
+      reason: `Setup 链第 ${index + 1}/${resolved.tasks.length} 步：${task.name}`,
+    });
   }
   return {
     caseId: input.evalCase.caseId,
     status: 'auto_setup',
     blockers: [],
     reason: resolved.reason,
-    plan: {
-      setupId: `setup-${input.evalCase.caseId}`,
-      targetCaseId: input.evalCase.caseId,
-      targetTaskId: input.evalCase.taskId!,
-      setupTaskId: resolved.task.taskId,
-      setupCase,
-      setupScenario,
-      reason: resolved.reason,
-    },
+    plan: { setupId: `setup-chain-${input.evalCase.caseId}`, targetCaseId: input.evalCase.caseId, targetTaskId: input.evalCase.taskId, steps, reason: resolved.reason },
   };
 }
 
