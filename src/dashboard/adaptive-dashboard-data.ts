@@ -34,7 +34,7 @@ export async function listAdaptiveCases(outputDir: string): Promise<EvalCase[]> 
 }
 
 export async function findAdaptiveCase(outputDir: string, caseId: string): Promise<EvalCase | null> {
-  const manifest = await pathExists(evalSetManifestPath(outputDir)) ? await loadEvalSetManifest(outputDir) : null;
+  const manifest = await pathExists(evalSetManifestPath(outputDir) ? outputDir : outputDir) ? await loadEvalSetManifest(outputDir) : null;
   const reference = manifest?.cases.find((item) => item.caseId === caseId);
   return reference ? loadEvalCase(outputDir, reference.setType, reference.caseId) : null;
 }
@@ -91,7 +91,20 @@ export async function listAdaptiveRuns(outputDir: string): Promise<AdaptiveRunSu
       createdAt: result.createdAt,
       evidenceComplete: packet?.evidenceCompleteness.complete ?? false,
       evidenceMissing: packet?.evidenceCompleteness.missing ?? ['缺少 Evidence Packet。'],
-    } as AdaptiveRunSummary & { evidenceComplete: boolean; evidenceMissing: string[] });
+      deterministicChecks: result.deterministic.checks,
+      deterministicHardFailure: result.deterministic.hardFailure,
+      semanticVerdict: result.semantic.verdict,
+      semanticUnknowns: result.semantic.unknowns,
+      finalState: packet?.finalState ?? null,
+    } as AdaptiveRunSummary & {
+      evidenceComplete: boolean;
+      evidenceMissing: string[];
+      deterministicChecks: typeof result.deterministic.checks;
+      deterministicHardFailure: boolean;
+      semanticVerdict: typeof result.semantic.verdict;
+      semanticUnknowns: string[];
+      finalState: typeof packet extends null ? null : unknown;
+    });
   }
   return summaries;
 }
