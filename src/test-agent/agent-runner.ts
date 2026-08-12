@@ -136,7 +136,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
         const field = before.formFields.find((item) => item.elementId === decision.targetElementId);
         if (!field) decision = { ...decision, value: null };
         else {
-          const safeInput = generateSafeInput(field, evalCase.knownInformation, page.url());
+          const safeInput = generateSafeInput(field, evalCase.knownInformation, page.url(), decision.value);
           if (safeInput.status === 'blocked_by_safety') {
             decision = { ...decision, value: null };
             actionResult = { status: 'blocked_by_safety', action: 'fill', targetElementId: decision.targetElementId, summary: safeInput.reason, evidenceRefs: [beforeScreenshotPath] };
