@@ -85,14 +85,17 @@ function provider(): MockAiProvider {
   return new MockAiProvider((request) => {
     if (request.task === 'semantic_verifier') return { status: 'confirmed', observed: '可见状态符合预期。', confirmedFacts: ['页面状态发生预期变化'], unknowns: [], evidenceRefs: [], confidence: 0.95 };
     const prompt = JSON.parse(request.userPrompt) as { observation: { visibleStateSummary: string; formFields: Array<{ elementId: string; inputType: string; currentValuePresent: boolean }>; interactableElements: Array<{ elementId: string; label: string }> } };
+    const caseId = typeof request.metadata?.caseId === 'string' ? request.metadata.caseId : '';
+    if (caseId.startsWith('setup-')) {
+      if (prompt.observation.visibleStateSummary.includes('Created')) return { intentSummary: 'Setup 完成', action: 'finish', targetElementId: null, value: null, expectedResult: 'Created', confidence: 1 };
+      const textField = prompt.observation.formFields.find((field) => field.inputType !== 'file');
+      if (textField && !textField.currentValuePresent) return { intentSummary: '填写合成项目名', action: 'fill', targetElementId: textField.elementId, value: 'EvalPilot Setup', expectedResult: '项目名称已填写', confidence: 1 };
+      const create = prompt.observation.interactableElements.find((element) => element.label === 'Create');
+      return { intentSummary: '创建测试项目', action: 'click', targetElementId: create?.elementId ?? null, value: null, expectedResult: 'Created', confidence: 1 };
+    }
     if (prompt.observation.visibleStateSummary.includes('Imported')) return { intentSummary: '目标任务完成', action: 'finish', targetElementId: null, value: null, expectedResult: 'Imported', confidence: 1 };
     const file = prompt.observation.formFields.find((field) => field.inputType === 'file');
-    if (file) return { intentSummary: '导入 CSV', action: 'fill', targetElementId: file.elementId, value: '/tmp/not-allowed.csv', expectedResult: 'Imported', confidence: 1 };
-    if (prompt.observation.visibleStateSummary.includes('Created')) return { intentSummary: 'Setup 完成', action: 'finish', targetElementId: null, value: null, expectedResult: 'Created', confidence: 1 };
-    const textField = prompt.observation.formFields.find((field) => field.inputType !== 'file');
-    if (textField && !textField.currentValuePresent) return { intentSummary: '填写合成项目名', action: 'fill', targetElementId: textField.elementId, value: 'EvalPilot Setup', expectedResult: '项目名称已填写', confidence: 1 };
-    const create = prompt.observation.interactableElements.find((element) => element.label === 'Create');
-    return { intentSummary: '创建测试项目', action: 'click', targetElementId: create?.elementId ?? null, value: null, expectedResult: 'Created', confidence: 1 };
+    return { intentSummary: '导入 CSV', action: 'fill', targetElementId: file?.elementId ?? null, value: '/tmp/not-allowed.csv', expectedResult: 'Imported', confidence: 1 };
   });
 }
 
