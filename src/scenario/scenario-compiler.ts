@@ -22,6 +22,7 @@ export interface ScenarioPreconditionCheck {
   text: string;
   status: 'satisfied' | 'unresolved';
   reason: string;
+  blockerType?: ScenarioBlockerType;
 }
 
 export interface ExecutableScenario {
@@ -118,7 +119,7 @@ export function projectScenarioBlockers(scenario: ExecutableScenario, types: Sce
     preconditions: scenario.preconditions.map((precondition) => blockedValues.has(precondition.text)
       ? precondition
       : precondition.status === 'unresolved'
-        ? { ...precondition, status: 'satisfied', reason: '该前置条件由组合 Prerequisite Planner 的其他已验证步骤负责。' }
+        ? { ...precondition, status: 'satisfied', reason: '该前置条件由组合 Prerequisite Planner 的其他已验证步骤负责.' }
         : precondition),
   };
 }
@@ -134,9 +135,14 @@ export function compileExecutableScenario(input: { evalCase: EvalCase; productMo
   const preconditions = sourcePreconditions.map((text, index): ScenarioPreconditionCheck => {
     if (matchesAny(text, trivialPreconditionPatterns)) return { text, status: 'satisfied', reason: '该条件由项目 Readiness / 起始页面检查负责。' };
     const specificBlocker = specificPreconditionBlocker(input.evalCase.caseId, index, text);
-    if (specificBlocker) { blockers.push(specificBlocker); return { text, status: 'unresolved', reason: specificBlocker.summary }; }
+    if (specificBlocker) {
+      blockers.push(specificBlocker);
+      return { text, status: 'unresolved', reason: specificBlocker.summary, blockerType: specificBlocker.type };
+    }
     if (knownInformationSatisfies(text, input.evalCase.knownInformation)) return { text, status: 'satisfied', reason: '案例已提供与该普通输入条件关联的已知测试信息。' };
-    const blocker = unresolvedPreconditionBlocker(input.evalCase.caseId, index, text); blockers.push(blocker); return { text, status: 'unresolved', reason: blocker.summary };
+    const blocker = unresolvedPreconditionBlocker(input.evalCase.caseId, index, text);
+    blockers.push(blocker);
+    return { text, status: 'unresolved', reason: blocker.summary, blockerType: blocker.type };
   });
   return { scenarioId: `scenario-${input.evalCase.caseId}`, projectId: input.evalCase.projectId, caseId: input.evalCase.caseId, capabilityId: input.evalCase.capabilityId, taskId: input.evalCase.taskId, goal: input.evalCase.goal, startingUrl: start.url, readiness: scenarioReadinessFromBlockers(blockers), blockers, preconditions, knownInformationKeys: Object.keys(input.evalCase.knownInformation).sort(), generatedAt };
 }

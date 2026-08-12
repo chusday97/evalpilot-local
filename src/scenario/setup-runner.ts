@@ -7,6 +7,8 @@ import { runAiTestAgent } from '../test-agent/agent-runner.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
 import type { AutoSetupPlan } from './setup-resolver.js';
 
+type ChainAwareSetupPlan = AutoSetupPlan & { chainSteps?: AutoSetupPlan[] };
+
 export interface AutoSetupExecutionResult {
   setupId: string;
   targetCaseId: string;
@@ -19,6 +21,7 @@ export interface AutoSetupExecutionResult {
   blockedRemoteRequests: string[];
   summary: string;
   completedAt: string;
+  steps?: AutoSetupExecutionResult[];
 }
 
 function isLoopback(url: string): boolean {
@@ -37,7 +40,7 @@ function shouldBlockRemoteBusinessRequest(route: Route): boolean {
   return !isLoopback(request.url());
 }
 
-export async function runAutoSetup(input: {
+async function runSingleAutoSetup(input: {
   page: Page;
   provider: AiProvider;
   outputDir: string;
@@ -48,6 +51,7 @@ export async function runAutoSetup(input: {
   allowRemoteModel?: boolean;
   allowScreenshotToProvider?: boolean;
   now?: () => Date;
+  forceStartingNavigation?: boolean;
 }): Promise<AutoSetupExecutionResult> {
   const blockedRemoteRequests: string[] = [];
   const routeHandler = async (route: Route) => {
@@ -62,6 +66,14 @@ export async function runAutoSetup(input: {
   await input.page.route('**/*', routeHandler);
   let agentRun: Awaited<ReturnType<typeof runAiTestAgent>>;
   try {
+    // A chained setup step is a new executable scenario even when it shares the same URL as
+    // the previous step. Re-enter its declared starting URL so the app can render from the
+    // persisted Browser Context state instead of leaving the next Agent on the prior step's
+    // terminal DOM. The route guard is already active, so this refresh cannot bypass the
+    // loopback-only business-request boundary.
+    if (input.forceStartingNavigation) {
+      await input.page.goto(input.plan.setupScenario.startingUrl, { waitUntil: 'domcontentloaded' });
+    }
     agentRun = await runAiTestAgent(input.page, input.plan.setupCase, input.provider, {
       outputDir: input.outputDir,
       startingUrl: input.plan.setupScenario.startingUrl,
@@ -98,5 +110,51 @@ export async function runAutoSetup(input: {
       ? `前置任务“${input.plan.setupCase.title}”已由确定性证据确认完成。`
       : `前置任务“${input.plan.setupCase.title}”没有形成可安全复用的本地测试状态，目标 Case 未启动。${remoteBoundarySummary ? ` ${remoteBoundarySummary}` : ''}`,
     completedAt: agentRun.completedAt,
+  };
+}
+
+export async function runAutoSetup(input: {
+  page: Page;
+  provider: AiProvider;
+  outputDir: string;
+  plan: ChainAwareSetupPlan;
+  productModel: ProductModel;
+  evalSetVersion: number;
+  targetAppGitSha?: string | null;
+  allowRemoteModel?: boolean;
+  allowScreenshotToProvider?: boolean;
+  now?: () => Date;
+}): Promise<AutoSetupExecutionResult> {
+  const chain = input.plan.chainSteps ?? [];
+  if (chain.length <= 1) {
+    return runSingleAutoSetup({ ...input, plan: chain[0] ?? input.plan });
+  }
+
+  const steps: AutoSetupExecutionResult[] = [];
+  for (const [index, step] of chain.entries()) {
+    const execution = await runSingleAutoSetup({
+      ...input,
+      plan: step,
+      forceStartingNavigation: index > 0,
+    });
+    steps.push(execution);
+    if (execution.status !== 'passed') {
+      return {
+        ...execution,
+        setupId: input.plan.setupId,
+        summary: `Setup 链在“${step.setupCase.title}”停止；前面 ${steps.filter((item) => item.status === 'passed').length} 步已通过，但目标 Case 未启动。 ${execution.summary}`,
+        steps,
+      };
+    }
+  }
+
+  const final = steps.at(-1)!;
+  return {
+    ...final,
+    setupId: input.plan.setupId,
+    status: 'passed',
+    blockedRemoteRequests: steps.flatMap((step) => step.blockedRemoteRequests),
+    summary: `Setup 链 ${steps.map((step) => step.setupTaskId).join(' → ')} 已逐步通过确定性证据验证。`,
+    steps,
   };
 }
