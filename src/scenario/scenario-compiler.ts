@@ -83,7 +83,7 @@ function knownInformationSatisfies(precondition: string, knownInformation: Recor
   });
 }
 
-function preconditionBlocker(caseId: string, index: number, text: string): ScenarioBlocker | null {
+function specificPreconditionBlocker(caseId: string, index: number, text: string): ScenarioBlocker | null {
   if (matchesAny(text, authPatterns)) {
     return { blockerId: `${caseId}-precondition-${index + 1}`, type: 'needs_auth', summary: '这个任务需要可复用的测试登录态，当前还没有安全的认证 Fixture。', source: 'precondition', sourceValue: text };
   }
@@ -96,6 +96,10 @@ function preconditionBlocker(caseId: string, index: number, text: string): Scena
   if (matchesAny(text, setupPatterns)) {
     return { blockerId: `${caseId}-precondition-${index + 1}`, type: 'needs_setup', summary: '这个任务依赖已有对象或历史状态，需要先执行 Setup。', source: 'precondition', sourceValue: text };
   }
+  return null;
+}
+
+function unresolvedPreconditionBlocker(caseId: string, index: number, text: string): ScenarioBlocker {
   return { blockerId: `${caseId}-precondition-${index + 1}`, type: 'needs_setup', summary: '这个前置条件尚未被 Scenario Setup 明确满足，因此暂不启动 Agent。', source: 'precondition', sourceValue: text };
 }
 
@@ -160,12 +164,17 @@ export function compileExecutableScenario(input: {
     if (matchesAny(text, trivialPreconditionPatterns)) {
       return { text, status: 'satisfied', reason: '该条件由项目 Readiness / 起始页面检查负责。' };
     }
-    if (knownInformationSatisfies(text, input.evalCase.knownInformation)) {
-      return { text, status: 'satisfied', reason: '案例已提供与该条件关联的已知测试信息。' };
+    const specificBlocker = specificPreconditionBlocker(input.evalCase.caseId, index, text);
+    if (specificBlocker) {
+      blockers.push(specificBlocker);
+      return { text, status: 'unresolved', reason: specificBlocker.summary };
     }
-    const blocker = preconditionBlocker(input.evalCase.caseId, index, text);
-    if (blocker) blockers.push(blocker);
-    return { text, status: 'unresolved', reason: blocker?.summary ?? '前置条件尚未解析。' };
+    if (knownInformationSatisfies(text, input.evalCase.knownInformation)) {
+      return { text, status: 'satisfied', reason: '案例已提供与该普通输入条件关联的已知测试信息。' };
+    }
+    const blocker = unresolvedPreconditionBlocker(input.evalCase.caseId, index, text);
+    blockers.push(blocker);
+    return { text, status: 'unresolved', reason: blocker.summary };
   });
 
   return {
