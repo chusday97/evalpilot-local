@@ -162,6 +162,7 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
       const context = await browser.newContext();
       try {
         const page = await context.newPage();
+        let setupPassed = true;
         if (setupPlan) {
           const setupExecution = await runAutoSetup({
             page,
@@ -176,26 +177,28 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
           });
           setupExecutions.push(setupExecution);
           await writeJsonAtomic(resolve(setupExecutionDirectory, `${evalCase.caseId}.json`), setupExecution);
-          if (setupExecution.status !== 'passed') continue;
+          setupPassed = setupExecution.status === 'passed';
         }
-        const outcome = await runAdaptiveCase({
-          page,
-          provider,
-          outputDir: config.outputDir,
-          evalCase,
-          productModel: foundation.model,
-          existingCases: foundation.cases,
-          startingUrl: scenario.startingUrl,
-          evalSetVersion: foundation.version,
-          targetAppGitSha: commit,
-          allowRemoteModel: true,
-          allowScreenshotToProvider: input.allowScreenshot,
-        });
-        results.push(outcome.result);
-        if (outcome.finding) findings.push(outcome.finding);
-        if (outcome.badcase) badcases.push(outcome.badcase);
-        challengeCases.push(...(outcome.passAnalysis?.challengeCandidates ?? []));
-        packets.push(evidencePacketSchema.parse(JSON.parse(await readFile(outcome.agentRun.evidencePacketPath, 'utf8'))));
+        if (setupPassed) {
+          const outcome = await runAdaptiveCase({
+            page,
+            provider,
+            outputDir: config.outputDir,
+            evalCase,
+            productModel: foundation.model,
+            existingCases: foundation.cases,
+            startingUrl: scenario.startingUrl,
+            evalSetVersion: foundation.version,
+            targetAppGitSha: commit,
+            allowRemoteModel: true,
+            allowScreenshotToProvider: input.allowScreenshot,
+          });
+          results.push(outcome.result);
+          if (outcome.finding) findings.push(outcome.finding);
+          if (outcome.badcase) badcases.push(outcome.badcase);
+          challengeCases.push(...(outcome.passAnalysis?.challengeCandidates ?? []));
+          packets.push(evidencePacketSchema.parse(JSON.parse(await readFile(outcome.agentRun.evidencePacketPath, 'utf8'))));
+        }
       } finally {
         await context.close();
       }
