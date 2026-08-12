@@ -1,4 +1,4 @@
-import { readdir } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { AdaptiveRunSummary, Badcase, CandidateFinding, CoverageMatrix, EvalCase, EvalSetDashboardSummary, EvalSetType, ProductModel } from '../../types.js';
 import type { AiProvider } from '../ai/provider.js';
@@ -10,6 +10,7 @@ import { loadEvalCaseResult } from '../judge/eval-result-store.js';
 import { listFindings, loadFinding } from '../findings/finding-store.js';
 import { pathExists } from '../utils/file-system.js';
 import { generateEvaluationFoundation } from '../evaluation/evaluation-foundation.js';
+import { evidencePacketSchema } from '../test-agent/schemas.js';
 
 const emptyCounts: Record<EvalSetType, number> = { baseline: 0, regression: 0, challenge: 0, exploratory: 0 };
 
@@ -74,7 +75,23 @@ export async function listAdaptiveRuns(outputDir: string): Promise<AdaptiveRunSu
     if (!await pathExists(resolve(directory, runId, 'result.json'))) continue;
     const result = await loadEvalCaseResult(outputDir, runId);
     const evalCase = caseById.get(result.caseId);
-    summaries.push({ runId, caseId: result.caseId, caseTitle: evalCase?.title ?? null, setType: evalCase?.setType ?? null, verdict: result.verdict, failureSource: result.failureSource, severity: result.severity, summary: result.semantic.summary, createdAt: result.createdAt });
+    const packetPath = resolve(directory, runId, 'evidence-packet.json');
+    const packet = await pathExists(packetPath)
+      ? evidencePacketSchema.parse(JSON.parse(await readFile(packetPath, 'utf8')))
+      : null;
+    summaries.push({
+      runId,
+      caseId: result.caseId,
+      caseTitle: evalCase?.title ?? null,
+      setType: evalCase?.setType ?? null,
+      verdict: result.verdict,
+      failureSource: result.failureSource,
+      severity: result.severity,
+      summary: result.semantic.summary,
+      createdAt: result.createdAt,
+      evidenceComplete: packet?.evidenceCompleteness.complete ?? false,
+      evidenceMissing: packet?.evidenceCompleteness.missing ?? ['缺少 Evidence Packet。'],
+    } as AdaptiveRunSummary & { evidenceComplete: boolean; evidenceMissing: string[] });
   }
   return summaries;
 }
