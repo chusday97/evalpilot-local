@@ -66,7 +66,7 @@ export function generateSafeInput(field: GroundedField, knownInformation: Record
     const normalizedKey = normalized(key);
     const fixtureValue = String(rawValue);
     if (fieldTokens.some((token) => token.includes(normalizedKey) || normalizedKey.includes(token)) && satisfiesConstraints(field, fixtureValue, constraints)) {
-      return { status: 'ready', value: fixtureValue, origin: 'known_fixture', reason: `使用案例提供且符合页面约束的 ${key}。` };
+      return { status: 'ready', value: fixtureValue, origin: 'known_fixture', reason: `使用案例提供的 ${key}。` };
     }
   }
 
