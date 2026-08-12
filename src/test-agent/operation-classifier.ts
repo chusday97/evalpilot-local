@@ -4,9 +4,10 @@ const includesAny = (value: string, terms: string[]) => terms.some((term) => val
 
 export function classifyOperation(input: { decision: AgentDecision; observation: PageObservation; evalCase: EvalCase }): OperationType {
   const { decision, observation, evalCase } = input;
-  if (['fill', 'select', 'scroll', 'finish', 'abandon'].includes(decision.action)) return 'synchronous';
   const target = observation.interactableElements.find((element) => element.elementId === decision.targetElementId);
   const field = observation.formFields.find((element) => element.elementId === decision.targetElementId);
+  if (decision.action === 'fill' && field?.inputType === 'file') return 'file_processing';
+  if (['fill', 'select', 'scroll', 'finish', 'abandon'].includes(decision.action)) return 'synchronous';
   const actionContext = [target?.label, target?.text, target?.role, target?.tagName, field?.inputType, decision.intentSummary, decision.expectedResult]
     .filter((value): value is string => Boolean(value)).join(' ').toLocaleLowerCase();
   const context = [
