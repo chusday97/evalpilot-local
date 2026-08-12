@@ -20,6 +20,9 @@ const dataDir = resolve(outputDir, 'evalpilot-data');
 const manifestPath = resolve('acceptance/real-products/aquaguide.yaml');
 const children: ChildProcess[] = [];
 const servers: Server[] = [];
+const providerCalls: Array<{ at: string; schemaName: string }> = [];
+const sessionSnapshots: Array<{ at: string; status: string; stage: string; message: string | null; runIds: string[] }> = [];
+const acceptanceDeadlineMs = 180_000;
 
 await mkdir(outputDir, { recursive: true });
 await mkdir(dataDir, { recursive: true });
@@ -38,7 +41,7 @@ function freePort(): Promise<number> {
 async function waitFor(url: string, attempts = 120): Promise<Response> {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
     try {
-      const response = await fetch(url);
+      const response = await fetch(url, { signal: AbortSignal.timeout(2_000) });
       if (response.ok) return response;
     } catch {
       // Child process can still be starting.
@@ -51,11 +54,17 @@ async function waitFor(url: string, attempts = 120): Promise<Response> {
 async function api<T>(baseUrl: string, path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(`${baseUrl}${path}`, {
     ...options,
+    signal: options?.signal ?? AbortSignal.timeout(10_000),
     headers: { 'content-type': 'application/json', ...(options?.headers ?? {}) },
   });
   const payload = await response.json() as { success?: boolean; data?: T; error?: unknown };
   if (!response.ok || !payload.success) throw new Error(`${path} failed: ${JSON.stringify(payload)}`);
   return payload.data as T;
+}
+
+async function safeApi<T>(baseUrl: string, path: string): Promise<T | null> {
+  try { return await api<T>(baseUrl, path); }
+  catch { return null; }
 }
 
 function verifiedEvidence(input: any): { evidenceId: string; evidenceStatus: 'verified' | 'declared' } | null {
@@ -80,24 +89,25 @@ function productUnderstanding(input: any) {
     userTasks: [
       {
         taskId: 'task-create-usable-aquarium', capabilityId: 'cap-create-aquarium', name: '创建一个可用淡水鱼缸', goal: '创建一个可用淡水鱼缸',
-        preconditions: ['项目页面已打开'], successConditions: ['显示 60×30×30cm 尺寸', '水体为淡水'],
+        preconditions: ['项目页面已打开'], successConditions: ['显示 60x30x30cm 尺寸', '水体为淡水'],
         successSignals: [
-          { signalId: 'signal-create-size', kind: 'text_visible', target: '60×30×30cm', description: '鱼缸页面显示已保存的 60×30×30cm 尺寸', ...taskEvidence },
+          { signalId: 'signal-create-size', kind: 'text_visible', target: '60x30x30cm', description: '鱼缸页面显示已保存的 60x30x30cm 尺寸', ...taskEvidence },
           { signalId: 'signal-create-water', kind: 'text_visible', target: '淡水', description: '鱼缸页面显示淡水水体', ...taskEvidence },
         ], businessRuleIds: [], ...taskEvidence,
       },
       {
         taskId: 'task-record-existing-livestock', capabilityId: 'cap-record-livestock', name: '向已有鱼缸记录生物', goal: '记录已有生物到当前鱼缸',
-        preconditions: ['已有鱼缸'], successConditions: ['已有生物记录保存成功'],
+        preconditions: ['已有鱼缸'], successConditions: ['页面显示一个已保存活体'],
         successSignals: [
-          { signalId: 'signal-record-livestock', kind: 'text_visible', target: '已记录缸内生物', description: '页面明确显示已有生物记录成功', ...taskEvidence },
+          { signalId: 'signal-record-livestock', kind: 'text_visible', target: '已显示 1 个活体', description: '鱼缸页面显示已保存的真实活体', ...taskEvidence },
         ], businessRuleIds: [], ...taskEvidence,
       },
       {
         taskId: 'task-daily-check-risk', capabilityId: 'cap-daily-check', name: '完成每日检查并得到风险分级', goal: '完成每日检查并查看风险分级',
-        preconditions: ['已有鱼缸', '已有生物记录'], successConditions: ['经常浮头时显示高风险结果'],
+        preconditions: ['已有鱼缸', '已有生物记录'], successConditions: ['经常浮头时显示立即处理结果和打氧动作'],
         successSignals: [
-          { signalId: 'signal-daily-high-risk', kind: 'text_visible', target: '高风险', description: '每日检查结果显示高风险', ...taskEvidence },
+          { signalId: 'signal-daily-high-risk', kind: 'text_visible', target: '需要立即处理', description: '每日检查结果进入需要立即处理等级', ...taskEvidence },
+          { signalId: 'signal-daily-action', kind: 'text_visible', target: '立刻增加打氧或水面扰动', description: '高风险结果给出明确立即动作', ...taskEvidence },
         ], businessRuleIds: ['rule-daily-high-risk'], ...taskEvidence,
       },
     ],
@@ -106,7 +116,7 @@ function productUnderstanding(input: any) {
       transitions: [
         { transitionId: 'transition-create', fromState: 'empty', toState: 'usable', trigger: '保存尺寸和淡水水体', successSignalIds: ['signal-create-size', 'signal-create-water'] },
         { transitionId: 'transition-stock', fromState: 'usable', toState: 'stocked', trigger: '记录已有生物', successSignalIds: ['signal-record-livestock'] },
-        { transitionId: 'transition-check', fromState: 'stocked', toState: 'checked', trigger: '完成每日检查', successSignalIds: ['signal-daily-high-risk'] },
+        { transitionId: 'transition-check', fromState: 'stocked', toState: 'checked', trigger: '完成每日检查', successSignalIds: ['signal-daily-high-risk', 'signal-daily-action'] },
       ], ...taskEvidence,
     }],
     crossPageJourneys: [{
@@ -114,7 +124,7 @@ function productUnderstanding(input: any) {
       taskIds: ['task-create-usable-aquarium', 'task-record-existing-livestock', 'task-daily-check-risk'],
       routes: ['/welcome', '/aquarium'], successConditions: ['可用鱼缸已建立', '已有生物已记录', '每日检查已完成'], ...taskEvidence,
     }],
-    businessRules: [{ ruleId: 'rule-daily-high-risk', statement: '经常浮头必须至少保持高风险，AI 不得降低确定性风险。', ...taskEvidence }],
+    businessRules: [{ ruleId: 'rule-daily-high-risk', statement: '经常浮头必须至少保持需要立即处理等级，AI 不得降低确定性风险。', ...taskEvidence }],
     unknowns: [],
   };
 }
@@ -156,12 +166,13 @@ function actorDecision(input: any) {
 
   if (goal.includes('创建') && goal.includes('鱼缸')) {
     if (String(observation.pageUrl ?? '').includes('/welcome')) {
-      return safeClick(input, (item) => labelIncludes(item, '建立第一个鱼缸'), '沿真实 onboarding 建立第一个鱼缸', '进入鱼缸页面') ?? { intentSummary: '欢迎页没有建缸入口', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止并保留证据', confidence: 1 };
+      return safeClick(input, (item) => labelIncludes(item, '建立第一个鱼缸'), '沿真实 onboarding 建立第一个鱼缸', '进入鱼缸页面')
+        ?? { intentSummary: '欢迎页没有建缸入口', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止并保留证据', confidence: 1 };
     }
-    const dialogText = (observation.interactableElements ?? []).map((item: any) => String(item.label ?? '')).join(' ');
-    const settingsOpen = dialogText.includes('鱼缸设置') && dialogText.includes('保存设置');
+    const labels = (observation.interactableElements ?? []).map((item: any) => String(item.label ?? ''));
+    const settingsOpen = labels.includes('保存设置');
     if (!settingsOpen) {
-      return safeClick(input, (item) => labelIncludes(item, '建立或完善鱼缸') || labelIncludes(item, '鱼缸设置'), '打开鱼缸设置', '显示尺寸和水体设置')
+      return safeClick(input, (item) => labelIncludes(item, '建立或完善鱼缸') || String(item.label ?? '') === '鱼缸设置', '打开鱼缸设置', '显示尺寸和水体设置')
         ?? { intentSummary: '没有找到鱼缸设置入口', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止并保留证据', confidence: 1 };
     }
 
@@ -173,30 +184,25 @@ function actorDecision(input: any) {
       return { intentSummary: `填写第 ${filledCount + 1} 个尺寸字段`, action: 'fill', targetElementId: emptyNumbers[0].elementId, value, expectedResult: '尺寸字段保存当前输入值', confidence: 1 };
     }
 
-    if (!visible.includes('淡水') || visible.includes('水体未记录')) {
-      const openParameters = safeClick(input, (item) => labelIncludes(item, '参数') && labelIncludes(item, '水体未记录'), '打开水体参数', '显示淡水/海水选项');
-      if (openParameters) return openParameters;
-      const chooseFreshwater = safeClick(input, (item) => labelIncludes(item, '淡水') && labelIncludes(item, '常见观赏鱼'), '选择淡水', '水体参数变为淡水');
-      if (chooseFreshwater) return chooseFreshwater;
-    }
-
     const chooseFreshwater = safeClick(input, (item) => labelIncludes(item, '淡水') && labelIncludes(item, '常见观赏鱼'), '选择淡水', '水体参数变为淡水');
     if (chooseFreshwater && visible.includes('水体未记录')) return chooseFreshwater;
+    const openParameters = safeClick(input, (item) => labelIncludes(item, '参数') && labelIncludes(item, '水体未记录'), '打开水体参数', '显示淡水/海水选项');
+    if (openParameters && visible.includes('水体未记录')) return openParameters;
+    if (chooseFreshwater) return chooseFreshwater;
+
     const save = safeClick(input, (item) => String(item.label ?? '') === '保存设置', '保存鱼缸设置', '鱼缸页面显示已保存尺寸和淡水');
     if (save) return save;
   }
 
   if (goal.includes('记录') && goal.includes('生物')) {
     const search = (observation.formFields ?? []).find((field: any) => String(field.placeholder ?? field.label ?? '').includes('搜索鱼、虾、螺'));
-    if (search && !search.currentValuePresent) return { intentSummary: '搜索一只真实测试生物', action: 'fill', targetElementId: search.elementId, value: '咖啡鼠', expectedResult: '候选列表显示咖啡鼠', confidence: 1 };
-    const confirm = safeClick(input, (item) => labelIncludes(item, '确认添加') && !item.disabled, '确认记录已有生物', '页面显示记录成功');
-    if (confirm && (observation.interactableElements ?? []).some((item: any) => labelIncludes(item, '咖啡鼠'))) {
-      const selected = visible.includes('已选择') || visible.includes('数量') || visible.includes('入缸');
-      if (selected) return confirm;
+    if (search && !search.currentValuePresent) {
+      return { intentSummary: '搜索一只真实测试生物', action: 'fill', targetElementId: search.elementId, value: '咖啡鼠', expectedResult: '候选列表显示咖啡鼠', confidence: 1 };
     }
-    const fish = safeClick(input, (item) => labelIncludes(item, '咖啡鼠') && item.tagName === 'button', '选择咖啡鼠', '确认添加按钮可用');
+    const saveToTank = safeClick(input, (item) => String(item.label ?? '') === '保存到鱼缸', '保存已有生物记录', '鱼缸页面显示已保存活体');
+    if (saveToTank) return saveToTank;
+    const fish = safeClick(input, (item) => labelIncludes(item, '咖啡鼠') && item.tagName === 'button', '选择咖啡鼠', '显示数量和入缸日期表单');
     if (fish) return fish;
-    if (confirm) return confirm;
   }
 
   if (goal.includes('每日') && goal.includes('检查')) {
@@ -204,9 +210,11 @@ function actorDecision(input: any) {
     for (const label of choices) {
       const target = (observation.interactableElements ?? []).find((item: any) => !item.disabled && String(item.label ?? '') === label);
       const alreadyClicked = (input.recentDecisions ?? []).some((decision: any) => decision.targetElementId === target?.elementId);
-      if (target && !alreadyClicked) return { intentSummary: `回答每日检查：${label}`, action: 'click', targetElementId: target.elementId, value: null, expectedResult: '完成一项检查回答', confidence: 1 };
+      if (target && !alreadyClicked) {
+        return { intentSummary: `回答每日检查：${label}`, action: 'click', targetElementId: target.elementId, value: null, expectedResult: '完成一项检查回答', confidence: 1 };
+      }
     }
-    const generate = safeClick(input, (item) => labelIncludes(item, '生成检查结果') && !item.disabled, '生成每日检查风险结果', '页面显示风险分级');
+    const generate = safeClick(input, (item) => labelIncludes(item, '生成检查结果') && !item.disabled, '生成每日检查风险结果', '页面显示立即处理等级和动作');
     if (generate) return generate;
   }
 
@@ -225,7 +233,9 @@ function mockStructuredOutput(schemaName: string, userPrompt: string) {
   }
   if (schemaName === 'semantic_judge_result') {
     const deterministic = input.deterministic ?? {};
-    if (deterministic.hardFailure) return { verdict: 'fail', taskCompletion: 'failed', summary: '确定性断言已确认真实任务失败。', whatWorked: ['运行证据已保存'], whatFailed: ['验收成功信号未全部成立'], whyItMatters: ['真实用户任务没有完成'], confirmedFacts: ['确定性断言失败'], hypotheses: [], unknowns: [], evidenceRefs: deterministic.evidenceRefs ?? [], confidence: 0.95 };
+    if (deterministic.hardFailure) {
+      return { verdict: 'fail', taskCompletion: 'failed', summary: '确定性断言已确认真实任务失败。', whatWorked: ['运行证据已保存'], whatFailed: ['验收成功信号未全部成立'], whyItMatters: ['真实用户任务没有完成'], confirmedFacts: ['确定性断言失败'], hypotheses: [], unknowns: [], evidenceRefs: deterministic.evidenceRefs ?? [], confidence: 0.95 };
+    }
     const passed = (deterministic.checks ?? []).length > 0 && deterministic.checks.every((check: any) => check.verdict === 'pass');
     return passed
       ? { verdict: 'pass', taskCompletion: 'complete', summary: '真实 AquaGuide 任务已完成。', whatWorked: ['验收成功信号全部可见'], whatFailed: [], whyItMatters: [], confirmedFacts: ['真实任务完成信号可见'], hypotheses: [], unknowns: [], evidenceRefs: deterministic.evidenceRefs ?? [], confidence: 0.95 }
@@ -243,7 +253,8 @@ async function startMockProvider(): Promise<string> {
     request.on('end', () => {
       try {
         const body = JSON.parse(Buffer.concat(chunks).toString('utf8'));
-        const schemaName = body.text?.format?.name;
+        const schemaName = String(body.text?.format?.name ?? 'unknown');
+        providerCalls.push({ at: new Date().toISOString(), schemaName });
         const userPrompt = body.input?.[0]?.content?.find((item: any) => item.type === 'input_text')?.text ?? '{}';
         const output = mockStructuredOutput(schemaName, userPrompt);
         response.writeHead(200, { 'content-type': 'application/json' });
@@ -262,6 +273,20 @@ async function startMockProvider(): Promise<string> {
   return `http://127.0.0.1:${port}/v1`;
 }
 
+async function stopInfrastructure() {
+  for (const child of children) {
+    child.kill('SIGTERM');
+    setTimeout(() => { if (!child.killed) child.kill('SIGKILL'); }, 300).unref();
+  }
+  for (const server of servers) {
+    server.closeAllConnections?.();
+    server.close();
+  }
+}
+
+let dashboardLog = '';
+let diagnostic: Record<string, unknown> = {};
+
 try {
   await waitFor(targetUrl);
   const mockProviderUrl = await startMockProvider();
@@ -273,7 +298,6 @@ try {
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   children.push(dashboard);
-  let dashboardLog = '';
   dashboard.stdout?.on('data', (chunk) => { dashboardLog += chunk.toString(); });
   dashboard.stderr?.on('data', (chunk) => { dashboardLog += chunk.toString(); });
   await waitFor(`${dashboardUrl}/api/health`);
@@ -289,24 +313,47 @@ try {
     body: JSON.stringify({ projectId: project.projectId, depth: 'core', capabilityIds: [], allowRemoteModel: true, allowScreenshot: false }),
   });
   let session = created;
-  for (let attempt = 0; attempt < 360 && session.status !== 'completed' && session.status !== 'failed'; attempt += 1) {
-    await new Promise((wait) => setTimeout(wait, 500));
-    session = (await api<any>(dashboardUrl, `/api/evaluations/${encodeURIComponent(created.evaluationId)}`)).session;
+  const deadline = Date.now() + acceptanceDeadlineMs;
+  while (Date.now() < deadline && session.status !== 'completed' && session.status !== 'failed') {
+    await new Promise((wait) => setTimeout(wait, 1_000));
+    const snapshot = await safeApi<any>(dashboardUrl, `/api/evaluations/${encodeURIComponent(created.evaluationId)}`);
+    if (!snapshot?.session) continue;
+    session = snapshot.session;
+    const currentStage = session.stages?.find((stage: any) => stage.name === session.currentStage);
+    sessionSnapshots.push({ at: new Date().toISOString(), status: session.status, stage: session.currentStage, message: currentStage?.message ?? null, runIds: [...(session.runIds ?? [])] });
   }
 
-  const adaptiveRuns = await api<any[]>(dashboardUrl, `/api/projects/${encodeURIComponent(project.projectId)}/adaptive-runs`);
-  const nextAction = await api<any>(dashboardUrl, `/api/evaluations/${encodeURIComponent(created.evaluationId)}/next-action?projectId=${encodeURIComponent(project.projectId)}`);
+  const timedOut = session.status !== 'completed' && session.status !== 'failed';
+  const adaptiveRuns = await safeApi<any[]>(dashboardUrl, `/api/projects/${encodeURIComponent(project.projectId)}/adaptive-runs`) ?? [];
+  const nextAction = await safeApi<any>(dashboardUrl, `/api/evaluations/${encodeURIComponent(created.evaluationId)}/next-action?projectId=${encodeURIComponent(project.projectId)}`);
   const evaluationDirectory = resolve(project.outputDir, 'evaluations', created.evaluationId);
-  const gate = await evaluateRealProductAcceptanceFromArtifacts({ manifestPath, evaluationDirectory });
-  const summary = { project, session, adaptiveRuns, nextAction, gate, evaluationDirectory };
-  await writeFile(resolve(outputDir, 'aquaguide-real-acceptance.json'), JSON.stringify(summary, null, 2));
+  let gate: Awaited<ReturnType<typeof evaluateRealProductAcceptanceFromArtifacts>> | null = null;
+  let gateError: string | null = null;
+  try { gate = await evaluateRealProductAcceptanceFromArtifacts({ manifestPath, evaluationDirectory }); }
+  catch (error) { gateError = error instanceof Error ? error.message : String(error); }
+
+  diagnostic = { project, session, timedOut, adaptiveRuns, nextAction, gate, gateError, evaluationDirectory, providerCalls, sessionSnapshots };
+  await writeFile(resolve(outputDir, 'aquaguide-real-acceptance.json'), JSON.stringify(diagnostic, null, 2));
+  await writeFile(resolve(outputDir, 'provider-calls.json'), JSON.stringify(providerCalls, null, 2));
+  await writeFile(resolve(outputDir, 'session-snapshots.json'), JSON.stringify(sessionSnapshots, null, 2));
   await writeFile(resolve(outputDir, 'dashboard.log'), dashboardLog);
 
-  process.stdout.write(`AquaGuide Real Acceptance: ${gate.counts.passed}/${gate.counts.planned} (${Math.round(gate.taskCompletionRate * 100)}%)\n`);
-  for (const task of gate.tasks) process.stdout.write(`- [${task.status}] ${task.name}: ${task.reason}\n`);
-  process.stdout.write(`Next Action: ${nextAction.type}\n`);
-  if (!gate.passed) process.exitCode = 1;
+  if (gate) {
+    process.stdout.write(`AquaGuide Real Acceptance: ${gate.counts.passed}/${gate.counts.planned} (${Math.round(gate.taskCompletionRate * 100)}%)\n`);
+    for (const task of gate.tasks) process.stdout.write(`- [${task.status}] ${task.name}: ${task.reason}\n`);
+  } else {
+    process.stdout.write(`AquaGuide Real Acceptance did not reach the gate: ${gateError ?? 'unknown error'}\n`);
+  }
+  process.stdout.write(`Session: ${session.status} / ${session.currentStage}; provider calls=${providerCalls.length}; timedOut=${timedOut}\n`);
+  process.stdout.write(`Next Action: ${nextAction?.type ?? 'unavailable'}\n`);
+  if (timedOut || !gate?.passed) process.exitCode = 1;
+} catch (error) {
+  diagnostic = { error: error instanceof Error ? error.message : String(error), providerCalls, sessionSnapshots };
+  await writeFile(resolve(outputDir, 'aquaguide-real-acceptance.json'), JSON.stringify(diagnostic, null, 2));
+  await writeFile(resolve(outputDir, 'provider-calls.json'), JSON.stringify(providerCalls, null, 2));
+  await writeFile(resolve(outputDir, 'session-snapshots.json'), JSON.stringify(sessionSnapshots, null, 2));
+  await writeFile(resolve(outputDir, 'dashboard.log'), dashboardLog);
+  throw error;
 } finally {
-  for (const child of children) child.kill('SIGTERM');
-  for (const server of servers) await new Promise<void>((resolveClose) => server.close(() => resolveClose()));
+  await stopInfrastructure();
 }
