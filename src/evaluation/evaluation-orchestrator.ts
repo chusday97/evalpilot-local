@@ -20,13 +20,14 @@ import { ensureDirectory, pathExists, writeJsonAtomic } from '../utils/file-syst
 import { configForProject } from '../projects/project-registry.js';
 import { runAdaptiveCase } from './adaptive-evaluation-service.js';
 import { evaluationSourceFingerprint, generateEvaluationFoundation, loadEvaluationFoundationState, saveEvaluationFoundationState } from './evaluation-foundation.js';
+import { foundationQualityFromGeneration, foundationQualityMessage, loadFoundationQualityState, saveFoundationQualityState, shouldRegenerateFoundation, type FoundationQualityState } from './foundation-quality.js';
 import { evaluationOrchestratorInputSchema, evaluationOrchestratorResultSchema } from './schemas.js';
 import { selectEvaluationCases } from './evaluation-selector.js';
 
 const execFileAsync = promisify(execFile);
 
 interface OrchestratorHooks {
-  prepared?: (selection: EvalSetSelection, model: ProductModel) => Promise<void> | void;
+  prepared?: (selection: EvalSetSelection, model: ProductModel, quality: FoundationQualityState) => Promise<void> | void;
   caseCompleted?: (completed: number, total: number, evalCase: EvalCase) => Promise<void> | void;
 }
 
@@ -42,14 +43,38 @@ export function configuredEvaluationProvider(): AiProvider {
   return new OpenAiCompatibleProvider({ providerId: credential.provider as 'deepseek' | 'kimi' | 'openai_compatible', displayName: credential.displayName, apiKey: credential.apiKey, model: credential.model, baseUrl: credential.baseUrl, screenshotInput: credential.screenshotInput });
 }
 
-async function ensureFoundation(projectId: string, outputDir: string, provider: AiProvider): Promise<{ model: ProductModel; cases: EvalCase[]; version: number }> {
+async function ensureFoundation(projectId: string, outputDir: string, provider: AiProvider): Promise<{ model: ProductModel; cases: EvalCase[]; version: number; quality: FoundationQualityState }> {
   const versions = await listProductModelVersions(outputDir);
   const hasEvalSet = await pathExists(evalSetManifestPath(outputDir));
   const sourceFingerprint = await evaluationSourceFingerprint(outputDir);
-  const state = await loadEvaluationFoundationState(outputDir);
-  if (!versions.length || !hasEvalSet || (state !== null && state.sourceFingerprint !== sourceFingerprint)) {
-    await generateEvaluationFoundation({ projectId, outputDir, provider, allowRemoteModel: true });
+  const [state, persistedQuality] = await Promise.all([
+    loadEvaluationFoundationState(outputDir),
+    loadFoundationQualityState(outputDir),
+  ]);
+  const regenerate = shouldRegenerateFoundation({
+    hasProductModel: versions.length > 0,
+    hasEvalSet,
+    sourceFingerprint,
+    persistedFingerprint: state?.sourceFingerprint ?? null,
+    qualityState: persistedQuality,
+    providerId: provider.info.providerId,
+    model: provider.info.model,
+  });
+  let quality = persistedQuality;
+  if (regenerate) {
+    const generatedAt = new Date().toISOString();
+    const generated = await generateEvaluationFoundation({ projectId, outputDir, provider, allowRemoteModel: true, generatedAt });
+    quality = foundationQualityFromGeneration({
+      sourceFingerprint,
+      generationMode: generated.generationMode,
+      oracleFallbackCount: generated.oracleFallbackCount,
+      warnings: generated.warnings,
+      provider,
+      generatedAt,
+    });
+    await saveFoundationQualityState(outputDir, quality);
   }
+
   const currentVersions = await listProductModelVersions(outputDir);
   const modelVersion = currentVersions.at(-1);
   if (!modelVersion) throw new EvalPilotError('产品理解没有成功生成，请检查扫描证据后重试。', 'PRODUCT_MODEL_REQUIRED');
@@ -58,8 +83,11 @@ async function ensureFoundation(projectId: string, outputDir: string, provider: 
     loadEvalSetCases(outputDir),
     loadEvalSetManifest(outputDir),
   ]);
-  await saveEvaluationFoundationState(outputDir, { schemaVersion: 1, sourceFingerprint, productModelVersion: model.version, evalSetVersion: manifest.version, generatedAt: new Date().toISOString() });
-  return { model, cases, version: manifest.version };
+  if (!quality || quality.sourceFingerprint !== sourceFingerprint) {
+    throw new EvalPilotError('产品理解质量状态缺失，已停止使用无法确认来源的评测案例。', 'PRODUCT_MODEL_REQUIRED');
+  }
+  await saveEvaluationFoundationState(outputDir, { schemaVersion: 1, sourceFingerprint, productModelVersion: model.version, evalSetVersion: manifest.version, generatedAt: quality.generatedAt });
+  return { model, cases, version: manifest.version, quality };
 }
 
 async function targetCommit(projectRoot: string): Promise<string | null> {
@@ -72,11 +100,16 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const config = await configForProject(cwd, input.projectId);
   const provider = dependencies.provider ?? configuredEvaluationProvider();
   const foundation = await ensureFoundation(input.projectId, config.outputDir, provider);
+  const evaluationDirectory = resolve(config.outputDir, 'evaluations', input.evaluationId);
+  await ensureDirectory(evaluationDirectory);
+  await writeJsonAtomic(resolve(evaluationDirectory, 'foundation-quality.json'), foundation.quality);
+  if (foundation.quality.quality === 'degraded') {
+    throw new EvalPilotError(foundationQualityMessage(foundation.quality), 'PRODUCT_MODEL_REQUIRED');
+  }
+
   const selection = selectEvaluationCases({ model: foundation.model, cases: foundation.cases, depth: input.depth, capabilityIds: input.capabilityIds });
   if (!selection.cases.length) throw new EvalPilotError('所选功能没有可运行的评测案例。请重新整理案例或调整功能范围。', 'EVALUATION_CASE_NOT_FOUND');
 
-  const evaluationDirectory = resolve(config.outputDir, 'evaluations', input.evaluationId);
-  await ensureDirectory(evaluationDirectory);
   const scenarioGeneratedAt = new Date().toISOString();
   const scenarios = compileExecutableScenarios({ cases: selection.cases, productModel: foundation.model, targetUrl: config.targetUrl, generatedAt: scenarioGeneratedAt });
   const executionPlan = planScenarioExecution(scenarios);
@@ -93,7 +126,7 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
     throw new EvalPilotError(`所选评测任务当前都不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${detail}`, 'EVALUATION_SCENARIO_NOT_READY');
   }
 
-  await hooks.prepared?.(selection, foundation.model);
+  await hooks.prepared?.(selection, foundation.model, foundation.quality);
   const scenarioByCaseId = new Map(scenarios.map((scenario) => [scenario.caseId, scenario]));
   const runnableCaseIds = new Set(executionPlan.readyCaseIds);
   const runnableCases = selection.cases.filter((evalCase) => runnableCaseIds.has(evalCase.caseId));

@@ -76,8 +76,9 @@ export async function generateEvaluationFoundation(input: { projectId: string; o
     ? await generateAndSaveBaselineWithOracleBuilder(input.outputDir, model, input.provider, { generatedAt, allowRemoteModel: true })
     : { cases: await generateAndSaveBaseline(input.outputDir, model, generatedAt), oracleResults: [] };
   const cases = generated.cases;
+  const oracleFallbackCount = generated.oracleResults.filter((result) => result.mode !== 'ai').length;
   warnings = [...warnings, ...generated.oracleResults.flatMap((result) => result.warnings)];
   const coverage = analyzeCoverage({ model, cases, generatedAt });
   await saveCoverageMatrix(input.outputDir, coverage);
-  return { productModel: model, cases, coverage, generationMode, warnings };
+  return { productModel: model, cases, coverage, generationMode, oracleFallbackCount, warnings };
 }

@@ -27,6 +27,33 @@ function freePort() {
 function mockStructuredOutput(schemaName, userPrompt) {
   let input = {};
   try { input = JSON.parse(userPrompt); } catch { /* Invalid prompt input should produce an invalid schema response. */ }
+  if (schemaName === 'product_understanding_draft') {
+    const evidenceCatalog = input.evidenceCatalog ?? [];
+    const evidence = evidenceCatalog.find((item) => item.sourceType === 'browser' && item.status === 'verified') ?? evidenceCatalog[0];
+    if (!evidence?.evidenceId) return {};
+    const evidenceStatus = evidence.status === 'verified' ? 'verified' : 'declared';
+    const blueprint = input.blueprint?.[0] ?? {};
+    const route = input.routes?.[0]?.path ?? '/';
+    const capabilityId = blueprint.id ?? 'cap-task-list';
+    return {
+      capabilities: [{ capabilityId, name: blueprint.name ?? '任务清单', description: '添加一个任务并确认页面结果。', routes: [route], entryPoints: [route], userGoals: ['添加一个任务'], importance: 'critical', evidenceStatus, evidenceRefs: [evidence.evidenceId], needsHumanReview: false }],
+      userTasks: [{
+        taskId: 'task-add-public-example', capabilityId, name: '添加任务', goal: '添加一个任务并确认添加结果', preconditions: ['项目页面已打开'], successConditions: ['已添加'],
+        successSignals: [{ signalId: 'signal-task-added', kind: 'text_visible', target: '已添加', description: '页面显示已添加结果', evidenceStatus, evidenceRefs: [evidence.evidenceId], needsHumanReview: false }],
+        businessRuleIds: [], evidenceStatus, evidenceRefs: [evidence.evidenceId], needsHumanReview: false,
+      }],
+      objectLifecycles: [], crossPageJourneys: [], businessRules: [], unknowns: [],
+    };
+  }
+  if (schemaName === 'oracle_builder_output') {
+    const signal = input.task?.successSignals?.find((item) => item.kind !== 'semantic') ?? input.task?.successSignals?.[0];
+    const target = signal?.target ?? input.task?.successConditions?.[0] ?? '已添加';
+    return {
+      expectedOutcome: [target], mustObserve: [target], mustNotObserve: [], businessRules: [], semanticRubric: [`用户是否完成：${input.task?.goal ?? '添加任务'}`],
+      deterministicAssertions: [{ assertionId: 'assert-task-added', type: 'text_visible', target, expected: true, negated: false }],
+      inconclusiveWhen: ['没有观察到目标结果且没有明确失败证据'], needsHumanReview: false, reviewReasons: [],
+    };
+  }
   if (schemaName === 'agent_decision') {
     const observation = input.observation ?? {};
     const visible = String(observation.visibleStateSummary ?? '');
@@ -74,30 +101,21 @@ async function startMockProvider() {
       }
     });
   });
-  await new Promise((resolveListen, reject) => {
-    server.once('error', reject);
-    server.listen(port, '127.0.0.1', resolveListen);
-  });
+  await new Promise((resolveListen, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolveListen); });
   servers.push(server);
   return `http://127.0.0.1:${port}/v1`;
 }
 
 async function waitFor(url, attempts = 80) {
   for (let attempt = 0; attempt < attempts; attempt += 1) {
-    try {
-      const response = await fetch(url);
-      if (response.ok) return response;
-    } catch { /* The child process is still starting. */ }
+    try { const response = await fetch(url); if (response.ok) return response; } catch { /* child process still starting */ }
     await new Promise((wait) => setTimeout(wait, 250));
   }
   throw new Error(`服务没有按时就绪：${url}`);
 }
 
 async function api(baseUrl, path, options) {
-  const response = await fetch(`${baseUrl}${path}`, {
-    ...options,
-    headers: { 'content-type': 'application/json', ...options?.headers },
-  });
+  const response = await fetch(`${baseUrl}${path}`, { ...options, headers: { 'content-type': 'application/json', ...options?.headers } });
   const payload = await response.json();
   if (!response.ok || !payload.success) throw new Error(`${path} 请求失败：${JSON.stringify(payload)}`);
   return payload.data;
@@ -106,13 +124,8 @@ async function api(baseUrl, path, options) {
 try {
   let tarball = process.argv[2] ? resolve(root, process.argv[2]) : null;
   if (!tarball) {
-    const output = execFileSync('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary], {
-      cwd: root,
-      encoding: 'utf8',
-      env: { ...process.env, npm_config_cache: cache },
-    });
-    const [packed] = JSON.parse(output);
-    tarball = join(temporary, packed.filename);
+    const output = execFileSync('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', temporary], { cwd: root, encoding: 'utf8', env: { ...process.env, npm_config_cache: cache } });
+    const [packed] = JSON.parse(output); tarball = join(temporary, packed.filename);
   }
 
   const consumer = join(temporary, 'consumer');
@@ -139,16 +152,10 @@ try {
   processes.push(dashboard);
   await waitFor(`${dashboardUrl}/api/health`);
 
-  const project = await api(dashboardUrl, '/api/projects', {
-    method: 'POST',
-    body: JSON.stringify({ name: 'Static No API Example', projectRoot: exampleRoot, targetUrl: exampleUrl, importSource: 'manual' }),
-  });
+  const project = await api(dashboardUrl, '/api/projects', { method: 'POST', body: JSON.stringify({ name: 'Static No API Example', projectRoot: exampleRoot, targetUrl: exampleUrl, importSource: 'manual' }) });
   if (project.status !== 'ready') throw new Error(`公开示例添加后未就绪：${JSON.stringify(project)}`);
 
-  const created = await api(dashboardUrl, '/api/evaluations', {
-    method: 'POST',
-    body: JSON.stringify({ projectId: project.projectId, depth: 'core', capabilityIds: [], allowRemoteModel: true, allowScreenshot: false }),
-  });
+  const created = await api(dashboardUrl, '/api/evaluations', { method: 'POST', body: JSON.stringify({ projectId: project.projectId, depth: 'core', capabilityIds: [], allowRemoteModel: true, allowScreenshot: false }) });
   let session = created;
   for (let attempt = 0; attempt < 240 && session.status !== 'completed' && session.status !== 'failed'; attempt += 1) {
     await new Promise((wait) => setTimeout(wait, 500));
@@ -156,10 +163,20 @@ try {
   }
   if (session.status !== 'completed') throw new Error(`公开示例核心评测未完成：${JSON.stringify({ status: session.status, stage: session.currentStage, error: session.error })}`);
   if (!session.coverage || session.coverage.plannedCount < 1) throw new Error('公开示例没有生成功能级覆盖证据。');
-  if (!session.coverage.complete || session.coverage.executedCount !== session.coverage.plannedCount || session.coverage.notRunCount !== 0) {
-    throw new Error(`公开示例没有实际运行全部计划功能：${JSON.stringify(session.coverage)}`);
+  if (!session.coverage.complete || session.coverage.executedCount !== session.coverage.plannedCount || session.coverage.notRunCount !== 0) throw new Error(`公开示例没有实际运行全部计划功能：${JSON.stringify(session.coverage)}`);
+  const adaptiveRuns = await api(dashboardUrl, `/api/projects/${encodeURIComponent(project.projectId)}/adaptive-runs`);
+  if (session.coverage.passedCount !== session.coverage.plannedCount || session.coverage.failedCount !== 0 || session.coverage.blockedCount !== 0) {
+    throw new Error(`公开示例没有真正通过全部计划功能：${JSON.stringify({ coverage: session.coverage, adaptiveRuns: adaptiveRuns.slice(0, 3), runIds: session.runIds })}`);
   }
   if (new Set(session.executedCapabilityIds).size !== session.coverage.executedCount) throw new Error('实际运行功能数量与覆盖证据不一致。');
+
+  const foundationQualityPath = resolve(project.outputDir, 'evaluations', session.evaluationId, 'foundation-quality.json');
+  if (!existsSync(foundationQualityPath)) throw new Error('公开示例没有保存 Product Understanding 质量快照。');
+  const foundationQuality = JSON.parse(readFileSync(foundationQualityPath, 'utf8'));
+  if (foundationQuality.quality !== 'ready' || foundationQuality.generationMode !== 'ai' || foundationQuality.oracleFallbackCount !== 0) throw new Error(`公开示例没有经过成功的 AI Product Understanding + Oracle：${JSON.stringify(foundationQuality)}`);
+
+  const nextAction = await api(dashboardUrl, `/api/evaluations/${encodeURIComponent(session.evaluationId)}/next-action?projectId=${encodeURIComponent(project.projectId)}`);
+  if (nextAction.type !== 'no_action') throw new Error(`公开示例完成后仍产生了不正确的下一步：${JSON.stringify(nextAction)}`);
 
   const records = await api(dashboardUrl, `/api/evaluation-records?projectId=${encodeURIComponent(project.projectId)}`);
   const record = records.find((item) => item.evaluationId === session.evaluationId);
@@ -175,7 +192,7 @@ try {
   const reportPage = await waitFor(`${dashboardUrl}/issues?evaluationId=${encodeURIComponent(session.evaluationId)}`);
   if (!(await reportPage.text()).includes('<div id="root">')) throw new Error('公开示例报告页面无法打开。');
 
-  process.stdout.write(`${JSON.stringify({ ok: true, projectStatus: project.status, evaluationStatus: session.status, report: 'ready', plannedCapabilities: session.coverage.plannedCount, executedCapabilities: session.coverage.executedCount, evaluationId: session.evaluationId })}\n`);
+  process.stdout.write(`${JSON.stringify({ ok: true, projectStatus: project.status, evaluationStatus: session.status, foundationQuality: foundationQuality.quality, taskPass: true, nextAction: nextAction.type, report: 'ready', plannedCapabilities: session.coverage.plannedCount, executedCapabilities: session.coverage.executedCount, evaluationId: session.evaluationId })}\n`);
 } finally {
   for (const child of processes.reverse()) child.kill('SIGTERM');
   await Promise.all(servers.reverse().map((server) => new Promise((resolveClose) => server.close(resolveClose))));

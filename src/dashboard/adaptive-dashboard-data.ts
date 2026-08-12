@@ -1,6 +1,6 @@
-import { readdir } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
-import type { AdaptiveRunSummary, Badcase, CandidateFinding, CoverageMatrix, EvalCase, EvalSetDashboardSummary, EvalSetType, ProductModel } from '../../types.js';
+import type { AdaptiveRunSummary, AiTestAgentRun, Badcase, CandidateFinding, CoverageMatrix, EvalCase, EvalSetDashboardSummary, EvalSetType, EvidencePacket, ProductModel } from '../../types.js';
 import type { AiProvider } from '../ai/provider.js';
 import { listProductModelVersions, loadProductModel } from '../product-model/product-model-store.js';
 import { loadLatestCoverageMatrix } from '../eval-set/coverage-store.js';
@@ -10,8 +10,23 @@ import { loadEvalCaseResult } from '../judge/eval-result-store.js';
 import { listFindings, loadFinding } from '../findings/finding-store.js';
 import { pathExists } from '../utils/file-system.js';
 import { generateEvaluationFoundation } from '../evaluation/evaluation-foundation.js';
+import { evidencePacketSchema } from '../test-agent/schemas.js';
 
 const emptyCounts: Record<EvalSetType, number> = { baseline: 0, regression: 0, challenge: 0, exploratory: 0 };
+
+type AdaptiveRunDiagnosticSummary = AdaptiveRunSummary & {
+  evidenceComplete: boolean;
+  evidenceMissing: string[];
+  deterministicChecks: Awaited<ReturnType<typeof loadEvalCaseResult>>['deterministic']['checks'];
+  deterministicHardFailure: boolean;
+  semanticVerdict: Awaited<ReturnType<typeof loadEvalCaseResult>>['semantic']['verdict'];
+  semanticUnknowns: string[];
+  finalState: EvidencePacket['finalState'] | null;
+  agentStatus: AiTestAgentRun['status'] | null;
+  agentError: string | null;
+  lastDecision: AiTestAgentRun['decisions'][number] | null;
+  lastActionResult: AiTestAgentRun['actionResults'][number] | null;
+};
 
 export async function latestProductModel(outputDir: string): Promise<ProductModel | null> {
   const versions = await listProductModelVersions(outputDir);
@@ -74,7 +89,37 @@ export async function listAdaptiveRuns(outputDir: string): Promise<AdaptiveRunSu
     if (!await pathExists(resolve(directory, runId, 'result.json'))) continue;
     const result = await loadEvalCaseResult(outputDir, runId);
     const evalCase = caseById.get(result.caseId);
-    summaries.push({ runId, caseId: result.caseId, caseTitle: evalCase?.title ?? null, setType: evalCase?.setType ?? null, verdict: result.verdict, failureSource: result.failureSource, severity: result.severity, summary: result.semantic.summary, createdAt: result.createdAt });
+    const packetPath = resolve(directory, runId, 'evidence-packet.json');
+    const packet = await pathExists(packetPath)
+      ? evidencePacketSchema.parse(JSON.parse(await readFile(packetPath, 'utf8')))
+      : null;
+    const agentRunPath = resolve(directory, runId, 'agent-run.json');
+    const agentRun = await pathExists(agentRunPath)
+      ? JSON.parse(await readFile(agentRunPath, 'utf8')) as AiTestAgentRun
+      : null;
+    const summary: AdaptiveRunDiagnosticSummary = {
+      runId,
+      caseId: result.caseId,
+      caseTitle: evalCase?.title ?? null,
+      setType: evalCase?.setType ?? null,
+      verdict: result.verdict,
+      failureSource: result.failureSource,
+      severity: result.severity,
+      summary: result.semantic.summary,
+      createdAt: result.createdAt,
+      evidenceComplete: packet?.evidenceCompleteness.complete ?? false,
+      evidenceMissing: packet?.evidenceCompleteness.missing ?? ['缺少 Evidence Packet。'],
+      deterministicChecks: result.deterministic.checks,
+      deterministicHardFailure: result.deterministic.hardFailure,
+      semanticVerdict: result.semantic.verdict,
+      semanticUnknowns: result.semantic.unknowns,
+      finalState: packet?.finalState ?? null,
+      agentStatus: agentRun?.status ?? null,
+      agentError: agentRun?.error ?? null,
+      lastDecision: agentRun?.decisions.at(-1) ?? null,
+      lastActionResult: agentRun?.actionResults.at(-1) ?? null,
+    };
+    summaries.push(summary);
   }
   return summaries;
 }
