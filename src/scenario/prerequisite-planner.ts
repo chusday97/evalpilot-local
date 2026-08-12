@@ -52,8 +52,22 @@ export async function planScenarioPrerequisites(input: {
     return { caseId: input.evalCase.caseId, status: 'not_required', executionOrder: ['target'], authFixture: null, setupPlan: null, fileFixturePlan: null, unresolvedBlockers: [], reasons: ['Scenario 已具备执行条件。'] };
   }
 
+  const hardBlockers = uniqueBlockers(input.scenario.blockers.filter((blocker) => nonAutomatableTypes.includes(blocker.type)));
+  if (hardBlockers.length) {
+    return {
+      caseId: input.evalCase.caseId,
+      status: 'blocked',
+      executionOrder: ['target'],
+      authFixture: null,
+      setupPlan: null,
+      fileFixturePlan: null,
+      unresolvedBlockers: hardBlockers,
+      reasons: ['Scenario 包含需要人工确认或当前不支持的前置条件，Planner 在读取任何本地 Fixture 前停止。'],
+    };
+  }
+
   const reasons: string[] = [];
-  const unresolved: ScenarioBlocker[] = input.scenario.blockers.filter((blocker) => nonAutomatableTypes.includes(blocker.type));
+  const unresolved: ScenarioBlocker[] = [];
   let authFixture: AuthSessionFixture | null = null;
   let setupPlan: AutoSetupPlan | null = null;
   let fileFixturePlan: SyntheticFileFixturePlan | null = null;
