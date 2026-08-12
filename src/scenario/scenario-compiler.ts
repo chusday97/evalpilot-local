@@ -85,7 +85,7 @@ function unresolvedPreconditionBlocker(caseId: string, index: number, text: stri
   return { blockerId: `${caseId}-precondition-${index + 1}`, type: 'needs_setup', summary: '这个前置条件尚未被 Scenario Setup 明确满足，因此暂不启动 Agent。', source: 'precondition', sourceValue: text };
 }
 
-function readinessFrom(blockers: ScenarioBlocker[]): ScenarioReadiness {
+export function scenarioReadinessFromBlockers(blockers: ScenarioBlocker[]): ScenarioReadiness {
   if (!blockers.length) return 'ready';
   const order: ScenarioBlockerType[] = ['unsupported', 'needs_auth', 'needs_test_data', 'needs_human_input', 'needs_setup'];
   return order.find((type) => blockers.some((blocker) => blocker.type === type)) ?? 'needs_setup';
@@ -103,6 +103,22 @@ function startingUrlFor(evalCase: EvalCase, model: ProductModel, targetUrl: stri
   catch { return { url: targetUrl, blocker: { blockerId: `${evalCase.caseId}-starting-url`, type: 'unsupported', summary: '这个案例没有可解析的安全起始页面。', source: 'product_model', sourceValue: entry } }; }
 }
 
+export function projectScenarioBlockers(scenario: ExecutableScenario, types: ScenarioBlockerType[]): ExecutableScenario {
+  const allowed = new Set(types);
+  const blockers = scenario.blockers.filter((blocker) => allowed.has(blocker.type));
+  const blockedValues = new Set(blockers.map((blocker) => blocker.sourceValue));
+  return {
+    ...scenario,
+    readiness: scenarioReadinessFromBlockers(blockers),
+    blockers,
+    preconditions: scenario.preconditions.map((precondition) => blockedValues.has(precondition.text)
+      ? precondition
+      : precondition.status === 'unresolved'
+        ? { ...precondition, status: 'satisfied', reason: '该前置条件由组合 Prerequisite Planner 的其他已验证步骤负责。' }
+        : precondition),
+  };
+}
+
 export function compileExecutableScenario(input: { evalCase: EvalCase; productModel: ProductModel; targetUrl: string; generatedAt?: string }): ExecutableScenario {
   const generatedAt = input.generatedAt ?? new Date().toISOString();
   const blockers: ScenarioBlocker[] = [];
@@ -118,7 +134,7 @@ export function compileExecutableScenario(input: { evalCase: EvalCase; productMo
     if (knownInformationSatisfies(text, input.evalCase.knownInformation)) return { text, status: 'satisfied', reason: '案例已提供与该普通输入条件关联的已知测试信息。' };
     const blocker = unresolvedPreconditionBlocker(input.evalCase.caseId, index, text); blockers.push(blocker); return { text, status: 'unresolved', reason: blocker.summary };
   });
-  return { scenarioId: `scenario-${input.evalCase.caseId}`, projectId: input.evalCase.projectId, caseId: input.evalCase.caseId, capabilityId: input.evalCase.capabilityId, taskId: input.evalCase.taskId, goal: input.evalCase.goal, startingUrl: start.url, readiness: readinessFrom(blockers), blockers, preconditions, knownInformationKeys: Object.keys(input.evalCase.knownInformation).sort(), generatedAt };
+  return { scenarioId: `scenario-${input.evalCase.caseId}`, projectId: input.evalCase.projectId, caseId: input.evalCase.caseId, capabilityId: input.evalCase.capabilityId, taskId: input.evalCase.taskId, goal: input.evalCase.goal, startingUrl: start.url, readiness: scenarioReadinessFromBlockers(blockers), blockers, preconditions, knownInformationKeys: Object.keys(input.evalCase.knownInformation).sort(), generatedAt };
 }
 
 export function compileExecutableScenarios(input: { cases: EvalCase[]; productModel: ProductModel; targetUrl: string; generatedAt?: string }): ExecutableScenario[] {
