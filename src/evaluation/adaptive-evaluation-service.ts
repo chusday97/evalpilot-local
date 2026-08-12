@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import type { Page } from 'playwright';
 import type { AiProvider } from '../ai/provider.js';
 import type { Badcase, EvalCase, EvalCaseResult, EvaluatorBadcase, PassAnalysis, ProductModel } from '../../types.js';
+import type { SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
 import { recordCaseResult } from '../eval-set/case-lifecycle.js';
 import { analyzeCoverage } from '../eval-set/coverage-analyzer.js';
 import { loadCoverageRunEvidence, saveCoverageMatrix } from '../eval-set/coverage-store.js';
@@ -30,9 +31,10 @@ export async function runAdaptiveCase(input: {
   allowScreenshotToProvider?: boolean;
   maxAgentSteps?: number;
   agentWaitTimeoutMs?: number;
+  fileFixtures?: SyntheticFileFixture[];
   now?: () => Date;
 }): Promise<{ agentRun: Awaited<ReturnType<typeof runAiTestAgent>>; result: EvalCaseResult; finding: Awaited<ReturnType<typeof triageEvalCaseFinding>>['finding']; badcase: Badcase | null; evaluatorBadcase: EvaluatorBadcase | null; passAnalysis: PassAnalysis | null; report: Awaited<ReturnType<typeof buildAdaptiveEvaluationReport>> }> {
-  const agentRun = await runAiTestAgent(input.page, input.evalCase, input.provider, { outputDir: input.outputDir, startingUrl: input.startingUrl, mode: 'task', maxSteps: input.maxAgentSteps, waitTimeoutMs: input.agentWaitTimeoutMs, targetAppCommit: input.targetAppGitSha ?? null, productModelVersion: input.productModel.version, evalSetVersion: input.evalSetVersion, judgeModel: input.provider.info.model, allowRemoteModel: input.allowRemoteModel, allowScreenshotToProvider: input.allowScreenshotToProvider, now: input.now });
+  const agentRun = await runAiTestAgent(input.page, input.evalCase, input.provider, { outputDir: input.outputDir, startingUrl: input.startingUrl, mode: 'task', maxSteps: input.maxAgentSteps, waitTimeoutMs: input.agentWaitTimeoutMs, targetAppCommit: input.targetAppGitSha ?? null, productModelVersion: input.productModel.version, evalSetVersion: input.evalSetVersion, judgeModel: input.provider.info.model, allowRemoteModel: input.allowRemoteModel, allowScreenshotToProvider: input.allowScreenshotToProvider, fileFixtures: input.fileFixtures, now: input.now });
   const packet = evidencePacketSchema.parse(JSON.parse(await readFile(agentRun.evidencePacketPath, 'utf8')));
   const rawJudgedResult = await judgeEvalCase({ outputDir: input.outputDir, evalCase: input.evalCase, packet, provider: input.provider, allowRemoteModel: input.allowRemoteModel, createdAt: agentRun.completedAt });
   const safetyGatedResult = agentRun.status === 'blocked_by_safety'
