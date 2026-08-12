@@ -2,12 +2,14 @@ import { resolve } from 'node:path';
 import type { Page } from 'playwright';
 import type { AgentActionResult, AgentDecision, AiTestAgentRun, EvalCase, EvidencePacket, InteractionAction, PageObservation, ReflectionDecision, StepEvidence, StepVerification, WaitPolicy } from '../../types.js';
 import type { AiProvider } from '../ai/provider.js';
+import type { SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
 import { ensureDirectory, pathExists, writeJsonAtomic } from '../utils/file-system.js';
 import { actorPromptV1 } from '../prompts/actor.v1.js';
 import { chooseAgentAction } from './actor.js';
 import { executeAgentAction } from './action-executor.js';
 import { calculateEvidenceCompleteness, saveAgentEvidence } from './evidence-packet.js';
 import { readFieldInputConstraints } from './field-input-constraints.js';
+import { chooseSyntheticFileFixture } from './file-fixture.js';
 import { observePage } from './observer.js';
 import { reflectOnStep } from './reflector.js';
 import { generateSafeInput } from './safe-input-generator.js';
@@ -39,6 +41,7 @@ interface AgentRunnerOptions {
   useSemanticReflector?: boolean;
   waitTimeoutMs?: number;
   waitPolicy?: Partial<WaitPolicy>;
+  fileFixtures?: SyntheticFileFixture[];
   now?: () => Date;
 }
 
@@ -152,7 +155,15 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       if (decision.action === 'fill') {
         const field = before.formFields.find((item) => item.elementId === decision.targetElementId);
         if (!field) decision = { ...decision, value: null };
-        else {
+        else if (field.inputType === 'file') {
+          const fixture = await chooseSyntheticFileFixture(page, field, options.fileFixtures ?? []);
+          if (!fixture) {
+            decision = { ...decision, value: null };
+            actionResult = { status: 'blocked_by_safety', action: 'fill', targetElementId: decision.targetElementId, summary: '当前文件输入没有匹配的 EvalPilot 合成 Fixture；不会读取任意本地文件。', evidenceRefs: [beforeScreenshotPath] };
+          } else {
+            decision = { ...decision, value: fixture.fixtureId };
+          }
+        } else {
           const constraints = await readFieldInputConstraints(page, field);
           const safeInput = generateSafeInput(field, evalCase.knownInformation, page.url(), decision.value, constraints);
           if (safeInput.status === 'blocked_by_safety') {
@@ -164,7 +175,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       }
       decisions.push(decision);
       const taskStateBefore = await captureTaskStateSignals(page, decision);
-      actionResult ??= await executeAgentAction(page, before, decision);
+      actionResult ??= await executeAgentAction(page, before, decision, { fileFixtures: options.fileFixtures });
       const operationType = classifyOperation({ decision, observation: before, evalCase });
       const waitResult = await waitForProgressAwareOutcome({
         page,
