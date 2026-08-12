@@ -18,7 +18,7 @@ permissions:
 jobs:
   acceptance:
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 8
     steps:
       - name: Checkout EvalPilot
         uses: actions/checkout@v4
@@ -64,7 +64,7 @@ jobs:
           exit 1
 
       - name: Run EvalPilot real acceptance
-        run: npx tsx scripts/run-aquaguide-real-acceptance.ts --project-root real-products/aquaguide --url http://127.0.0.1:3000 --output real-product-acceptance-output
+        run: timeout --signal=TERM --kill-after=5s 240s npx tsx scripts/run-aquaguide-real-acceptance.ts --project-root real-products/aquaguide --url http://127.0.0.1:3000 --output real-product-acceptance-output
 
       - name: Upload real acceptance evidence
         if: always()
