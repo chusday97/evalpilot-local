@@ -13,11 +13,10 @@ import { analyzeCoverage } from '../eval-set/coverage-analyzer.js';
 import { saveCoverageMatrix } from '../eval-set/coverage-store.js';
 import { listProductModelVersions, loadProductModel } from '../product-model/product-model-store.js';
 import { buildAdaptiveEvaluationReport } from '../report/adaptive-report.js';
-import { resolveAuthSessionFixture, type AuthSessionFixture } from '../scenario/auth-session-fixture.js';
 import { verifyAuthSession, type AuthSessionCheck } from '../scenario/auth-session-verifier.js';
-import { materializeSyntheticFileFixtures, resolveSyntheticFileFixtures, type SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
-import { compileExecutableScenarios, planScenarioExecution, scenarioBlockerSummary } from '../scenario/scenario-compiler.js';
-import { resolveScenarioSetups } from '../scenario/setup-resolver.js';
+import { materializeSyntheticFileFixtures, type SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
+import { planScenarioPrerequisiteSet, summarizePrerequisitePlan, type PrerequisitePlan } from '../scenario/prerequisite-planner.js';
+import { compileExecutableScenarios } from '../scenario/scenario-compiler.js';
 import { runAutoSetup, type AutoSetupExecutionResult } from '../scenario/setup-runner.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
 import { EvalPilotError } from '../utils/errors.js';
@@ -101,6 +100,16 @@ async function targetCommit(projectRoot: string): Promise<string | null> {
   catch { return null; }
 }
 
+function materializationBlockedPlan(plan: PrerequisitePlan, scenario: ReturnType<typeof compileExecutableScenarios>[number], error: unknown): PrerequisitePlan {
+  const blockers = scenario.blockers.filter((blocker) => blocker.type === 'needs_test_data');
+  return {
+    ...plan,
+    status: 'blocked',
+    unresolvedBlockers: [...new Map([...plan.unresolvedBlockers, ...blockers].map((blocker) => [blocker.blockerId, blocker])).values()],
+    reasons: [...plan.reasons, `File: 合成 Fixture 无法安全写入：${error instanceof Error ? error.message : String(error)}`],
+  };
+}
+
 export async function runEvaluationOrchestrator(cwd: string, rawInput: EvaluationOrchestratorInput, hooks: OrchestratorHooks = {}, dependencies: OrchestratorDependencies = {}): Promise<EvaluationOrchestratorResult> {
   const input = evaluationOrchestratorInputSchema.parse(rawInput);
   const config = await configForProject(cwd, input.projectId);
@@ -118,96 +127,64 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
 
   const scenarioGeneratedAt = new Date().toISOString();
   const scenarios = compileExecutableScenarios({ cases: selection.cases, productModel: foundation.model, targetUrl: config.targetUrl, generatedAt: scenarioGeneratedAt });
-  const executionPlan = planScenarioExecution(scenarios);
-  const setupResolutions = resolveScenarioSetups({ scenarios, cases: selection.cases, productModel: foundation.model, targetUrl: config.targetUrl, generatedAt: scenarioGeneratedAt });
-  const setupPlans = setupResolutions.flatMap((resolutionItem) => resolutionItem.status === 'auto_setup' && resolutionItem.plan ? [resolutionItem.plan] : []);
-  const setupPlanByCaseId = new Map(setupPlans.map((plan) => [plan.targetCaseId, plan]));
-  const setupResolutionSummaries = setupResolutions.map((resolutionItem) => ({
-    caseId: resolutionItem.caseId,
-    status: resolutionItem.status,
-    blockers: resolutionItem.blockers,
-    reason: resolutionItem.reason,
-    plan: resolutionItem.plan ? {
-      setupId: resolutionItem.plan.setupId,
-      targetCaseId: resolutionItem.plan.targetCaseId,
-      targetTaskId: resolutionItem.plan.targetTaskId,
-      setupTaskId: resolutionItem.plan.setupTaskId,
-      setupScenarioId: resolutionItem.plan.setupScenario.scenarioId,
-      reason: resolutionItem.plan.reason,
-    } : null,
-  }));
+  const authStorageStatePath = dependencies.authStorageStatePath ?? process.env.EVALPILOT_AUTH_STATE ?? null;
+  let prerequisitePlans = await planScenarioPrerequisiteSet({
+    scenarios,
+    cases: selection.cases,
+    productModel: foundation.model,
+    targetUrl: config.targetUrl,
+    projectRoot: config.projectRoot,
+    authStorageStatePath,
+    generatedAt: scenarioGeneratedAt,
+  });
 
-  const fileFixtureResolutions = scenarios.map((scenario) => resolveSyntheticFileFixtures({ scenario, targetUrl: config.targetUrl }));
+  const scenarioByCaseId = new Map(scenarios.map((scenario) => [scenario.caseId, scenario]));
   const fileFixtureDirectory = resolve(evaluationDirectory, 'synthetic-fixtures');
   const fileFixturesByCaseId = new Map<string, SyntheticFileFixture[]>();
-  for (const resolutionItem of fileFixtureResolutions) {
-    if (resolutionItem.status !== 'ready' || !resolutionItem.plan) continue;
+  const materializedPlans: PrerequisitePlan[] = [];
+  for (const plan of prerequisitePlans) {
+    if (plan.status !== 'ready' || !plan.fileFixturePlan) {
+      materializedPlans.push(plan);
+      continue;
+    }
     try {
-      const fixtures = await materializeSyntheticFileFixtures(resolutionItem.plan, resolve(fileFixtureDirectory, resolutionItem.caseId));
-      fileFixturesByCaseId.set(resolutionItem.caseId, fixtures);
+      const fixtures = await materializeSyntheticFileFixtures(plan.fileFixturePlan, resolve(fileFixtureDirectory, plan.caseId));
+      fileFixturesByCaseId.set(plan.caseId, fixtures);
+      materializedPlans.push(plan);
     } catch (materializeError) {
-      throw new EvalPilotError(`无法安全生成案例 ${resolutionItem.caseId} 的合成文件 Fixture：${materializeError instanceof Error ? materializeError.message : String(materializeError)}`, 'EVALUATION_SCENARIO_NOT_READY');
+      const scenario = scenarioByCaseId.get(plan.caseId);
+      materializedPlans.push(scenario ? materializationBlockedPlan(plan, scenario, materializeError) : { ...plan, status: 'blocked', reasons: [...plan.reasons, 'File: Scenario 已不存在，未写入 Fixture。'] });
     }
   }
-  const fileFixtureCaseIds = [...fileFixturesByCaseId.keys()];
-  const fileFixtureResolutionSummaries = fileFixtureResolutions.map((resolutionItem) => ({
-    caseId: resolutionItem.caseId,
-    status: resolutionItem.status,
-    reason: resolutionItem.reason,
-    blockers: resolutionItem.blockers,
-    fixtures: resolutionItem.plan?.fixtures.map((fixture) => ({ fixtureId: fixture.fixtureId, kind: fixture.kind, filename: fixture.filename, mimeType: fixture.mimeType })) ?? [],
-  }));
+  prerequisitePlans = materializedPlans;
+  const prerequisitePlanByCaseId = new Map(prerequisitePlans.map((plan) => [plan.caseId, plan]));
+  const readyCaseIds = prerequisitePlans.filter((plan) => plan.status !== 'blocked').map((plan) => plan.caseId);
+  const readyCaseIdSet = new Set(readyCaseIds);
+  const blockedCaseIds = prerequisitePlans.filter((plan) => plan.status === 'blocked').map((plan) => plan.caseId);
+  const directReadyCaseIds = prerequisitePlans.filter((plan) => plan.status === 'not_required').map((plan) => plan.caseId);
+  const prerequisiteSummaries = prerequisitePlans.map(summarizePrerequisitePlan);
 
-  const authStorageStatePath = dependencies.authStorageStatePath ?? process.env.EVALPILOT_AUTH_STATE ?? null;
-  const authResolutions = await Promise.all(scenarios.map((scenario) => resolveAuthSessionFixture({ scenario, targetUrl: config.targetUrl, projectRoot: config.projectRoot, storageStatePath: authStorageStatePath })));
-  const authFixturesByCaseId = new Map<string, AuthSessionFixture>();
-  for (const authResolution of authResolutions) if (authResolution.status === 'ready' && authResolution.fixture) authFixturesByCaseId.set(authResolution.caseId, authResolution.fixture);
-  const authFixtureCaseIds = [...authFixturesByCaseId.keys()];
-  const authResolutionSummaries = authResolutions.map((authResolution) => ({
-    caseId: authResolution.caseId,
-    status: authResolution.status,
-    reason: authResolution.reason,
-    blockers: authResolution.blockers,
-    fixture: authResolution.fixture ? {
-      source: authResolution.fixture.source,
-      targetOrigin: authResolution.fixture.targetOrigin,
-      cookieCount: authResolution.fixture.cookieCount,
-      originCount: authResolution.fixture.originCount,
-    } : null,
-  }));
-
-  const autoSetupCaseIds = setupPlans.map((plan) => plan.targetCaseId);
-  const effectiveReadyCaseIds = [...new Set([...executionPlan.readyCaseIds, ...autoSetupCaseIds, ...fileFixtureCaseIds, ...authFixtureCaseIds])];
-  const effectiveReadyCaseIdSet = new Set(effectiveReadyCaseIds);
-  const effectiveBlockedScenarios = scenarios.filter((scenario) => !effectiveReadyCaseIdSet.has(scenario.caseId));
-  const effectiveBlockedCaseIds = effectiveBlockedScenarios.map((scenario) => scenario.caseId);
   await writeJsonAtomic(resolve(evaluationDirectory, 'scenario-preflight.json'), {
-    schemaVersion: 4,
+    schemaVersion: 5,
     evaluationId: input.evaluationId,
     generatedAt: scenarioGeneratedAt,
-    readyCaseIds: effectiveReadyCaseIds,
-    blockedCaseIds: effectiveBlockedCaseIds,
-    directReadyCaseIds: executionPlan.readyCaseIds,
-    autoSetupCaseIds,
-    fileFixtureCaseIds,
-    authFixtureCaseIds,
-    setupResolutions: setupResolutionSummaries,
-    fileFixtureResolutions: fileFixtureResolutionSummaries,
-    authResolutions: authResolutionSummaries,
+    readyCaseIds,
+    blockedCaseIds,
+    directReadyCaseIds,
+    prerequisitePlans: prerequisiteSummaries,
     scenarios,
   });
-  if (executionPlan.allBlocked && autoSetupCaseIds.length === 0 && fileFixtureCaseIds.length === 0 && authFixtureCaseIds.length === 0) {
-    const detail = scenarioBlockerSummary(effectiveBlockedScenarios);
-    const setupDetail = setupResolutions.filter((item) => item.status === 'blocked').map((item) => `${item.caseId}: ${item.reason}`).join(' | ');
-    const fileDetail = fileFixtureResolutions.filter((item) => item.status === 'blocked' && item.blockers.some((blocker) => blocker.type === 'needs_test_data')).map((item) => `${item.caseId}: ${item.reason}`).join(' | ');
-    const authDetail = authResolutions.filter((item) => item.status === 'blocked' && item.blockers.some((blocker) => blocker.type === 'needs_auth')).map((item) => `${item.caseId}: ${item.reason}`).join(' | ');
-    throw new EvalPilotError(`所选评测任务当前都不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${[detail, setupDetail, fileDetail, authDetail].filter(Boolean).join(' | ')}`, 'EVALUATION_SCENARIO_NOT_READY');
+
+  if (!readyCaseIds.length) {
+    const detail = prerequisitePlans
+      .filter((plan) => plan.status === 'blocked')
+      .map((plan) => `${plan.caseId}: ${[...plan.reasons, ...plan.unresolvedBlockers.map((blocker) => `${blocker.summary}（${blocker.sourceValue}）`)].join('；')}`)
+      .join(' | ');
+    throw new EvalPilotError(`所选评测任务当前都不具备安全执行条件。EvalPilot 已在启动浏览器前停止：${detail}`, 'EVALUATION_SCENARIO_NOT_READY');
   }
 
   await hooks.prepared?.(selection, foundation.model, foundation.quality);
-  const scenarioByCaseId = new Map(scenarios.map((scenario) => [scenario.caseId, scenario]));
-  const runnableCaseIds = new Set(effectiveReadyCaseIds);
-  const runnableCases = selection.cases.filter((evalCase) => runnableCaseIds.has(evalCase.caseId));
+  const runnableCases = selection.cases.filter((evalCase) => readyCaseIdSet.has(evalCase.caseId));
   const browser = await (dependencies.launchBrowser?.() ?? chromium.launch({ headless: true }));
   const results = [];
   const findings = [];
@@ -218,32 +195,32 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const authChecks: Array<{ caseId: string; check: AuthSessionCheck }> = [];
   const setupExecutionDirectory = resolve(evaluationDirectory, 'setup-executions');
   const authCheckDirectory = resolve(evaluationDirectory, 'auth-checks');
-  if (setupPlans.length) await ensureDirectory(setupExecutionDirectory);
-  if (authFixtureCaseIds.length) await ensureDirectory(authCheckDirectory);
+  if (prerequisitePlans.some((plan) => plan.status === 'ready' && plan.setupPlan)) await ensureDirectory(setupExecutionDirectory);
+  if (prerequisitePlans.some((plan) => plan.status === 'ready' && plan.authFixture)) await ensureDirectory(authCheckDirectory);
   const commit = await targetCommit(config.projectRoot);
+
   try {
     for (const [index, evalCase] of runnableCases.entries()) {
       const scenario = scenarioByCaseId.get(evalCase.caseId);
-      const setupPlan = setupPlanByCaseId.get(evalCase.caseId) ?? null;
+      const prerequisitePlan = prerequisitePlanByCaseId.get(evalCase.caseId);
+      if (!scenario || !prerequisitePlan || prerequisitePlan.status === 'blocked') throw new EvalPilotError(`案例“${evalCase.title}”未通过 Scenario Preflight。`, 'EVALUATION_SCENARIO_NOT_READY');
       const fileFixtures = fileFixturesByCaseId.get(evalCase.caseId) ?? [];
-      const authFixture = authFixturesByCaseId.get(evalCase.caseId) ?? null;
-      if (!scenario || (scenario.readiness !== 'ready' && !setupPlan && fileFixtures.length === 0 && !authFixture)) throw new EvalPilotError(`案例“${evalCase.title}”未通过 Scenario Preflight。`, 'EVALUATION_SCENARIO_NOT_READY');
-      const context = await browser.newContext(authFixture ? { storageState: authFixture.storageState } : undefined);
+      const context = await browser.newContext(prerequisitePlan.authFixture ? { storageState: prerequisitePlan.authFixture.storageState } : undefined);
       try {
         const page = await context.newPage();
         let prerequisitesPassed = true;
-        if (authFixture) {
+        if (prerequisitePlan.authFixture) {
           const authCheck = await verifyAuthSession(page, scenario.startingUrl);
           authChecks.push({ caseId: evalCase.caseId, check: authCheck });
           await writeJsonAtomic(resolve(authCheckDirectory, `${evalCase.caseId}.json`), { schemaVersion: 1, caseId: evalCase.caseId, ...authCheck });
           prerequisitesPassed = authCheck.status === 'ready';
         }
-        if (setupPlan && prerequisitesPassed) {
+        if (prerequisitePlan.setupPlan && prerequisitesPassed) {
           const setupExecution = await runAutoSetup({
             page,
             provider,
             outputDir: config.outputDir,
-            plan: setupPlan,
+            plan: prerequisitePlan.setupPlan,
             productModel: foundation.model,
             evalSetVersion: foundation.version,
             targetAppGitSha: commit,
