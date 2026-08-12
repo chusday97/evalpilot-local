@@ -32,15 +32,25 @@ function scenario(url: string): ExecutableScenario {
   };
 }
 
-async function fixtureServer(): Promise<{ url: string; close: () => Promise<void> }> {
+async function fixtureServer(accept = '.csv'): Promise<{ url: string; close: () => Promise<void> }> {
   const server = createServer((_request, response) => {
     response.writeHead(200, { 'content-type': 'text/html; charset=utf-8' });
-    response.end(`<!doctype html><html><body><main><h1>CSV Import</h1><input id="file" type="file" accept=".csv"><p id="status">Waiting</p><p id="name"></p></main><script>const input=document.querySelector('#file');input.addEventListener('change',()=>{document.querySelector('#name').textContent=input.files[0]?.name||'';document.querySelector('#status').textContent='Processing fixture';setTimeout(()=>{document.querySelector('#status').textContent='Processed fixture'},180);});</script></body></html>`);
+    response.end(`<!doctype html><html><body><main><h1>CSV Import</h1><input id="file" type="file" accept="${accept}"><p id="status">Waiting</p><p id="name"></p></main><script>const input=document.querySelector('#file');input.addEventListener('change',()=>{document.querySelector('#name').textContent=input.files[0]?.name||'';document.querySelector('#status').textContent='Processing fixture';setTimeout(()=>{document.querySelector('#status').textContent='Processed fixture'},180);});</script></body></html>`);
   });
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('fixture server did not expose a port');
   return { url: `http://127.0.0.1:${address.port}`, close: () => new Promise<void>((resolve, reject) => server.close((error) => error ? reject(error) : resolve())) };
+}
+
+function uploadProvider(): MockAiProvider {
+  return new MockAiProvider((request) => {
+    if (request.task === 'semantic_verifier') return { status: 'confirmed', observed: '可见状态符合预期。', confirmedFacts: ['文件处理状态发生变化'], unknowns: [], evidenceRefs: [], confidence: 0.95 };
+    const prompt = JSON.parse(request.userPrompt) as { observation: { visibleStateSummary: string; formFields: Array<{ elementId: string; inputType: string; currentValuePresent: boolean }> } };
+    if (prompt.observation.visibleStateSummary.includes('Processed fixture')) return { intentSummary: '文件已处理完成', action: 'finish', targetElementId: null, value: null, expectedResult: 'Processed fixture', confidence: 1 };
+    const field = prompt.observation.formFields.find((item) => item.inputType === 'file');
+    return { intentSummary: '上传 CSV', action: 'fill', targetElementId: field?.elementId ?? null, value: '/etc/passwd', expectedResult: 'Processed fixture', confidence: 1 };
+  });
 }
 
 describe('Synthetic file upload', () => {
@@ -52,13 +62,7 @@ describe('Synthetic file upload', () => {
       const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-upload-'));
       const files = await materializeSyntheticFileFixtures(resolution.plan!, join(outputDir, 'fixtures'));
       const csv = files[0]!;
-      const provider = new MockAiProvider((request) => {
-        if (request.task === 'semantic_verifier') return { status: 'confirmed', observed: '可见状态符合预期。', confirmedFacts: ['文件处理状态发生变化'], unknowns: [], evidenceRefs: [], confidence: 0.95 };
-        const prompt = JSON.parse(request.userPrompt) as { observation: { visibleStateSummary: string; formFields: Array<{ elementId: string; inputType: string; currentValuePresent: boolean }> } };
-        if (prompt.observation.visibleStateSummary.includes('Processed fixture')) return { intentSummary: '文件已处理完成', action: 'finish', targetElementId: null, value: null, expectedResult: 'Processed fixture', confidence: 1 };
-        const field = prompt.observation.formFields.find((item) => item.inputType === 'file');
-        return { intentSummary: '上传 CSV', action: 'fill', targetElementId: field?.elementId ?? null, value: '/etc/passwd', expectedResult: 'Processed fixture', confidence: 1 };
-      });
+      const provider = uploadProvider();
 
       browser = await chromium.launch({ headless: true });
       const page = await browser.newPage();
@@ -74,6 +78,28 @@ describe('Synthetic file upload', () => {
       expect(packet.stepEvidence[0]?.taskWait?.operationType).toBe('file_processing');
       expect(provider.requests.every((request) => !request.userPrompt.includes(csv.path))).toBe(true);
       expect(provider.requests.every((request) => !request.userPrompt.includes('/etc/passwd'))).toBe(true);
+    } finally {
+      await fixture.close();
+    }
+  });
+
+  browserIt('blocks the file action when the page accept constraint has no compatible fixture', async () => {
+    const fixture = await fixtureServer('.png');
+    try {
+      const resolution = resolveSyntheticFileFixtures({ scenario: scenario(fixture.url), targetUrl: fixture.url });
+      const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-upload-mismatch-'));
+      const files = await materializeSyntheticFileFixtures(resolution.plan!, join(outputDir, 'fixtures'));
+      const provider = uploadProvider();
+
+      browser = await chromium.launch({ headless: true });
+      const page = await browser.newPage();
+      const run = await runAiTestAgent(page, evalCase(), provider, { outputDir, startingUrl: fixture.url, fileFixtures: files, allowRemoteModel: true, allowScreenshotToProvider: false, productModelVersion: 1, evalSetVersion: 1, judgeModel: provider.info.model, now: () => new Date(now) });
+
+      expect(run.status).toBe('blocked_by_safety');
+      expect(run.decisions[0]?.value).toBeNull();
+      expect(run.actionResults[0]?.status).toBe('blocked_by_safety');
+      expect(run.actionResults[0]?.summary).toContain('没有匹配的 EvalPilot 合成 Fixture');
+      expect(await page.locator('#name').innerText()).toBe('');
     } finally {
       await fixture.close();
     }
