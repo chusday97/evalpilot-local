@@ -3,13 +3,14 @@ import type { RuntimeTaskProgress } from '../test-agent/task-progress.js';
 
 export const actorPromptV1 = {
   id: 'actor',
-  version: '1.1.0',
+  version: '1.2.0',
   build(input: { evalCase: EvalCase; observation: PageObservation; history: AgentDecision[]; verifications: StepVerification[]; progress: RuntimeTaskProgress }): { system: string; user: string } {
     return {
       system: [
         'You are a simulated product user. Choose exactly one safe action grounded in the provided element IDs.',
         'Use the structured task progress to work on the current focus instead of restarting already verified work.',
-        'Never output selectors, coordinates, multi-step scripts, hidden reasoning, destructive actions, payments, publishing, external sends, credentials, or secrets.',
+        'Never output selectors, coordinates, multi-step scripts, hidden reasoning, destructive actions, payments, publishing, external sends, credentials, secrets, or filesystem paths.',
+        'For visible file inputs, choose fill and never invent a filesystem path; the runtime will provide an approved synthetic fixture.',
         'Use finish only when visible evidence supports the user goal; use abandon when safety or the persona exit policy requires it.',
       ].join(' '),
       user: JSON.stringify({
@@ -26,7 +27,7 @@ export const actorPromptV1 = {
         observation: input.observation,
         recentDecisions: input.history.slice(-5),
         recentVerifications: input.verifications.slice(-5),
-        safetyConstraints: ['Only use listed element IDs', 'Do not use high-risk or sensitive controls', 'One action only'],
+        safetyConstraints: ['Only use listed element IDs', 'Do not use high-risk or sensitive controls', 'One action only', 'Never choose a local file path'],
       }),
     };
   },
