@@ -15,7 +15,7 @@
     "test": "vitest run",
     "test:browser": "EVALPILOT_BROWSER_TEST=1 vitest run tests/browser-evidence.test.ts",
     "test:runner": "EVALPILOT_BROWSER_TEST=1 vitest run tests/runner-browser.test.ts",
-    "test:ai-agent": "EVALPILOT_BROWSER_TEST=1 vitest run tests/ai-test-agent.test.ts tests/evidence-gate.test.ts tests/hybrid-judge.test.ts tests/safe-setup-runner.test.ts tests/transitive-safe-setup.test.ts tests/synthetic-file-upload.test.ts tests/auth-session-fixture.test.ts tests/combined-prerequisite-browser.test.ts && tsx scripts/verify-task-state-browser-serialization.ts",
+    "test:ai-agent": "EVALPILOT_BROWSER_TEST=1 vitest run tests/ai-test-agent.test.ts tests/evidence-gate.test.ts tests/hybrid-judge.test.ts tests/safe-setup-runner.test.ts tests/transitive-safe-setup.test.ts tests/synthetic-file-upload.test.ts tests/auth-session-fixture.test.ts tests/combined-prerequisite-browser.test.ts && tsx scripts/verify-task-state-browser-serialization.ts && tsx scripts/verify-observer-browser-serialization.ts",
     "test:semantic-verifier": "EVALPILOT_BROWSER_TEST=1 vitest run tests/semantic-verifier.test.ts tests/semantic-verifier-browser.test.ts",
     "test:product-understanding": "vitest run tests/product-task-understanding.test.ts tests/query-entrypoint-normalization.test.ts",
     "test:dashboard": "EVALPILOT_DASHBOARD_TEST=1 vitest run tests/dashboard-browser.test.ts tests/project-workspace.test.ts",
@@ -70,7 +70,7 @@
   "devDependencies": {
     "@types/node": "^26.1.1",
     "@types/react": "^19.2.17",
-    "@types/react-dom": "^19.2.3",
+    "@types/react-dom": "^19.2.17",
     "@vitejs/plugin-react": "^6.0.3",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
