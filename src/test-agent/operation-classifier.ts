@@ -30,12 +30,19 @@ export function classifyOperation(input: { decision: AgentDecision; observation:
   if (field?.inputType === 'file'
     || includesAny(actionContext, ['upload', 'import file', 'process file', '上传', '导入文件', '处理文件', '解析文件'])) return 'file_processing';
 
-  if (includesAny(actionContext, ['generate', 'generating', 'ai ', 'assistant', 'chat', 'summarize', 'transcribe', '生成', '智能', '助手', '对话', '总结', '转写'])) return 'ai_generation';
+  if (includesAny(actionContext, ['generate', 'generating', 'stream', 'streaming', 'ai ', 'assistant', 'chat', 'summarize', 'transcribe', '生成', '流式', '智能', '助手', '对话', '总结', '转写'])) return 'ai_generation';
 
   if (decision.action === 'click'
     && includesAny(actionContext, ['submit', 'save', 'create', 'update', 'confirm', 'send', 'sign in', 'log in', '提交', '保存', '创建', '更新', '确认', '发送', '登录'])) return 'form_submit';
 
-  if (decision.action === 'wait' || decision.action === 'retry') return 'unknown_async';
-  if (decision.action === 'click') return 'synchronous';
+  const synchronousUiControl = decision.action === 'click'
+    && target?.tagName === 'button'
+    && includesAny(actionContext, [
+      'settings', 'parameters', 'tab', 'option', 'toggle', 'expand', 'collapse', 'panel', 'menu',
+      '设置', '参数', '选项', '选择', '切换', '展开', '收起', '面板', '菜单',
+    ]);
+  if (synchronousUiControl) return 'synchronous';
+
+  if (decision.action === 'wait' || decision.action === 'retry' || decision.action === 'click') return 'unknown_async';
   return 'synchronous';
 }
