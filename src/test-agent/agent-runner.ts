@@ -104,7 +104,10 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
   let finalObservation: PageObservation | null = null;
   let failedAttempts = 0;
   try {
-    await page.context().tracing.start({ screenshots: true, snapshots: true, sources: false });
+    // Step-level before/after PNGs and DOM observations are the canonical visual evidence.
+    // Keep Playwright Trace lightweight so it records action/runtime diagnostics without
+    // duplicating expensive screenshots and DOM snapshots on animation-heavy applications.
+    await page.context().tracing.start({ screenshots: false, snapshots: false, sources: false });
     traceStarted = true;
   } catch (traceError) {
     error = `本地 Trace 无法启动：${traceError instanceof Error ? traceError.message : String(traceError)}`;
