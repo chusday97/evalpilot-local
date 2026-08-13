@@ -10,8 +10,10 @@ export interface FieldInputConstraints {
   pattern: string | null;
 }
 
-function finiteNumber(value: string | null): number | null {
-  if (value === null || value.trim() === '') return null;
+function finiteNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
@@ -46,6 +48,6 @@ export async function readFieldInputConstraints(page: Page, field: GroundedField
     minLength: integer(finiteNumber(attributes.minLength)),
     maxLength: integer(finiteNumber(attributes.maxLength)),
     step: finiteNumber(attributes.step),
-    pattern: attributes.pattern,
+    pattern: typeof attributes.pattern === 'string' ? attributes.pattern : null,
   };
 }
