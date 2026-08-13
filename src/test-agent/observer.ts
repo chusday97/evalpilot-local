@@ -30,24 +30,49 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
   const title = await page.title().catch(() => '');
   const headings = await page.locator('h1,h2,h3').allInnerTexts().catch(() => []);
   const visibleText = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 4_000);
-  const raw = await page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').evaluateAll((nodes): RawElement[] => nodes
-    .filter((node) => {
+  const raw = await page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').evaluateAll((nodes): RawElement[] => {
+    // IMPORTANT: keep this browser-serialized callback free of nested callback functions.
+    // EvalPilot often runs from source through tsx/esbuild; keep-name transforms can inject
+    // `__name(...)` into nested callbacks. Playwright serializes this function into the page,
+    // where esbuild's Node-side helper does not exist. Explicit loops avoid that runtime leak.
+    const result: RawElement[] = [];
+    for (const node of nodes) {
       const element = node as HTMLElement;
       const style = window.getComputedStyle(element);
-      return style.visibility !== 'hidden' && style.display !== 'none' && element.getClientRects().length > 0;
-    })
-    .map((node) => {
-      const element = node as HTMLElement;
+      if (style.visibility === 'hidden' || style.display === 'none' || element.getClientRects().length === 0) continue;
+
       const input = node as HTMLInputElement;
       const select = node as HTMLSelectElement;
-      const labels = 'labels' in input && input.labels ? Array.from(input.labels).map((item) => item.textContent?.trim() ?? '').filter(Boolean) : [];
-      const options = element.tagName === 'SELECT'
-        ? [...new Set(Array.from(select.options).flatMap((option) => [option.value.trim(), option.text.trim()]).filter(Boolean))]
-        : [];
-      return {
+      const labels: string[] = [];
+      if ('labels' in input && input.labels) {
+        for (const labelNode of Array.from(input.labels)) {
+          const value = labelNode.textContent?.trim() ?? '';
+          if (value) labels.push(value);
+        }
+      }
+
+      const options: string[] = [];
+      if (element.tagName === 'SELECT') {
+        const seen = new Set<string>();
+        for (const option of Array.from(select.options)) {
+          const value = option.value.trim();
+          const text = option.text.trim();
+          if (value && !seen.has(value)) {
+            seen.add(value);
+            options.push(value);
+          }
+          if (text && !seen.has(text)) {
+            seen.add(text);
+            options.push(text);
+          }
+        }
+      }
+
+      const ariaLabel = element.getAttribute('aria-label');
+      result.push({
         tagName: element.tagName.toLowerCase(),
         role: element.getAttribute('role'),
-        label: element.getAttribute('aria-label') ?? labels.join(' ') ?? '',
+        label: ariaLabel ?? labels.join(' '),
         text: element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 240) || null,
         placeholder: element.getAttribute('placeholder'),
         disabled: 'disabled' in input ? Boolean(input.disabled) : element.getAttribute('aria-disabled') === 'true',
@@ -56,8 +81,10 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
         required: 'required' in input ? Boolean(input.required) : false,
         currentValuePresent: 'value' in input ? String(input.value ?? '').length > 0 : false,
         options,
-      };
-    }));
+      });
+    }
+    return result;
+  });
 
   const interactableElements: GroundedElement[] = raw.map((item, index) => ({
     elementId: `E${String(index + 1).padStart(3, '0')}`,
