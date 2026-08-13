@@ -41,6 +41,13 @@ export function classifyEvaluatorFailure(input: {
   const navigationMismatch = /navigation.{0,12}mismatch|route.{0,12}mismatch|导航.{0,8}不匹配|路由.{0,8}不匹配|预期.{0,8}(地址|URL|页面).{0,8}(不符|未到达)/i.test(text);
   const explicitEvaluatorFailure = input.result.failureSource === 'evaluator' || input.agentRun.failureSource === 'evaluator';
 
+  // A runtime failure inside EvalPilot means the task did not complete under a trustworthy
+  // evaluator execution. It must take precedence over deterministic assertions computed from
+  // the partial final page; otherwise an evaluator crash can be mislabeled as a product bug.
+  if (input.agentRun.failureSource === 'evaluator' && input.agentRun.error) {
+    return { category: 'tool_execution_error', technicalReason: input.agentRun.error };
+  }
+
   if (input.packet.evidenceCompleteness.complete && input.result.failureSource === 'product' && input.result.deterministic.hardFailure) return null;
   if (input.result.failureSource === 'product' && !failedAction && !noNextAction && !unsupportedControl && !modelOutputInvalid) return null;
   if (!input.packet.evidenceCompleteness.complete) return { category: 'evidence_missing', technicalReason: input.packet.evidenceCompleteness.missing.join(' ') };
