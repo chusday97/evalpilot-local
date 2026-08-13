@@ -35,8 +35,25 @@ function evidenceCatalog(input: {
   return catalog;
 }
 
+const routeBase = 'http://evalpilot.local';
+
 function normalizeRoute(route: string): string | null {
-  try { return new URL(route).pathname || '/'; } catch { return route.startsWith('/') ? route : null; }
+  try {
+    const parsed = new URL(route, routeBase);
+    return parsed.pathname || '/';
+  } catch {
+    return null;
+  }
+}
+
+function normalizeEntryPoint(entryPoint: string): { value: string; route: string } | null {
+  try {
+    const parsed = new URL(entryPoint, routeBase);
+    const route = parsed.pathname || '/';
+    return { value: `${route}${parsed.search}${parsed.hash}`, route };
+  } catch {
+    return null;
+  }
 }
 
 function mappedEvidence(references: string[], catalog: Map<string, ProductUnderstandingEvidenceItem>): EvidenceClaim[] {
@@ -99,7 +116,10 @@ export async function understandProductTasks(input: {
       const { evidenceRefs, ...fields } = item;
       const evidence = mappedEvidence(item.evidenceRefs, catalog);
       const routes = [...new Set(item.routes.map(normalizeRoute).filter((route): route is string => Boolean(route && knownRoutes.has(route))))];
-      const entryPoints = [...new Set(item.entryPoints.map(normalizeRoute).filter((route): route is string => Boolean(route && knownRoutes.has(route))))];
+      const entryPoints = [...new Set(item.entryPoints
+        .map(normalizeEntryPoint)
+        .filter((entry): entry is { value: string; route: string } => Boolean(entry && knownRoutes.has(entry.route)))
+        .map((entry) => entry.value))];
       const routeMismatch = routes.length !== item.routes.length || entryPoints.length !== item.entryPoints.length;
       if (routeMismatch) warnings.push(`能力 ${item.capabilityId} 的未知路由或入口已过滤。`);
       const status = evidenceStatus(item.evidenceStatus, evidence);
