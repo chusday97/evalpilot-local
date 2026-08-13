@@ -296,7 +296,7 @@ async function startMockProvider(): Promise<string> {
         response.end(JSON.stringify({ output_text: JSON.stringify(output) }));
       } catch (error) {
         response.writeHead(400, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ error: { message: error instanceof Error ? error.message : String(error) }));
+        response.end(JSON.stringify({ error: { message: error instanceof Error ? error.message : String(error) } }));
       }
     });
   });
