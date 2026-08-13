@@ -10,46 +10,44 @@ export interface FieldInputConstraints {
   pattern: string | null;
 }
 
-function finiteNumber(value: string | null): number | null {
-  if (value === null || value.trim() === '') return null;
+function finiteNumber(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === 'number') return Number.isFinite(value) ? value : null;
+  if (typeof value !== 'string' || value.trim() === '') return null;
   const parsed = Number(value);
   return Number.isFinite(parsed) ? parsed : null;
 }
 
-function integer(value: number): number | null {
-  return Number.isInteger(value) && value >= 0 ? value : null;
+function integer(value: number | null): number | null {
+  return value !== null && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
 export async function readFieldInputConstraints(page: Page, field: GroundedField): Promise<FieldInputConstraints> {
   const index = Number(field.locatorHint.split(':')[1]);
   if (!Number.isInteger(index) || index < 0) return { min: null, max: null, minLength: null, maxLength: null, step: null, pattern: null };
   const locator = page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').filter({ visible: true }).nth(index);
-  return locator.evaluate((node) => {
-    const element = node as HTMLInputElement | HTMLTextAreaElement;
-    const readNumber = (name: string): number | null => {
-      const raw = element.getAttribute(name);
-      if (raw === null || raw.trim() === '') return null;
-      const parsed = Number(raw);
-      return Number.isFinite(parsed) ? parsed : null;
-    };
-    const readLength = (name: 'minlength' | 'maxlength'): number | null => {
-      const value = readNumber(name);
-      return value !== null && Number.isInteger(value) && value >= 0 ? value : null;
-    };
+
+  // Keep the browser-evaluated callback self-contained and free of nested helpers.
+  // Transpilers may inject helper references such as `__name` for nested functions;
+  // those helpers do not exist inside Playwright's browser execution context.
+  const attributes = await locator.evaluate((node) => {
+    const element = node as HTMLElement;
     return {
-      min: readNumber('min'),
-      max: readNumber('max'),
-      minLength: readLength('minlength'),
-      maxLength: readLength('maxlength'),
-      step: readNumber('step'),
+      min: element.getAttribute('min'),
+      max: element.getAttribute('max'),
+      minLength: element.getAttribute('minlength'),
+      maxLength: element.getAttribute('maxlength'),
+      step: element.getAttribute('step'),
       pattern: element.getAttribute('pattern'),
     };
-  }).then((value) => ({
-    min: finiteNumber(value.min === null ? null : String(value.min)),
-    max: finiteNumber(value.max === null ? null : String(value.max)),
-    minLength: value.minLength === null ? null : integer(value.minLength),
-    maxLength: value.maxLength === null ? null : integer(value.maxLength),
-    step: finiteNumber(value.step === null ? null : String(value.step)),
-    pattern: value.pattern,
-  }));
+  });
+
+  return {
+    min: finiteNumber(attributes.min),
+    max: finiteNumber(attributes.max),
+    minLength: integer(finiteNumber(attributes.minLength)),
+    maxLength: integer(finiteNumber(attributes.maxLength)),
+    step: finiteNumber(attributes.step),
+    pattern: typeof attributes.pattern === 'string' ? attributes.pattern : null,
+  };
 }
