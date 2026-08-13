@@ -81,7 +81,7 @@ function productUnderstanding(input: any) {
   const evidenceStatus = evidence.evidenceStatus;
   const taskEvidence = { evidenceStatus, evidenceRefs: refs, needsHumanReview: false };
 
-  const createSize = '鱼缸页面显示已保存的 60×30×30cm 尺寸';
+  const createSize = '鱼缸页面显示已保存的 60x30x30cm 尺寸';
   const createWater = '鱼缸页面显示已保存的淡水水体';
   const recordLivestock = '鱼缸主页面显示已保存的咖啡鼠活体记录';
   const dailyRisk = '每日检查结果保持高风险并显示 Act now';
@@ -98,7 +98,7 @@ function productUnderstanding(input: any) {
         taskId: 'task-create-usable-aquarium', capabilityId: 'cap-create-aquarium', name: '创建一个可用淡水鱼缸', goal: '创建一个可用淡水鱼缸',
         preconditions: ['项目页面已打开'], successConditions: [createSize, createWater],
         successSignals: [
-          { signalId: 'signal-create-size', kind: 'text_visible', target: '60×30×30cm', description: createSize, ...taskEvidence },
+          { signalId: 'signal-create-size', kind: 'text_visible', target: '60x30x30cm', description: createSize, ...taskEvidence },
           { signalId: 'signal-create-water', kind: 'text_visible', target: '淡水', description: createWater, ...taskEvidence },
         ], businessRuleIds: [], ...taskEvidence,
       },
