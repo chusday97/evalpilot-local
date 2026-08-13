@@ -161,8 +161,8 @@ function labelIncludesAny(item: any, values: string[]): boolean {
   return values.some((value) => labelIncludes(item, value));
 }
 
-function safeClick(input: any, predicate: (item: any) => boolean, intent: string, expectedResult: string) {
-  const target = (input.observation?.interactableElements ?? []).find((item: any) => !item.disabled && predicate(item));
+function safeButtonClick(input: any, predicate: (item: any) => boolean, intent: string, expectedResult: string) {
+  const target = (input.observation?.interactableElements ?? []).find((item: any) => !item.disabled && item.tagName === 'button' && predicate(item));
   return target ? { intentSummary: intent, action: 'click', targetElementId: target.elementId, value: null, expectedResult, confidence: 1 } : null;
 }
 
@@ -175,36 +175,46 @@ function actorDecision(input: any) {
     return { intentSummary: '验收目标已经可见', action: 'finish', targetElementId: null, value: null, expectedResult: expected.join('；'), confidence: 1 };
   }
 
+  if (/Loading AquaGuide/i.test(visible)) {
+    return { intentSummary: '等待 AquaGuide 完成初始化', action: 'wait', targetElementId: null, value: null, expectedResult: 'AquaGuide 页面完成初始化', confidence: 1 };
+  }
+
   if (goal.includes('创建') && goal.includes('鱼缸')) {
     if (String(observation.pageUrl ?? '').includes('/welcome')) {
-      return safeClick(input, (item) => labelIncludesAny(item, ['建立第一个鱼缸', 'Build your first aquarium']), '沿真实 onboarding 建立第一个鱼缸', '进入鱼缸创建流程')
+      return safeButtonClick(input, (item) => labelIncludesAny(item, ['建立第一个鱼缸', 'Build your first aquarium']), '沿真实 onboarding 建立第一个鱼缸', '进入鱼缸创建流程')
         ?? { intentSummary: '欢迎页没有建缸入口', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止并保留证据', confidence: 1 };
     }
 
-    const labels = (observation.interactableElements ?? []).map((item: any) => String(item.label ?? ''));
-    const settingsOpen = labels.some((label: string) => label === '保存设置' || label === 'Save Settings');
+    const buttons = (observation.interactableElements ?? []).filter((item: any) => item.tagName === 'button' && !item.disabled);
+    const settingsOpen = buttons.some((item: any) => ['保存设置', 'Save Settings'].includes(String(item.label ?? '')));
     if (!settingsOpen) {
-      return safeClick(input, (item) => labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置', 'Tank Settings']), '打开鱼缸设置', '显示尺寸和水体设置')
+      return safeButtonClick(input, (item) => labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置', 'Tank Settings']), '打开鱼缸设置', '显示尺寸和水体设置')
         ?? { intentSummary: '没有找到鱼缸设置入口', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止并保留证据', confidence: 1 };
     }
 
     const numberFields = (observation.formFields ?? []).filter((field: any) => field.inputType === 'number' && !field.disabled);
     const emptyNumbers = numberFields.filter((field: any) => !field.currentValuePresent);
-    if (emptyNumbers.length > 0 && numberFields.length >= 3) {
-      const filledCount = numberFields.length - emptyNumbers.length;
-      const value = filledCount === 0 ? '60' : '30';
-      return { intentSummary: `填写第 ${filledCount + 1} 个尺寸字段`, action: 'fill', targetElementId: emptyNumbers[0].elementId, value, expectedResult: '尺寸字段保存当前输入值', confidence: 1 };
+    if (numberFields.length >= 3 && emptyNumbers.length > 0) {
+      const index = numberFields.indexOf(emptyNumbers[0]);
+      const value = index === 0 ? '60' : '30';
+      return { intentSummary: `填写第 ${index + 1} 个尺寸字段`, action: 'fill', targetElementId: emptyNumbers[0].elementId, value, expectedResult: '尺寸字段保存当前输入值', confidence: 1 };
+    }
+
+    const dimensionsMissing = /尺寸未记录|Size unknown|Incomplete dimensions/i.test(visible);
+    if (dimensionsMissing && numberFields.length < 3) {
+      const openDimensions = safeButtonClick(input, (item) => labelIncludesAny(item, ['Dimensions', '尺寸']) && labelIncludesAny(item, ['待配置', 'Incomplete', '修改']), '打开尺寸设置', '显示长宽高数字输入框');
+      if (openDimensions) return openDimensions;
     }
 
     const waterUnknown = /水体未记录|Water type unknown/i.test(visible);
-    const chooseFreshwater = safeClick(input, (item) => labelIncludes(item, '淡水') && labelIncludes(item, '常见观赏鱼'), '选择 Freshwater 水体', '水体参数变为 Freshwater');
+    const chooseFreshwater = safeButtonClick(input, (item) => labelIncludes(item, '淡水'), '选择 Freshwater 水体', '水体参数变为 Freshwater');
     if (waterUnknown && chooseFreshwater) return chooseFreshwater;
     if (waterUnknown) {
-      const openParameters = safeClick(input, (item) => labelIncludesAny(item, ['参数', 'Parameters']), '打开水体参数', '显示淡水/海水选项');
+      const openParameters = safeButtonClick(input, (item) => labelIncludesAny(item, ['Parameters', '参数']) && labelIncludesAny(item, ['待配置', 'Water type unknown', '修改']), '打开水体参数', '显示淡水/海水选项');
       if (openParameters) return openParameters;
     }
 
-    const save = safeClick(input, (item) => ['保存设置', 'Save Settings'].includes(String(item.label ?? '')), '保存鱼缸设置', '鱼缸主页面显示已保存尺寸和水体');
+    const save = safeButtonClick(input, (item) => ['保存设置', 'Save Settings'].includes(String(item.label ?? '')), '保存鱼缸设置', '鱼缸主页面显示已保存尺寸和水体');
     if (save) return save;
   }
 
@@ -216,21 +226,28 @@ function actorDecision(input: any) {
     if (search && !search.currentValuePresent) {
       return { intentSummary: '用学名搜索真实测试物种', action: 'fill', targetElementId: search.elementId, value: 'Corydoras aeneus', expectedResult: '候选列表显示 Corydoras aeneus', confidence: 1 };
     }
-    const saveToTank = safeClick(input, (item) => String(item.label ?? '') === '保存到鱼缸', '保存已有生物记录', '主鱼缸页面保留咖啡鼠记录');
+    const saveToTank = safeButtonClick(input, (item) => String(item.label ?? '') === '保存到鱼缸', '保存已有生物记录', '主鱼缸页面保留咖啡鼠记录');
     if (saveToTank) return saveToTank;
-    const fish = safeClick(input, (item) => labelIncludes(item, 'Corydoras aeneus') && item.tagName === 'button', '选择 Corydoras aeneus', '显示数量和入缸日期表单');
+    const fish = safeButtonClick(input, (item) => labelIncludes(item, 'Corydoras aeneus'), '选择 Corydoras aeneus', '显示数量和入缸日期表单');
     if (fish) return fish;
   }
 
   if (goal.includes('每日') && goal.includes('检查')) {
-    const choices = ['经常浮头', '清澈', '没有泡沫或油膜', '没有异味', '正常游动和进食', '没有特别操作'];
-    const answered = Math.max(0, Math.min(choices.length, Number(input.taskProgress?.completedVerifiedSteps ?? 0)));
-    if (answered < choices.length) {
-      const label = choices[answered]!;
-      const target = (observation.interactableElements ?? []).find((item: any) => !item.disabled && String(item.label ?? '') === label);
-      if (target) return { intentSummary: `回答每日检查：${label}`, action: 'click', targetElementId: target.elementId, value: null, expectedResult: '完成一项检查回答', confidence: 1 };
+    const questionAnswers: Array<[string, string]> = [
+      ['鱼是否浮头或呼吸急促？', '经常浮头'],
+      ['水体是否发白、发绿或浑浊？', '清澈'],
+      ['水面是否有持续泡沫或油膜？', '没有泡沫或油膜'],
+      ['鱼缸是否出现异味？', '没有异味'],
+      ['鱼是否拒食、趴底、躲藏或追咬？', '正常游动和进食'],
+      ['最近 48 小时做过什么？', '没有特别操作'],
+      ['还有其他情况想补充吗？', '跳过'],
+    ];
+    for (const [question, answer] of questionAnswers) {
+      if (!visible.includes(question)) continue;
+      const choice = safeButtonClick(input, (item) => String(item.label ?? '') === answer, `回答每日检查：${answer}`, '进入下一项检查问题');
+      if (choice) return choice;
     }
-    const generate = safeClick(input, (item) => labelIncludesAny(item, ['生成检查结果', 'Generate Results']) && !item.disabled, '生成每日检查风险结果', '页面显示高风险等级和立即动作');
+    const generate = safeButtonClick(input, (item) => labelIncludesAny(item, ['生成检查结果', 'Generate Results']), '生成每日检查风险结果', '页面显示高风险等级和立即动作');
     if (generate) return generate;
   }
 
@@ -283,7 +300,7 @@ async function startMockProvider(): Promise<string> {
   });
   await new Promise<void>((resolveListen, reject) => {
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', resolveListen);
+    server.listen(port, '127.0.0.1', () => resolveListen());
   });
   servers.push(server);
   return `http://127.0.0.1:${port}/v1`;
