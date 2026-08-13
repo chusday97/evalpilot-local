@@ -200,18 +200,20 @@ function actorDecision(input: any) {
       return { intentSummary: `填写第 ${index + 1} 个尺寸字段`, action: 'fill', targetElementId: emptyNumbers[0].elementId, value, expectedResult: '尺寸字段保存当前输入值', confidence: 1 };
     }
 
-    const dimensionsMissing = /尺寸未记录|Size unknown|Incomplete dimensions/i.test(visible);
-    if (dimensionsMissing && numberFields.length < 3) {
-      const openDimensions = safeButtonClick(input, (item) => labelIncludesAny(item, ['Dimensions', '尺寸']) && labelIncludesAny(item, ['待配置', 'Incomplete', '修改']), '打开尺寸设置', '显示长宽高数字输入框');
-      if (openDimensions) return openDimensions;
-    }
+    const dimensionsButton = buttons.find((item: any) => labelIncludesAny(item, ['Dimensions', '尺寸']));
+    const parametersButton = buttons.find((item: any) => labelIncludesAny(item, ['Parameters', '参数']));
+    const freshwaterButton = buttons.find((item: any) => labelIncludes(item, '淡水') && !labelIncludes(item, '海水'));
+    const dimensionsNeedConfig = Boolean(dimensionsButton && labelIncludesAny(dimensionsButton, ['Incomplete dimensions', '尺寸未记录']));
+    const waterTypeUnknown = Boolean(parametersButton && labelIncludesAny(parametersButton, ['Water type unknown', '水体未记录']));
 
-    const waterUnknown = /水体未记录|Water type unknown/i.test(visible);
-    const chooseFreshwater = safeButtonClick(input, (item) => labelIncludes(item, '淡水'), '选择 Freshwater 水体', '水体参数变为 Freshwater');
-    if (waterUnknown && chooseFreshwater) return chooseFreshwater;
-    if (waterUnknown) {
-      const openParameters = safeButtonClick(input, (item) => labelIncludesAny(item, ['Parameters', '参数']) && labelIncludesAny(item, ['待配置', 'Water type unknown', '修改']), '打开水体参数', '显示淡水/海水选项');
-      if (openParameters) return openParameters;
+    if (waterTypeUnknown && freshwaterButton) {
+      return { intentSummary: '选择 Freshwater 水体', action: 'click', targetElementId: freshwaterButton.elementId, value: null, expectedResult: '水体参数变为 Freshwater', confidence: 1 };
+    }
+    if (dimensionsNeedConfig && numberFields.length < 3 && dimensionsButton) {
+      return { intentSummary: '打开尺寸设置', action: 'click', targetElementId: dimensionsButton.elementId, value: null, expectedResult: '显示长宽高数字输入框', confidence: 1 };
+    }
+    if (waterTypeUnknown && parametersButton) {
+      return { intentSummary: '打开水体参数', action: 'click', targetElementId: parametersButton.elementId, value: null, expectedResult: '显示淡水/海水选项', confidence: 1 };
     }
 
     const save = safeButtonClick(input, (item) => ['保存设置', 'Save Settings'].includes(String(item.label ?? '')), '保存鱼缸设置', '鱼缸主页面显示已保存尺寸和水体');
@@ -294,7 +296,7 @@ async function startMockProvider(): Promise<string> {
         response.end(JSON.stringify({ output_text: JSON.stringify(output) }));
       } catch (error) {
         response.writeHead(400, { 'content-type': 'application/json' });
-        response.end(JSON.stringify({ error: { message: error instanceof Error ? error.message : String(error) } }));
+        response.end(JSON.stringify({ error: { message: error instanceof Error ? error.message : String(error) }));
       }
     });
   });
