@@ -5,11 +5,12 @@ on:
   pull_request:
     paths:
       - '.github/workflows/aquaguide-real-acceptance.yml'
-      - 'scripts/run-aquaguide-real-acceptance.ts'
+      - 'scripts/run-aquaguide-real-acceptance-v2.ts'
       - 'src/acceptance/**'
       - 'src/scenario/**'
       - 'src/test-agent/**'
       - 'src/judge/**'
+      - 'src/product-model/**'
       - 'acceptance/real-products/aquaguide.yaml'
 
 permissions:
@@ -64,7 +65,7 @@ jobs:
           exit 1
 
       - name: Run EvalPilot real acceptance
-        run: timeout --signal=TERM --kill-after=5s 240s npx tsx scripts/run-aquaguide-real-acceptance.ts --project-root real-products/aquaguide --url http://127.0.0.1:3000 --output real-product-acceptance-output
+        run: timeout --signal=TERM --kill-after=5s 240s npx tsx scripts/run-aquaguide-real-acceptance-v2.ts --project-root real-products/aquaguide --url http://127.0.0.1:3000 --output real-product-acceptance-output
 
       - name: Upload real acceptance evidence
         if: always()
