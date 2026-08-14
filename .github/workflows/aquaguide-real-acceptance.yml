@@ -90,7 +90,7 @@ jobs:
               ),
               (
                   "{ signalId: 'signal-record-livestock', kind: 'text_visible', target: '咖啡鼠', description: recordLivestock, ...taskEvidence },",
-                  "{ signalId: 'signal-record-livestock', kind: 'text_visible', target: 'Corydoras aeneus 1 in tank', description: recordLivestock, ...taskEvidence },",
+                  "{ signalId: 'signal-record-livestock', kind: 'text_visible', target: 'Corydoras aeneus x 1', description: recordLivestock, ...taskEvidence },",
               ),
               (
                   "successSignalIds: ['signal-create-size', 'signal-create-water']",
