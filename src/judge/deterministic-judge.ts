@@ -1,15 +1,23 @@
 import type { DeterministicCheckResult, DeterministicJudgeResult, EvalCase, EvidencePacket } from '../../types.js';
 import { deterministicJudgeResultSchema } from './schemas.js';
 
+function canonicalFinalObservation(packet: EvidencePacket) {
+  const finalStep = packet.stepEvidence.at(-1);
+  if (!finalStep) return null;
+  return packet.observations.find((item) => item.observationId === finalStep.afterObservationId) ?? null;
+}
+
 function checkAssertion(evalCase: EvalCase, packet: EvidencePacket, index: number): DeterministicCheckResult {
   const assertion = evalCase.oracle.deterministicAssertions[index]!;
-  const text = packet.finalState.visibleTextSummary;
+  const finalObservation = canonicalFinalObservation(packet);
+  const text = finalObservation?.visibleStateSummary ?? packet.finalState.visibleTextSummary;
+  const finalUrl = finalObservation?.pageUrl ?? packet.finalState.url;
   const network = packet.networkEvidence.join('\n');
   const consoleText = packet.consoleEvidence.join('\n');
   let verdict: DeterministicCheckResult['verdict'] = 'inconclusive';
   let summary = '现有证据不足以判断该断言。';
   if (assertion.type === 'url_matches') {
-    const matched = packet.finalState.url.includes(assertion.target);
+    const matched = finalUrl.includes(assertion.target);
     verdict = matched !== assertion.negated ? 'pass' : 'fail'; summary = `最终 URL ${matched ? '匹配' : '不匹配'} ${assertion.target}。`;
   } else if (assertion.type === 'text_visible' || assertion.type === 'text_absent') {
     const present = text.toLowerCase().includes(assertion.target.toLowerCase());
