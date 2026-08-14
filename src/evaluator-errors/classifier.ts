@@ -26,8 +26,8 @@ function hasWaitExhaustion(packet: EvidencePacket): boolean {
     && !['failed', 'blocked'].includes(item.taskState?.state ?? ''));
 }
 
-function isActionBudgetExhaustion(error: string | null): boolean {
-  return Boolean(error && /评测器在 \d+ 个操作内没有观察到足够进展|评测器达到 \d+ 个安全操作上限/.test(error));
+function isRuntimeCrash(error: string | null): boolean {
+  return Boolean(error && /playwright|locator\.|page\.|browser\.|referenceerror|typeerror|execution context|target closed|frame was detached|__name/i.test(error));
 }
 
 export function classifyEvaluatorFailure(input: {
@@ -44,20 +44,18 @@ export function classifyEvaluatorFailure(input: {
   const modelOutputInvalid = /model.{0,12}(output|response).{0,12}(invalid|malformed)|schema.{0,12}(invalid|error)|invalid.{0,12}(json|output)|模型输出.{0,8}(无效|损坏)|输出无效|结构化输出.{0,8}(失败|无效)/i.test(text);
   const navigationMismatch = /navigation.{0,12}mismatch|route.{0,12}mismatch|导航.{0,8}不匹配|路由.{0,8}不匹配|预期.{0,8}(地址|URL|页面).{0,8}(不符|未到达)/i.test(text);
   const explicitEvaluatorFailure = input.result.failureSource === 'evaluator' || input.agentRun.failureSource === 'evaluator';
-  const runtimeError = input.agentRun.failureSource === 'evaluator'
-    && Boolean(input.agentRun.error)
-    && !isActionBudgetExhaustion(input.agentRun.error);
+  const runtimeCrash = input.agentRun.failureSource === 'evaluator' && isRuntimeCrash(input.agentRun.error);
 
-  // Preserve specific evaluator diagnoses first. A genuine evaluator runtime crash must
-  // beat deterministic assertions computed from a partial page. Budget exhaustion is
-  // different: a real product defect can prevent progress until the Agent budget ends,
-  // so a hard deterministic product failure must remain eligible in that case.
+  // Preserve specific evaluator diagnoses first. Only a concrete browser/tool runtime crash
+  // may override deterministic assertions from a partial page. Generic evaluator errors such
+  // as action-budget exhaustion can be downstream of a genuine product defect and must not
+  // erase evidence-complete Product Failure signals.
   if (!input.packet.evidenceCompleteness.complete) return { category: 'evidence_missing', technicalReason: input.packet.evidenceCompleteness.missing.join(' ') };
   if (modelOutputInvalid) return { category: 'model_output_invalid', technicalReason: input.agentRun.error ?? '模型输出未通过结构校验。' };
   if (unsupportedControl) return { category: 'unsupported_control', technicalReason: blockedAction?.summary ?? '当前控件不在评测器可安全执行的范围内。' };
   if (navigationMismatch) return { category: 'navigation_mismatch', technicalReason: '实际页面与评测器预期的导航目标不一致。' };
   if (failedAction) return { category: 'tool_execution_error', technicalReason: failedAction.summary };
-  if (runtimeError) return { category: 'tool_execution_error', technicalReason: input.agentRun.error! };
+  if (runtimeCrash) return { category: 'tool_execution_error', technicalReason: input.agentRun.error! };
 
   if (input.packet.evidenceCompleteness.complete && input.result.failureSource === 'product' && input.result.deterministic.hardFailure) return null;
   if (input.result.failureSource === 'product' && !noNextAction) return null;
