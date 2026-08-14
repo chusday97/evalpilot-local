@@ -17,6 +17,7 @@ import { verifyAuthSession, type AuthSessionCheck } from '../scenario/auth-sessi
 import { materializeSyntheticFileFixtures, type SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
 import { planScenarioPrerequisiteSet, summarizePrerequisitePlan, type PrerequisitePlan } from '../scenario/prerequisite-planner.js';
 import { compileExecutableScenarios } from '../scenario/scenario-compiler.js';
+import { captureVerifiedSetupCheckpoint, chainPlanForRemaining, checkpointAuthScopeKey, resolveSetupCheckpoint, type VerifiedSetupCheckpoint } from '../scenario/setup-checkpoint.js';
 import { runAutoSetup, type AutoSetupExecutionResult } from '../scenario/setup-runner.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
 import { EvalPilotError } from '../utils/errors.js';
@@ -193,6 +194,7 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
   const challengeCases: EvalCase[] = [];
   const setupExecutions: AutoSetupExecutionResult[] = [];
   const authChecks: Array<{ caseId: string; check: AuthSessionCheck }> = [];
+  const verifiedSetupCheckpoints = new Map<string, VerifiedSetupCheckpoint>();
   const setupExecutionDirectory = resolve(evaluationDirectory, 'setup-executions');
   const authCheckDirectory = resolve(evaluationDirectory, 'auth-checks');
   if (prerequisitePlans.some((plan) => plan.status === 'ready' && plan.setupPlan)) await ensureDirectory(setupExecutionDirectory);
@@ -205,7 +207,15 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
       const prerequisitePlan = prerequisitePlanByCaseId.get(evalCase.caseId);
       if (!scenario || !prerequisitePlan || prerequisitePlan.status === 'blocked') throw new EvalPilotError(`案例“${evalCase.title}”未通过 Scenario Preflight。`, 'EVALUATION_SCENARIO_NOT_READY');
       const fileFixtures = fileFixturesByCaseId.get(evalCase.caseId) ?? [];
-      const context = await browser.newContext(prerequisitePlan.authFixture ? { storageState: prerequisitePlan.authFixture.storageState } : undefined);
+      const authScopeKey = checkpointAuthScopeKey(prerequisitePlan.authFixture?.storageState ?? null);
+      const checkpointResolution = resolveSetupCheckpoint({
+        setupPlans: prerequisitePlan.setupPlans,
+        checkpoints: verifiedSetupCheckpoints,
+        targetUrl: scenario.startingUrl,
+        authScopeKey,
+      });
+      const contextStorageState = checkpointResolution.checkpoint?.storageState ?? prerequisitePlan.authFixture?.storageState ?? null;
+      const context = await browser.newContext(contextStorageState ? { storageState: contextStorageState } : undefined);
       try {
         const page = await context.newPage();
         let prerequisitesPassed = true;
@@ -215,12 +225,14 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
           await writeJsonAtomic(resolve(authCheckDirectory, `${evalCase.caseId}.json`), { schemaVersion: 1, caseId: evalCase.caseId, ...authCheck });
           prerequisitesPassed = authCheck.status === 'ready';
         }
-        if (prerequisitePlan.setupPlan && prerequisitesPassed) {
+
+        const remainingSetupPlan = chainPlanForRemaining(evalCase.caseId, checkpointResolution.remainingSetupPlans);
+        if (remainingSetupPlan && prerequisitesPassed) {
           const setupExecution = await runAutoSetup({
             page,
             provider,
             outputDir: config.outputDir,
-            plan: prerequisitePlan.setupPlan,
+            plan: remainingSetupPlan,
             productModel: foundation.model,
             evalSetVersion: foundation.version,
             targetAppGitSha: commit,
@@ -230,7 +242,22 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
           setupExecutions.push(setupExecution);
           await writeJsonAtomic(resolve(setupExecutionDirectory, `${evalCase.caseId}.json`), setupExecution);
           prerequisitesPassed = setupExecution.status === 'passed';
+          if (prerequisitesPassed) {
+            const finalSetup = checkpointResolution.remainingSetupPlans.at(-1);
+            if (finalSetup) {
+              const sourceRunId = setupExecution.steps?.at(-1)?.runId ?? setupExecution.runId;
+              const checkpoint = await captureVerifiedSetupCheckpoint({
+                context,
+                taskId: finalSetup.setupTaskId,
+                targetUrl: scenario.startingUrl,
+                authScopeKey,
+                sourceRunId,
+              });
+              if (checkpoint) verifiedSetupCheckpoints.set(checkpoint.taskId, checkpoint);
+            }
+          }
         }
+
         if (prerequisitesPassed) {
           const outcome = await runAdaptiveCase({
             page,
@@ -251,6 +278,18 @@ export async function runEvaluationOrchestrator(cwd: string, rawInput: Evaluatio
           if (outcome.badcase) badcases.push(outcome.badcase);
           challengeCases.push(...(outcome.passAnalysis?.challengeCandidates ?? []));
           packets.push(evidencePacketSchema.parse(JSON.parse(await readFile(outcome.agentRun.evidencePacketPath, 'utf8'))));
+
+          if (outcome.result.verdict === 'pass' && outcome.result.failureSource === null && evalCase.taskId) {
+            const checkpoint = await captureVerifiedSetupCheckpoint({
+              context,
+              taskId: evalCase.taskId,
+              targetUrl: scenario.startingUrl,
+              authScopeKey,
+              sourceRunId: outcome.result.runId,
+              capturedAt: outcome.agentRun.completedAt,
+            });
+            if (checkpoint) verifiedSetupCheckpoints.set(checkpoint.taskId, checkpoint);
+          }
         }
       } finally {
         await context.close();

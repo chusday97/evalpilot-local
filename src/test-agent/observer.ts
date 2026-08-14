@@ -16,6 +16,13 @@ interface RawElement {
   options: string[];
 }
 
+interface RawPageSample {
+  title: string;
+  headings: string[];
+  visibleText: string;
+  raw: RawElement[];
+}
+
 const highRiskPattern = /\b(delete|remove|erase|publish|deploy|purchase|pay|send|submit order|confirm order|account deletion)\b|删除|移除|发布|部署|购买|付款|发送|注销/i;
 const sensitivePattern = /password|passcode|credential|secret|token|credit|card|cvv|ssn|密码|密钥|令牌|信用卡|身份证/i;
 
@@ -27,15 +34,19 @@ function riskFor(element: RawElement): GroundedElement['risk'] {
 }
 
 export async function observePage(page: Page, evidenceRefs: string[] = [], observationId = 'observation-standalone'): Promise<PageObservation> {
-  const title = await page.title().catch(() => '');
-  const headings = await page.locator('h1,h2,h3').allInnerTexts().catch(() => []);
-  const visibleText = (await page.locator('body').innerText().catch(() => '')).replace(/\s+/g, ' ').trim().slice(0, 4_000);
-  const raw = await page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').evaluateAll((nodes): RawElement[] => {
-    // IMPORTANT: keep this browser-serialized callback free of nested callback functions.
-    // EvalPilot often runs from source through tsx/esbuild; keep-name transforms can inject
-    // `__name(...)` into nested callbacks. Playwright serializes this function into the page,
-    // where esbuild's Node-side helper does not exist. Explicit loops avoid that runtime leak.
-    const result: RawElement[] = [];
+  const sample = await page.evaluate((): RawPageSample => {
+    // IMPORTANT: keep this browser-serialized callback free of nested function declarations
+    // and callback helpers. EvalPilot often runs from source through tsx/esbuild; keep-name
+    // transforms can inject Node-side `__name(...)` helpers that do not exist in the page.
+    const headings: string[] = [];
+    const headingNodes = document.querySelectorAll('h1,h2,h3');
+    for (const headingNode of headingNodes) {
+      const text = (headingNode as HTMLElement).innerText.trim();
+      if (text) headings.push(text);
+    }
+
+    const raw: RawElement[] = [];
+    const nodes = document.querySelectorAll('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]');
     for (const node of nodes) {
       const element = node as HTMLElement;
       const style = window.getComputedStyle(element);
@@ -45,8 +56,9 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
       const select = node as HTMLSelectElement;
       const labels: string[] = [];
       if ('labels' in input && input.labels) {
-        for (const labelNode of Array.from(input.labels)) {
-          const value = labelNode.textContent?.trim() ?? '';
+        for (let index = 0; index < input.labels.length; index += 1) {
+          const labelNode = input.labels.item(index);
+          const value = labelNode?.textContent?.trim() ?? '';
           if (value) labels.push(value);
         }
       }
@@ -54,7 +66,9 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
       const options: string[] = [];
       if (element.tagName === 'SELECT') {
         const seen = new Set<string>();
-        for (const option of Array.from(select.options)) {
+        for (let index = 0; index < select.options.length; index += 1) {
+          const option = select.options.item(index);
+          if (!option) continue;
           const value = option.value.trim();
           const text = option.text.trim();
           if (value && !seen.has(value)) {
@@ -69,7 +83,7 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
       }
 
       const ariaLabel = element.getAttribute('aria-label');
-      result.push({
+      raw.push({
         tagName: element.tagName.toLowerCase(),
         role: element.getAttribute('role'),
         label: ariaLabel ?? labels.join(' '),
@@ -83,10 +97,16 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
         options,
       });
     }
-    return result;
-  });
 
-  const interactableElements: GroundedElement[] = raw.map((item, index) => ({
+    return {
+      title: document.title,
+      headings,
+      visibleText: (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 4_000),
+      raw,
+    };
+  }).catch((): RawPageSample => ({ title: '', headings: [], visibleText: '', raw: [] }));
+
+  const interactableElements: GroundedElement[] = sample.raw.map((item, index) => ({
     elementId: `E${String(index + 1).padStart(3, '0')}`,
     role: item.role,
     tagName: item.tagName,
@@ -97,7 +117,7 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
     risk: riskFor(item),
     locatorHint: `grounded-index:${index}`,
   }));
-  const formFields: GroundedField[] = raw.flatMap((item, index) => ['input', 'select', 'textarea'].includes(item.tagName) ? [{
+  const formFields: GroundedField[] = sample.raw.flatMap((item, index) => ['input', 'select', 'textarea'].includes(item.tagName) ? [{
     ...interactableElements[index]!,
     fieldName: item.fieldName,
     inputType: item.inputType,
@@ -108,13 +128,13 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
   return pageObservationSchema.parse({
     observationId,
     pageUrl: page.url(),
-    pagePurpose: headings[0] ?? title,
-    visibleStateSummary: visibleText,
-    primaryAreas: headings.slice(0, 8),
-    visibleProblems: [/error|failed|unavailable|错误|失败|不可用/i.test(visibleText) ? '页面显示错误或不可用状态' : null].filter((item): item is string => item !== null),
+    pagePurpose: sample.headings[0] ?? sample.title,
+    visibleStateSummary: sample.visibleText,
+    primaryAreas: sample.headings.slice(0, 8),
+    visibleProblems: [/error|failed|unavailable|错误|失败|不可用/i.test(sample.visibleText) ? '页面显示错误或不可用状态' : null].filter((item): item is string => item !== null),
     interactableElements,
     formFields,
     evidenceRefs,
-    confidence: visibleText || interactableElements.length ? 0.95 : 0.4,
+    confidence: sample.visibleText || interactableElements.length ? 0.95 : 0.4,
   });
 }
