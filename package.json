@@ -54,7 +54,7 @@
     "dist-dashboard/",
     "skills/evalpilot/",
     "README.md",
-    "LICENSE.md",
+    "LICENSE",
     "SECURITY.md"
   ],
   "publishConfig": {
