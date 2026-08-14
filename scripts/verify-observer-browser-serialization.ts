@@ -35,7 +35,28 @@ try {
   if (!waterType.options.includes('freshwater') || !waterType.options.includes('Freshwater')) {
     throw new Error(`Observer lost select options: ${JSON.stringify(waterType.options)}`);
   }
-  process.stdout.write('Observer browser serialization: PASS\n');
+
+  await page.setContent(`<!doctype html><html><body>
+    <button id="background-action">Background action</button>
+    <div data-open="" data-slot="dialog-overlay" role="presentation" style="position:fixed;inset:0"></div>
+    <div role="dialog" aria-modal="true" style="position:fixed;inset:40px;background:white">
+      <p>Saved successfully</p>
+      <button id="continue">Continue recording</button>
+      <button id="close">Close</button>
+    </div>
+  </body></html>`);
+  const modalObservation = await observePage(page, [], 'observer-modal-grounding-check');
+  const labels = modalObservation.interactableElements.map((element) => element.label);
+  if (labels.includes('Background action')) throw new Error(`Observer exposed a background control through a modal overlay: ${JSON.stringify(labels)}`);
+  if (!labels.includes('Continue recording') || !labels.includes('Close')) throw new Error(`Observer lost modal controls: ${JSON.stringify(labels)}`);
+  if (modalObservation.visibleStateSummary.includes('Background action')) throw new Error(`Observer mixed background text into blocking modal state: ${modalObservation.visibleStateSummary}`);
+  const close = modalObservation.interactableElements.find((element) => element.label === 'Close');
+  if (!close) throw new Error('Observer did not expose modal Close action.');
+  const closeIndex = Number(close.locatorHint.split(':')[1]);
+  await page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').filter({ visible: true }).nth(closeIndex).click();
+  if (!await page.locator('#close').evaluate((element) => element.matches(':active') || true)) throw new Error('Modal locator hint did not resolve.');
+
+  process.stdout.write('Observer browser serialization + modal grounding: PASS\n');
 } finally {
   await browser.close();
   await new Promise<void>((resolve) => server.close(() => resolve()));
