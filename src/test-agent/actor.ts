@@ -24,6 +24,11 @@ function immediateOracleSatisfied(evalCase: EvalCase, observation: PageObservati
   });
 }
 
+function hasVerifiedExecutedProgress(history: AgentDecision[], verifications: StepVerification[]): boolean {
+  if (history.length === 0 || verifications.length === 0) return false;
+  return verifications.some((verification) => verification.status === 'confirmed');
+}
+
 export async function chooseAgentAction(input: {
   provider: AiProvider;
   evalCase: EvalCase;
@@ -35,7 +40,11 @@ export async function chooseAgentAction(input: {
   allowRemoteModel: boolean;
   allowScreenshot: boolean;
 }): Promise<AgentDecision> {
-  if (immediateOracleSatisfied(input.evalCase, input.observation)) {
+  // Do not declare a task complete from its initial page alone: examples, placeholders or
+  // pre-existing state can already contain the Oracle text. Auto-finish is only a recovery
+  // optimization after this run has produced at least one confirmed interaction.
+  if (hasVerifiedExecutedProgress(input.history, input.verifications)
+    && immediateOracleSatisfied(input.evalCase, input.observation)) {
     return agentDecisionSchema.parse({
       intentSummary: '当前页面已经满足全部可即时验证的确定性成功条件。',
       action: 'finish',
