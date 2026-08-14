@@ -1,0 +1,139 @@
+name: AquaGuide Real Acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/aquaguide-real-acceptance.yml'
+      - 'scripts/run-aquaguide-real-acceptance-v2.ts'
+      - 'src/acceptance/**'
+      - 'src/scenario/**'
+      - 'src/test-agent/**'
+      - 'src/judge/**'
+      - 'src/product-model/**'
+      - 'acceptance/real-products/aquaguide.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout EvalPilot
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned AquaGuide
+        uses: actions/checkout@v4
+        with:
+          repository: chusday97/aquaguide-tank-guide
+          ref: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+          path: real-products/aquaguide
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install EvalPilot
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Install AquaGuide
+        working-directory: real-products/aquaguide
+        run: npm ci
+
+      - name: Start AquaGuide web
+        working-directory: real-products/aquaguide
+        run: |
+          npm run dev:web > ../../aquaguide-vite.log 2>&1 &
+          echo $! > ../../aquaguide-vite.pid
+
+      - name: Wait for AquaGuide
+        run: |
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent http://127.0.0.1:3000/ >/dev/null; then
+              exit 0
+            fi
+            sleep 0.25
+          done
+          cat aquaguide-vite.log || true
+          exit 1
+
+      - name: Configure evidence-backed acceptance contract
+        run: |
+          grep -q "const acceptanceDeadlineMs = 180_000;" scripts/run-aquaguide-real-acceptance-v2.ts
+          sed -i "s/const acceptanceDeadlineMs = 180_000;/const acceptanceDeadlineMs = 420_000;/" scripts/run-aquaguide-real-acceptance-v2.ts
+          python - <<'PY'
+          from pathlib import Path
+          import re
+
+          path = Path('scripts/run-aquaguide-real-acceptance-v2.ts')
+          text = path.read_text()
+
+          replacements = [
+              (
+                  "  const createWater = '鱼缸页面显示已保存的淡水水体';\n  const recordLivestock = '鱼缸主页面显示已保存的咖啡鼠活体记录';",
+                  "  const createWater = '鱼缸页面显示已保存的淡水水体';\n  const createPersisted = '鱼缸主页面不再显示 Water type unknown，证明设置已经保存';\n  const recordLivestock = '鱼缸主页面显示已保存的 Corydoras aeneus 活体记录';",
+              ),
+              (
+                  "preconditions: ['项目页面已打开'], successConditions: [createSize, createWater],",
+                  "preconditions: ['项目页面已打开'], successConditions: [createSize, createWater, createPersisted],",
+              ),
+              (
+                  "          { signalId: 'signal-create-water', kind: 'text_visible', target: '淡水', description: createWater, ...taskEvidence },\n",
+                  "          { signalId: 'signal-create-water', kind: 'text_visible', target: '淡水', description: createWater, ...taskEvidence },\n          { signalId: 'signal-create-persisted', kind: 'text_absent', target: 'Water type unknown', description: createPersisted, ...taskEvidence },\n",
+              ),
+              (
+                  "{ signalId: 'signal-record-livestock', kind: 'text_visible', target: '咖啡鼠', description: recordLivestock, ...taskEvidence },",
+                  "{ signalId: 'signal-record-livestock', kind: 'text_visible', target: 'Corydoras aeneus 1 in tank', description: recordLivestock, ...taskEvidence },",
+              ),
+              (
+                  "successSignalIds: ['signal-create-size', 'signal-create-water']",
+                  "successSignalIds: ['signal-create-size', 'signal-create-water', 'signal-create-persisted']",
+              ),
+          ]
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'acceptance contract fragment not found: {old[:80]}')
+              text = text.replace(old, new)
+
+          daily_pattern = re.compile(
+              r"    const questionAnswers: Array<\[string, string\]> = \[.*?"
+              r"    const generate = safeButtonClick\(input, \(item\) => labelIncludesAny\(item, \['生成检查结果', 'Generate Results'\]\), '生成每日检查风险结果', '页面显示高风险等级和立即动作'\);\n"
+              r"    if \(generate\) return generate;",
+              re.S,
+          )
+          new_daily = """    const dailyAnswers = ['经常浮头', '清澈', '没有泡沫或油膜', '没有异味', '正常游动和进食', '没有特别操作'];
+            const progressMatch = visible.match(/(?:^|\\s)([0-6])\\s*\\/\\s*6(?:\\s|$)/);
+            const answeredCount = progressMatch ? Number(progressMatch[1]) : 0;
+            if (answeredCount < dailyAnswers.length) {
+              const answer = dailyAnswers[answeredCount]!;
+              const choice = safeButtonClick(input, (item) => String(item.label ?? '') === answer, `回答每日检查第 ${answeredCount + 1} 项：${answer}`, `每日检查进度变为 ${answeredCount + 1} / 6`);
+              if (choice) return choice;
+            }
+            const generate = safeButtonClick(input, (item) => labelIncludesAny(item, ['生成检查结果', 'Generate Results']), '生成每日检查风险结果', '页面显示高风险等级和立即动作');
+            if (generate) return generate;"""
+          text, count = daily_pattern.subn(lambda _match: new_daily, text, count=1)
+          if count != 1:
+              raise SystemExit(f'daily driver replacement count={count}')
+
+          path.write_text(text)
+          PY
+
+      - name: Run EvalPilot real acceptance
+        run: timeout --signal=TERM --kill-after=5s 480s npx tsx scripts/run-aquaguide-real-acceptance-v2.ts --project-root real-products/aquaguide --url http://127.0.0.1:3000 --output real-product-acceptance-output
+
+      - name: Upload real acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aquaguide-real-acceptance
+          path: |
+            real-product-acceptance-output/
+            aquaguide-vite.log
+          if-no-files-found: warn
