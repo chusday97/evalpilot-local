@@ -40,6 +40,14 @@ function shouldBlockRemoteBusinessRequest(route: Route): boolean {
   return !isLoopback(request.url());
 }
 
+function blockedRequestMethod(entry: string): string {
+  return entry.trim().split(/\s+/, 1)[0]?.toUpperCase() ?? '';
+}
+
+export function isBlockedRemoteWrite(entry: string): boolean {
+  return !['GET', 'HEAD', 'OPTIONS'].includes(blockedRequestMethod(entry));
+}
+
 async function runSingleAutoSetup(input: {
   page: Page;
   provider: AiProvider;
@@ -92,10 +100,18 @@ async function runSingleAutoSetup(input: {
   const packet = evidencePacketSchema.parse(JSON.parse(await readFile(agentRun.evidencePacketPath, 'utf8')));
   const deterministic = runDeterministicJudge(input.plan.setupCase, packet);
   const allAssertionsPassed = deterministic.checks.length > 0 && deterministic.checks.every((check) => check.verdict === 'pass');
-  const passed = agentRun.status === 'completed' && packet.evidenceCompleteness.complete && allAssertionsPassed && blockedRemoteRequests.length === 0;
-  const remoteBoundarySummary = blockedRemoteRequests.length
-    ? `检测到并阻止 ${blockedRemoteRequests.length} 个发往非本地环境的业务请求。`
-    : null;
+  const blockedRemoteWrites = blockedRemoteRequests.filter(isBlockedRemoteWrite);
+  const blockedRemoteReads = blockedRemoteRequests.filter((entry) => !isBlockedRemoteWrite(entry));
+  // Every non-local business request is still aborted. Read-only requests are diagnostic only:
+  // if the local Setup reaches its deterministic Oracle without them, they cannot mutate
+  // production state and should not invalidate a safely established local fixture. Remote
+  // writes remain a hard failure even when the local UI appears to succeed.
+  const passed = agentRun.status === 'completed' && packet.evidenceCompleteness.complete && allAssertionsPassed && blockedRemoteWrites.length === 0;
+  const remoteBoundarySummary = blockedRemoteWrites.length
+    ? `检测到并阻止 ${blockedRemoteWrites.length} 个发往非本地环境的写请求。`
+    : blockedRemoteReads.length
+      ? `已阻止 ${blockedRemoteReads.length} 个非本地只读请求；本地确定性 Setup 仍已完成。`
+      : null;
   return {
     setupId: input.plan.setupId,
     targetCaseId: input.plan.targetCaseId,
@@ -107,7 +123,7 @@ async function runSingleAutoSetup(input: {
     evidencePacketPath: agentRun.evidencePacketPath,
     blockedRemoteRequests,
     summary: passed
-      ? `前置任务“${input.plan.setupCase.title}”已由确定性证据确认完成。`
+      ? `前置任务“${input.plan.setupCase.title}”已由确定性证据确认完成。${remoteBoundarySummary ? ` ${remoteBoundarySummary}` : ''}`
       : `前置任务“${input.plan.setupCase.title}”没有形成可安全复用的本地测试状态，目标 Case 未启动。${remoteBoundarySummary ? ` ${remoteBoundarySummary}` : ''}`,
     completedAt: agentRun.completedAt,
   };
