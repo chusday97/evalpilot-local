@@ -42,7 +42,7 @@ try {
     <div role="dialog" aria-modal="true" style="position:fixed;inset:40px;background:white">
       <p>Saved successfully</p>
       <button id="continue">Continue recording</button>
-      <button id="close">Close</button>
+      <button id="close" onclick="document.body.dataset.closed='1'">Close</button>
     </div>
   </body></html>`);
   const modalObservation = await observePage(page, [], 'observer-modal-grounding-check');
@@ -54,7 +54,8 @@ try {
   if (!close) throw new Error('Observer did not expose modal Close action.');
   const closeIndex = Number(close.locatorHint.split(':')[1]);
   await page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').filter({ visible: true }).nth(closeIndex).click();
-  if (!await page.locator('#close').evaluate((element) => element.matches(':active') || true)) throw new Error('Modal locator hint did not resolve.');
+  const closed = await page.evaluate(() => document.body.dataset.closed === '1');
+  if (!closed) throw new Error(`Modal locator hint resolved to the wrong global DOM element: ${close.locatorHint}`);
 
   process.stdout.write('Observer browser serialization + modal grounding: PASS\n');
 } finally {
