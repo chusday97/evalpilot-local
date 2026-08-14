@@ -25,7 +25,12 @@ function integer(value: number | null): number | null {
 export async function readFieldInputConstraints(page: Page, field: GroundedField): Promise<FieldInputConstraints> {
   const index = Number(field.locatorHint.split(':')[1]);
   if (!Number.isInteger(index) || index < 0) return { min: null, max: null, minLength: null, maxLength: null, step: null, pattern: null };
-  const locator = page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').filter({ visible: true }).nth(index);
+
+  // locatorHint is the index from Observer's original querySelectorAll NodeList.
+  // Re-filtering to visible elements here would create a different index space and
+  // could read constraints from the wrong element when hidden/background controls
+  // precede a modal field.
+  const locator = page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').nth(index);
 
   // Keep the browser-evaluated callback self-contained and free of nested helpers.
   // Transpilers may inject helper references such as `__name` for nested functions;
