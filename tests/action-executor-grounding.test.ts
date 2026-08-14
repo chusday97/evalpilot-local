@@ -2,6 +2,7 @@ import { chromium } from 'playwright';
 import { describe, expect, it } from 'vitest';
 import type { AgentDecision } from '../types.js';
 import { executeAgentAction } from '../src/test-agent/action-executor.js';
+import { readFieldInputConstraints } from '../src/test-agent/field-input-constraints.js';
 import { observePage } from '../src/test-agent/observer.js';
 
 const browserDescribe = process.env.EVALPILOT_BROWSER_TEST === '1' ? describe : describe.skip;
@@ -29,7 +30,7 @@ browserDescribe('grounded action identity', () => {
             <button id="hidden" style="display:none">Hidden</button>
             <button id="outside">Outside modal</button>
             <div role="dialog" aria-modal="true">
-              <input id="length" type="number" aria-label="Length">
+              <input id="length" type="number" min="20" max="120" step="10" aria-label="Length">
               <button id="save">Save Settings</button>
             </div>
           </body>
@@ -40,6 +41,9 @@ browserDescribe('grounded action identity', () => {
       const field = observation.formFields.find((item) => item.label === 'Length');
       expect(field).toBeTruthy();
       expect(field?.locatorHint).toBe('grounded-index:2');
+
+      const constraints = await readFieldInputConstraints(page, field!);
+      expect(constraints).toMatchObject({ min: 20, max: 120, step: 10 });
 
       const result = await executeAgentAction(page, observation, fillDecision(field!.elementId, '60'));
 
