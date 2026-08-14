@@ -52,6 +52,28 @@ describe('Hybrid Judge', () => {
     expect(result).toMatchObject({ verdict: 'fail', failureSource: 'product', severity: 'P1', semantic: { confirmedFacts: [], hypotheses: [{ hypothesis: '结果区域未渲染' }] } });
   });
 
+  it('judges visible text from the full linked final observation beyond the compact summary', () => {
+    const longPacket = packet(`${'x'.repeat(1_500)}Created`);
+    longPacket.finalState.visibleTextSummary = 'x'.repeat(1_000);
+    const deterministic = runDeterministicJudge(evalCase(), longPacket);
+    expect(deterministic.checks.map((item) => item.verdict)).toEqual(['pass', 'pass']);
+  });
+
+  it('does not pass from stale compact text when the linked final observation lacks the target', () => {
+    const finalPacket = packet('Saved page without the target token');
+    finalPacket.observations[0]!.visibleStateSummary = 'Draft page contained Created';
+    finalPacket.finalState.visibleTextSummary = 'Stale compact summary contained Created';
+    const deterministic = runDeterministicJudge(evalCase(), finalPacket);
+    expect(deterministic.checks.map((item) => item.verdict)).toEqual(['fail', 'pass']);
+  });
+
+  it('judges text_absent against the full linked final observation beyond the compact summary', () => {
+    const longPacket = packet(`Created ${'y'.repeat(1_500)} Error`);
+    longPacket.finalState.visibleTextSummary = `Created ${'y'.repeat(900)}`;
+    const deterministic = runDeterministicJudge(evalCase(), longPacket);
+    expect(deterministic.checks.map((item) => item.verdict)).toEqual(['pass', 'fail']);
+  });
+
   it('prevents pass when evidence is incomplete', () => {
     const incomplete = { ...packet(), stepVerifications: [] };
     const deterministic = runDeterministicJudge(evalCase(), incomplete);
