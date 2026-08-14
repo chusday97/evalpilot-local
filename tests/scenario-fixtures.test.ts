@@ -85,7 +85,12 @@ describe('select action compatibility', () => {
     const selectOption = vi.fn()
       .mockRejectedValueOnce(new Error('value not found'))
       .mockResolvedValueOnce(undefined);
-    const locator = { filter: vi.fn().mockReturnThis(), nth: vi.fn().mockReturnThis(), selectOption };
+    const locator = {
+      nth: vi.fn().mockReturnThis(),
+      evaluate: vi.fn().mockResolvedValue('select'),
+      isVisible: vi.fn().mockResolvedValue(true),
+      selectOption,
+    };
     const page = { locator: vi.fn(() => locator) } as any;
     const observation: PageObservation = {
       observationId: 'observation-select',
