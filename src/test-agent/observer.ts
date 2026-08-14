@@ -14,6 +14,7 @@ interface RawElement {
   required: boolean;
   currentValuePresent: boolean;
   options: string[];
+  locatorIndex: number;
 }
 
 interface RawPageSample {
@@ -45,10 +46,32 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
       if (text) headings.push(text);
     }
 
+    let modalRoot: HTMLElement | null = null;
+    const dialogNodes = document.querySelectorAll('[role="dialog"]');
+    for (let index = 0; index < dialogNodes.length; index += 1) {
+      const candidate = dialogNodes.item(index);
+      if (!(candidate instanceof HTMLElement)) continue;
+      const style = window.getComputedStyle(candidate);
+      if (style.visibility === 'hidden' || style.display === 'none' || candidate.getClientRects().length === 0) continue;
+      modalRoot = candidate;
+    }
+    let blockingOverlayVisible = false;
+    const overlayNodes = document.querySelectorAll('[data-slot="dialog-overlay"],[data-base-ui-inert][role="presentation"]');
+    for (let index = 0; index < overlayNodes.length; index += 1) {
+      const overlay = overlayNodes.item(index);
+      if (!(overlay instanceof HTMLElement)) continue;
+      const style = window.getComputedStyle(overlay);
+      if (style.visibility !== 'hidden' && style.display !== 'none' && overlay.getClientRects().length > 0) blockingOverlayVisible = true;
+    }
+    const modalBlocksPage = Boolean(modalRoot && (modalRoot.getAttribute('aria-modal') === 'true' || blockingOverlayVisible));
+
     const raw: RawElement[] = [];
     const nodes = document.querySelectorAll('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]');
-    for (const node of nodes) {
-      const element = node as HTMLElement;
+    for (let nodeIndex = 0; nodeIndex < nodes.length; nodeIndex += 1) {
+      const node = nodes.item(nodeIndex);
+      if (!(node instanceof HTMLElement)) continue;
+      if (modalBlocksPage && modalRoot && !modalRoot.contains(node)) continue;
+      const element = node;
       const style = window.getComputedStyle(element);
       if (style.visibility === 'hidden' || style.display === 'none' || element.getClientRects().length === 0) continue;
 
@@ -95,13 +118,15 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
         required: 'required' in input ? Boolean(input.required) : false,
         currentValuePresent: 'value' in input ? String(input.value ?? '').length > 0 : false,
         options,
+        locatorIndex: nodeIndex,
       });
     }
 
+    const visibleTextSource = modalBlocksPage && modalRoot ? modalRoot.innerText : (document.body?.innerText ?? '');
     return {
       title: document.title,
       headings,
-      visibleText: (document.body?.innerText ?? '').replace(/\s+/g, ' ').trim().slice(0, 4_000),
+      visibleText: visibleTextSource.replace(/\s+/g, ' ').trim().slice(0, 4_000),
       raw,
     };
   }).catch((): RawPageSample => ({ title: '', headings: [], visibleText: '', raw: [] }));
@@ -115,7 +140,7 @@ export async function observePage(page: Page, evidenceRefs: string[] = [], obser
     placeholder: item.placeholder,
     disabled: item.disabled,
     risk: riskFor(item),
-    locatorHint: `grounded-index:${index}`,
+    locatorHint: `grounded-index:${item.locatorIndex}`,
   }));
   const formFields: GroundedField[] = sample.raw.flatMap((item, index) => ['input', 'select', 'textarea'].includes(item.tagName) ? [{
     ...interactableElements[index]!,
