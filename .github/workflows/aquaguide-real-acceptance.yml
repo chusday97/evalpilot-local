@@ -102,15 +102,11 @@ jobs:
                   raise SystemExit(f'acceptance contract fragment not found: {old[:80]}')
               text = text.replace(old, new)
 
-          settings_old = """      return safeButtonClick(input, (item) => labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置', 'Tank Settings']), '打开鱼缸设置', '显示尺寸和水体设置')
-                ?? { intentSummary: '没有找到鱼缸设置入口', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止并保留证据', confidence: 1 };"""
-          settings_new = """      const stableSettings = safeButtonClick(input, (item) => String(item.label ?? '') === 'Settings', '打开鱼缸设置', '显示尺寸和水体设置');
-                if (stableSettings) return stableSettings;
-                return safeButtonClick(input, (item) => labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置', 'Tank Settings']), '打开鱼缸设置', '显示尺寸和水体设置')
-                  ?? { intentSummary: '没有找到鱼缸设置入口', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止并保留证据', confidence: 1 };"""
-          if settings_old not in text:
-              raise SystemExit('create-task settings driver fragment not found')
-          text = text.replace(settings_old, settings_new)
+          settings_selector_old = "labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置', 'Tank Settings'])"
+          settings_selector_new = "(String(item.label ?? '') === 'Settings' || labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置']))"
+          if text.count(settings_selector_old) != 1:
+              raise SystemExit(f'create-task settings selector count={text.count(settings_selector_old)}')
+          text = text.replace(settings_selector_old, settings_selector_new)
 
           daily_pattern = re.compile(
               r"    const questionAnswers: Array<\[string, string\]> = \[.*?"
