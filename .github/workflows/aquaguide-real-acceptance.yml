@@ -103,7 +103,7 @@ jobs:
               text = text.replace(old, new)
 
           settings_selector_old = "labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置', 'Tank Settings'])"
-          settings_selector_new = "(String(item.label ?? '') === 'Settings' || labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置']))"
+          settings_selector_new = "labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', 'Create or configure a tank', '鱼缸设置'])"
           if text.count(settings_selector_old) != 1:
               raise SystemExit(f'create-task settings selector count={text.count(settings_selector_old)}')
           text = text.replace(settings_selector_old, settings_selector_new)
