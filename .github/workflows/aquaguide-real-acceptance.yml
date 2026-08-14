@@ -102,6 +102,16 @@ jobs:
                   raise SystemExit(f'acceptance contract fragment not found: {old[:80]}')
               text = text.replace(old, new)
 
+          settings_old = """      return safeButtonClick(input, (item) => labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置', 'Tank Settings']), '打开鱼缸设置', '显示尺寸和水体设置')
+                ?? { intentSummary: '没有找到鱼缸设置入口', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止并保留证据', confidence: 1 };"""
+          settings_new = """      const stableSettings = safeButtonClick(input, (item) => String(item.label ?? '') === 'Settings', '打开鱼缸设置', '显示尺寸和水体设置');
+                if (stableSettings) return stableSettings;
+                return safeButtonClick(input, (item) => labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置', 'Tank Settings']), '打开鱼缸设置', '显示尺寸和水体设置')
+                  ?? { intentSummary: '没有找到鱼缸设置入口', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止并保留证据', confidence: 1 };"""
+          if settings_old not in text:
+              raise SystemExit('create-task settings driver fragment not found')
+          text = text.replace(settings_old, settings_new)
+
           daily_pattern = re.compile(
               r"    const questionAnswers: Array<\[string, string\]> = \[.*?"
               r"    const generate = safeButtonClick\(input, \(item\) => labelIncludesAny\(item, \['生成检查结果', 'Generate Results'\]\), '生成每日检查风险结果', '页面显示高风险等级和立即动作'\);\n"
@@ -126,7 +136,77 @@ jobs:
           PY
 
       - name: Run EvalPilot real acceptance
-        run: timeout --signal=TERM --kill-after=5s 480s npx tsx scripts/run-aquaguide-real-acceptance-v2.ts --project-root real-products/aquaguide --url http://127.0.0.1:3000 --output real-product-acceptance-output
+        run: |
+          set -euo pipefail
+          rm -f acceptance-run.log
+          setsid npx tsx scripts/run-aquaguide-real-acceptance-v2.ts \
+            --project-root real-products/aquaguide \
+            --url http://127.0.0.1:3000 \
+            --output real-product-acceptance-output \
+            > acceptance-run.log 2>&1 &
+          runner_pid=$!
+          diagnostic_path="real-product-acceptance-output/aquaguide-real-acceptance.json"
+          diagnostic_ready=0
+
+          for attempt in $(seq 1 450); do
+            if [ -f "$diagnostic_path" ] && node - "$diagnostic_path" <<'NODE'
+          const fs = require('node:fs');
+          const path = process.argv[2];
+          try {
+            const diagnostic = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const terminal = Boolean(diagnostic.error) || ['completed', 'failed'].includes(diagnostic.session?.status);
+            process.exit(terminal ? 0 : 1);
+          } catch {
+            process.exit(1);
+          }
+          NODE
+            then
+              diagnostic_ready=1
+              break
+            fi
+            if ! kill -0 "$runner_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          if kill -0 "$runner_pid" 2>/dev/null; then
+            kill -TERM -- "-$runner_pid" 2>/dev/null || true
+            for attempt in $(seq 1 20); do
+              if ! kill -0 "$runner_pid" 2>/dev/null; then
+                break
+              fi
+              sleep 0.25
+            done
+            if kill -0 "$runner_pid" 2>/dev/null; then
+              kill -KILL -- "-$runner_pid" 2>/dev/null || true
+            fi
+          fi
+          wait "$runner_pid" 2>/dev/null || true
+          cat acceptance-run.log || true
+
+          if [ "$diagnostic_ready" -ne 1 ]; then
+            echo "Acceptance runner did not publish a terminal diagnostic before the watchdog expired." >&2
+            exit 1
+          fi
+
+          node - "$diagnostic_path" <<'NODE'
+          const fs = require('node:fs');
+          const path = process.argv[2];
+          const diagnostic = JSON.parse(fs.readFileSync(path, 'utf8'));
+          if (diagnostic.error) {
+            console.error(`Acceptance harness error: ${diagnostic.error}`);
+            process.exit(1);
+          }
+          if (diagnostic.timedOut) {
+            console.error('Acceptance session timed out before reaching a terminal evaluation state.');
+            process.exit(1);
+          }
+          if (!diagnostic.gate?.passed) {
+            console.error(`Acceptance gate failed: ${diagnostic.gate?.counts?.passed ?? 0}/${diagnostic.gate?.counts?.planned ?? 0} tasks passed.`);
+            process.exit(1);
+          }
+          NODE
 
       - name: Upload real acceptance evidence
         if: always()
@@ -136,4 +216,5 @@ jobs:
           path: |
             real-product-acceptance-output/
             aquaguide-vite.log
+            acceptance-run.log
           if-no-files-found: warn
