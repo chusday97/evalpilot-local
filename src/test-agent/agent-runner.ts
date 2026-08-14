@@ -119,7 +119,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       const stepLabel = String(stepIndex).padStart(3, '0');
       const beforeScreenshotPath = resolve(screenshotDirectory, `step-${stepLabel}-before.png`);
       const afterScreenshotPath = resolve(screenshotDirectory, `step-${stepLabel}-after.png`);
-      const beforeBuffer = await page.screenshot({ path: beforeScreenshotPath, fullPage: true });
+      const beforeBuffer = await page.screenshot({ path: beforeScreenshotPath, animations: 'disabled' });
       screenshots.push(beforeScreenshotPath);
       const before = await observePage(page, [beforeScreenshotPath], `observation-${stepLabel}-before`);
       observations.push(before);
@@ -198,7 +198,7 @@ export async function runAiTestAgent(page: Page, evalCase: EvalCase, provider: A
       actionResult = { ...actionResult, summary: `${actionResult.summary} ${waitResult.summary}` };
       actionResults.push(actionResult);
       interactions.push(interactionFor(decision, actionResult, interactions.length, performance.now() - monotonicStartedAt, before.pageUrl));
-      const afterBuffer = await page.screenshot({ path: afterScreenshotPath, fullPage: true });
+      const afterBuffer = await page.screenshot({ path: afterScreenshotPath, animations: 'disabled' });
       screenshots.push(afterScreenshotPath);
       const after = await observePage(page, [afterScreenshotPath], `observation-${stepLabel}-after`);
       observations.push(after);
