@@ -21,6 +21,7 @@ import { EvalPilotError } from '../utils/errors.js';
 import { dashboardAssetsRoot, isLegacyDataRoot, migrateLegacyData, packageVersion, resolveDataRoot } from '../runtime/paths.js';
 import { inspectRuntime } from '../runtime/runtime-readiness.js';
 import { runBuiltinBenchmark } from '../benchmark/runner.js';
+import { planConfiguredBlindExperience, runConfiguredBlindExperience } from '../ux-evaluation/configured-blind-experience-runner.js';
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -196,6 +197,66 @@ export function createProgram(cwd = process.cwd()): Command {
       process.stdout.write(
         `浏览器评测完成。\n执行：${run.results.length}\n通过：${passed}\n失败：${failed}\n阻塞：${blocked}\n不适用：${notApplicable}\n证据目录：${run.runDirectory}\n下一步：evalpilot report\n`,
       );
+    });
+
+  program
+    .command('experience')
+    .description('先检查前置状态，再用已连接模型运行独立 Blind Experience Evaluation')
+    .requiredOption('--project <project-id>', '已注册的 EvalPilot 项目 ID')
+    .requiredOption('--case <case-id>', '要观察的 EvalCase ID')
+    .option('--starting-url <url>', '覆盖 Product Model 的中立起始页面')
+    .option('--run', '在 preflight 通过后真正启动 Blind Actor')
+    .option('--confirmed', '确认允许把最小化可见页面信息发送给已连接模型')
+    .option('--allow-screenshot', '允许向已连接模型发送运行页面截图；默认关闭')
+    .option('--json', '输出完整 preflight / run JSON')
+    .action(async ({ project, case: caseId, startingUrl, run, confirmed, allowScreenshot, json }: { project: string; case: string; startingUrl?: string; run?: boolean; confirmed?: boolean; allowScreenshot?: boolean; json?: boolean }) => {
+      const input = { projectId: project, caseId, startingUrl, allowScreenshot: Boolean(allowScreenshot) };
+      const preflight = await planConfiguredBlindExperience(cwd, input);
+      if (!run) {
+        if (json) {
+          process.stdout.write(`${JSON.stringify(preflight, null, 2)}\n`);
+          return;
+        }
+        const setup = preflight.setupKnowledge.length
+          ? preflight.setupKnowledge.map((item) => `- ${item.setupTaskId}: ${item.status === 'ready' ? `使用 ${item.sourceCaseTitle ?? item.sourceCaseId}` : '缺少稳定 baseline'}`).join('\n')
+          : '- 不需要 evaluator-managed Setup';
+        process.stdout.write([
+          `Blind Experience Preflight：${preflight.canRun ? 'READY' : 'BLOCKED'}`,
+          `案例：${preflight.caseTitle}`,
+          `起始页面：${preflight.startingUrl}`,
+          `前置顺序：${preflight.prerequisite.executionOrder.join(' → ')}`,
+          `Setup 来源：\n${setup}`,
+          ...preflight.reasons.map((reason) => `- ${reason}`),
+          preflight.canRun ? '下一步：添加 --run --confirmed 启动 Blind Actor。' : '目标 Actor 未启动；请先补齐上面的前置状态。',
+        ].join('\n') + '\n');
+        return;
+      }
+      if (!confirmed) throw new EvalPilotError('真正启动 Blind Experience 前需要添加 --confirmed；这会调用当前已连接模型。', 'CONFIRMATION_REQUIRED');
+      if (!preflight.canRun) throw new EvalPilotError(`Blind Experience 前置状态未就绪：${preflight.reasons.join('；')}`, 'BLIND_EXPERIENCE_PREREQUISITE_BLOCKED');
+      const outcome = await runConfiguredBlindExperience(cwd, input);
+      const summary = {
+        preflight: outcome.preflight,
+        runId: outcome.agentRun.runId,
+        verdict: outcome.result.verdict,
+        failureSource: outcome.result.failureSource,
+        analysisStatus: outcome.experience.analysisStatus,
+        actionCount: outcome.experience.actions.length,
+        backtrackCount: outcome.experience.routeBacktrackCount,
+        frictionCount: outcome.experience.frictions.length,
+        findingCount: outcome.experience.findings.length,
+      };
+      if (json) {
+        process.stdout.write(`${JSON.stringify(summary, null, 2)}\n`);
+        return;
+      }
+      process.stdout.write([
+        'Blind Experience 完成。',
+        `Run：${summary.runId}`,
+        `Independent Judge：${summary.verdict}${summary.failureSource ? ` / ${summary.failureSource}` : ''}`,
+        `Journey：${summary.actionCount} 个动作 · ${summary.backtrackCount} 次显式回退`,
+        `Friction：${summary.frictionCount} · Finding：${summary.findingCount}`,
+        '边界：这是 AI Blind Actor 行为证据，不等同于真实用户满意度。',
+      ].join('\n') + '\n');
     });
 
   program
