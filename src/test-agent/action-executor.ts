@@ -1,22 +1,17 @@
 import type { Page } from 'playwright';
 import type { AgentActionResult, AgentDecision, PageObservation } from '../../types.js';
 import type { SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
-
-const groundedElementSelector = 'a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]';
+import { resolveGroundedTarget } from './grounding.js';
 
 function targetFor(observation: PageObservation, decision: AgentDecision) {
   return observation.interactableElements.find((item) => item.elementId === decision.targetElementId) ?? null;
 }
 
 async function selectVisibleOption(locator: ReturnType<Page['locator']>, value: string): Promise<void> {
-  try {
-    await locator.selectOption(value);
-  } catch (valueError) {
-    try {
-      await locator.selectOption({ label: value });
-    } catch {
-      throw valueError;
-    }
+  try { await locator.selectOption(value); }
+  catch (valueError) {
+    try { await locator.selectOption({ label: value }); }
+    catch { throw valueError; }
   }
 }
 
@@ -28,31 +23,14 @@ export async function executeAgentAction(page: Page, observation: PageObservatio
     if (target.risk !== 'safe') return { status: 'blocked_by_safety', action: decision.action, targetElementId: target.elementId, summary: `已阻止 ${target.risk} 风险操作。`, evidenceRefs: observation.evidenceRefs };
   }
   try {
-    const index = target ? Number(target.locatorHint.split(':')[1]) : null;
     let locator: ReturnType<Page['locator']> | null = null;
     if (target) {
-      if (!Number.isInteger(index) || index === null || index < 0) {
-        return { status: 'failed', action: decision.action, targetElementId: target.elementId, summary: '目标控件缺少有效的 DOM grounding index，需要重新观察页面。', evidenceRefs: observation.evidenceRefs };
+      const field = observation.formFields.find((item) => item.elementId === target.elementId) ?? null;
+      const resolution = await resolveGroundedTarget(page, target, field);
+      if (resolution.status === 'drifted') {
+        return { status: 'failed', action: decision.action, targetElementId: target.elementId, summary: resolution.reason, evidenceRefs: observation.evidenceRefs };
       }
-
-      // Observer records locatorIndex from the original querySelectorAll NodeList. Do not
-      // re-filter that list here: filtering visible elements creates a different index space
-      // and can silently retarget an action (for example, filling an observed input may hit a
-      // button when hidden/background elements precede a modal field).
-      locator = page.locator(groundedElementSelector).nth(index);
-      const actualTagName = await locator.evaluate((element) => element.tagName.toLowerCase()).catch(() => null);
-      if (actualTagName !== target.tagName) {
-        return {
-          status: 'failed',
-          action: decision.action,
-          targetElementId: target.elementId,
-          summary: `DOM grounding 已漂移：观察到 ${target.tagName}，执行时定位到 ${actualTagName ?? 'missing'}。需要重新观察页面。`,
-          evidenceRefs: observation.evidenceRefs,
-        };
-      }
-      if (!await locator.isVisible()) {
-        return { status: 'failed', action: decision.action, targetElementId: target.elementId, summary: '目标控件在执行前已不可见，需要重新观察页面。', evidenceRefs: observation.evidenceRefs };
-      }
+      locator = resolution.locator;
     }
 
     if (decision.action === 'click') await locator!.click();
