@@ -73,7 +73,7 @@ describe('adaptive experience false-positive regressions', () => {
     expect(frictions.some((item) => item.type === 'abandonment_risk')).toBe(false);
   });
 
-  it('does not infer a backtrack from a normal setup URL round-trip without an explicit back action', () => {
+  it('does not infer a backtrack from a normal setup URL round-trip and excludes post-success termination from UX metrics', () => {
     const home = 'http://127.0.0.1:3000/aquarium';
     const setup = 'http://127.0.0.1:3000/aquarium?action=setup';
     const controls = (label: string): PageObservation['interactableElements'] => [{
@@ -97,10 +97,13 @@ describe('adaptive experience false-positive regressions', () => {
       observation('o1a', setup, 'Save Settings'),
       observation('o2b', setup, 'Save Settings'),
       observation('o2a', home, 'Freshwater 60x30x30cm'),
+      observation('o3b', home, 'Freshwater 60x30x30cm'),
+      observation('o3a', home, 'Freshwater 60x30x30cm'),
     ];
     const decisions: AgentDecision[] = [
       { decisionId: 'd1', intentSummary: 'open setup', action: 'click', targetElementId: 'E001', value: null, expectedResult: 'setup opens', confidence: 1 },
       { decisionId: 'd2', intentSummary: 'save setup', action: 'click', targetElementId: 'E001', value: null, expectedResult: 'setup saves', confidence: 1 },
+      { decisionId: 'd3', intentSummary: 'scripted provider has no further branch', action: 'abandon', targetElementId: null, value: null, expectedResult: 'stop', confidence: 1 },
     ];
     const packet = {
       runId: 'run-round-trip',
@@ -110,10 +113,12 @@ describe('adaptive experience false-positive regressions', () => {
       stepVerifications: [
         { verificationId: 'v1', expectation: 'setup opens', observed: 'setup opened', status: 'confirmed', evidenceRefs: ['o1a.png'], confidence: 1 },
         { verificationId: 'v2', expectation: 'setup saves', observed: 'setup saved', status: 'confirmed', evidenceRefs: ['o2a.png'], confidence: 1 },
+        { verificationId: 'v3', expectation: 'stop', observed: 'no additional change', status: 'not_confirmed', evidenceRefs: ['o3a.png'], confidence: 1 },
       ],
       stepEvidence: [
         { stepIndex: 1, beforeObservationId: 'o1b', afterObservationId: 'o1a', beforeScreenshotPath: 'o1b.png', afterScreenshotPath: 'o1a.png', decisionId: 'd1', verificationId: 'v1', actionStatus: 'executed', taskState: null, taskWait: null },
         { stepIndex: 2, beforeObservationId: 'o2b', afterObservationId: 'o2a', beforeScreenshotPath: 'o2b.png', afterScreenshotPath: 'o2a.png', decisionId: 'd2', verificationId: 'v2', actionStatus: 'executed', taskState: null, taskWait: null },
+        { stepIndex: 3, beforeObservationId: 'o3b', afterObservationId: 'o3a', beforeScreenshotPath: 'o3b.png', afterScreenshotPath: 'o3a.png', decisionId: 'd3', verificationId: 'v3', actionStatus: 'executed', taskState: null, taskWait: null },
       ],
     } as unknown as EvidencePacket;
     const evalCase = {
@@ -134,9 +139,15 @@ describe('adaptive experience false-positive regressions', () => {
     } as EvalCaseResult;
 
     const analysis = analyzeAdaptiveExperience({ evalCase, result, packet, decisions });
+    expect(analysis.analysisMode).toBe('functional_run_sidecar');
     expect(analysis.routeSequence).toEqual([home, setup, home]);
     expect(analysis.routeBacktrackCount).toBe(0);
     expect(analysis.metrics.backtrackCount).toBe(0);
+    expect(analysis.metrics.abandoned).toBe(false);
+    expect(analysis.metrics.totalActions).toBe(2);
+    expect(analysis.actions.some((item) => item.type === 'abandon')).toBe(false);
+    expect(analysis.steps.at(-1)?.action).toBe('abandon');
     expect(analysis.frictions.some((item) => item.type === 'path_efficiency_issue')).toBe(false);
+    expect(analysis.frictions.some((item) => item.type === 'abandonment_risk')).toBe(false);
   });
 });
