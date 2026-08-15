@@ -24,6 +24,17 @@ function immediateOracleSatisfied(evalCase: EvalCase, observation: PageObservati
   });
 }
 
+const commitControlPattern = /(?:^|\b)(?:save(?:\s+settings)?|submit|apply|confirm|create|record|add(?:\s+to\s+.+)?)(?:\b|$)|保存(?:设置|到鱼缸)?|提交|应用|确认|创建|记录|添加/u;
+
+function hasPendingCommitControl(observation: PageObservation): boolean {
+  return observation.interactableElements.some((element) => {
+    if (element.disabled || element.risk !== 'safe') return false;
+    if (element.tagName !== 'button' && element.role !== 'button') return false;
+    const label = `${element.label ?? ''} ${element.text ?? ''}`.trim().toLowerCase();
+    return label.length > 0 && commitControlPattern.test(label);
+  });
+}
+
 function hasVerifiedExecutedProgress(history: AgentDecision[], verifications: StepVerification[]): boolean {
   if (history.length === 0 || verifications.length === 0) return false;
   return verifications.some((verification) => verification.status === 'confirmed');
@@ -43,7 +54,13 @@ export async function chooseAgentAction(input: {
   // Do not declare a task complete from its initial page alone: examples, placeholders or
   // pre-existing state can already contain the Oracle text. Auto-finish is only a recovery
   // optimization after this run has produced at least one confirmed interaction.
+  //
+  // Also fail open to the Actor while a visible commit control remains. Preview/draft UIs
+  // commonly render the eventual success text before Save/Submit is clicked; treating that
+  // text as terminal evidence creates false-positive setup checkpoints and contaminates all
+  // dependent cases with state that was never persisted.
   if (hasVerifiedExecutedProgress(input.history, input.verifications)
+    && !hasPendingCommitControl(input.observation)
     && immediateOracleSatisfied(input.evalCase, input.observation)) {
     return agentDecisionSchema.parse({
       intentSummary: '当前页面已经满足全部可即时验证的确定性成功条件。',
