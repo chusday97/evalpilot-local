@@ -74,7 +74,7 @@ function plan(): PrerequisitePlan {
 }
 
 describe('setup-state exact signature', () => {
-  it('is stable across object-key and unordered Oracle list ordering', () => {
+  it('is stable across object-key ordering, Oracle list ordering, and assertion metadata IDs', () => {
     const first = baseline('baseline-a', { waterType: 'freshwater', dimensions: { length: 60, width: 30 } });
     const second = baseline(
       'baseline-b',
@@ -84,7 +84,7 @@ describe('setup-state exact signature', () => {
         mustObserve: ['Created'],
         mustNotObserve: ['Error'],
         businessRules: ['state persists'],
-        deterministicAssertions: [...first.oracle.deterministicAssertions].reverse(),
+        deterministicAssertions: [...first.oracle.deterministicAssertions].reverse().map((assertion, index) => ({ ...assertion, assertionId: `copy-${index + 1}` })),
       },
     );
 
