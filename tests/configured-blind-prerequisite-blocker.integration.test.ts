@@ -192,10 +192,31 @@ describe('configured Blind prerequisite blocker integration', () => {
     expect(preflight).toEqual(expect.objectContaining({ status: 'blocked', canRun: false }));
     expect(preflight.prerequisite.executionOrder).toEqual(['setup', 'target']);
     expect(preflight.setupKnowledge).toEqual([
-      expect.objectContaining({ setupTaskId: 'task-create', sourceCaseId: null, candidateCaseIds: [], status: 'missing_baseline' }),
+      expect.objectContaining({ setupTaskId: 'task-create', sourceCaseId: null, candidateCaseIds: [], equivalence: 'missing', status: 'missing_baseline' }),
     ]);
     await expect(runConfiguredBlindExperience(cwd, { projectId: project.projectId, caseId: targetCase.caseId }))
       .rejects.toMatchObject({ code: 'BLIND_EXPERIENCE_PREREQUISITE_BLOCKED' });
+  });
+
+  it('allows exact-equivalent duplicate stable baselines and chooses deterministically', async () => {
+    const { cwd, project, targetCase } = await fixture([
+      { itemType: 'freshwater', size: { width: 30, length: 60 } },
+      { size: { length: 60, width: 30 }, itemType: 'freshwater' },
+    ]);
+    const preflight = await planConfiguredBlindExperience(cwd, { projectId: project.projectId, caseId: targetCase.caseId });
+
+    expect(preflight).toEqual(expect.objectContaining({ status: 'ready', canRun: true }));
+    expect(preflight.setupKnowledge).toEqual([
+      expect.objectContaining({
+        setupTaskId: 'task-create',
+        sourceCaseId: 'baseline-create-1',
+        candidateCaseIds: ['baseline-create-1', 'baseline-create-2'],
+        equivalence: 'exact_signature_match',
+        status: 'ready',
+      }),
+    ]);
+    expect(preflight.setupKnowledge[0]?.setupStateFingerprint).toMatch(/^[a-f0-9]{64}$/);
+    expect(new Set(preflight.setupKnowledge[0]?.candidateStateFingerprints.map((item) => item.fingerprint)).size).toBe(1);
   });
 
   it('blocks before provider/browser when multiple stable baselines cannot prove setup-state equivalence', async () => {
@@ -211,6 +232,7 @@ describe('configured Blind prerequisite blocker integration', () => {
         setupTaskId: 'task-create',
         sourceCaseId: null,
         candidateCaseIds: ['baseline-create-1', 'baseline-create-2'],
+        equivalence: 'ambiguous',
         status: 'missing_baseline',
       }),
     ]);
