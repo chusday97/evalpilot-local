@@ -74,6 +74,8 @@ export async function waitForProgressAwareOutcome(input: ProgressAwareWaitInput)
   let lastProgressAtMs: number | null = null;
   let pollIndex = 0;
   const noWait = input.operationType === 'synchronous' || input.decision.action === 'finish' || input.decision.action === 'abandon' || input.actionResult.status !== 'executed';
+  const canSettleAfterProgress = !noWait && input.operationType !== 'ai_generation' && input.operationType !== 'file_processing';
+  const settleWindowMs = Math.min(1_000, Math.max(250, input.policy.pollIntervalMs));
 
   while (true) {
     const elapsedBeforeWait = performance.now() - startedAt;
@@ -114,6 +116,25 @@ export async function waitForProgressAwareOutcome(input: ProgressAwareWaitInput)
         finalSignals: currentSignals,
         taskState: observation,
         taskWait: waitEvidence({ operationType: input.operationType, policy: input.policy, observations, extensionsUsed, finalReason }),
+      };
+    }
+
+    // Once a short/ordinary async interaction has produced visible progress, do not keep
+    // burning the entire extended soft-timeout after the page has become quiet again. This
+    // is deliberately not a success verdict: it only hands control back to the Actor for a
+    // fresh observation. Long-running AI/file operations keep their existing wait semantics.
+    const settledAfterProgress = canSettleAfterProgress
+      && lastProgressAtMs !== null
+      && observation.state === 'interacting'
+      && observation.networkActivity === 'idle'
+      && observation.loadingSignals.length === 0
+      && elapsedMs - lastProgressAtMs >= settleWindowMs;
+    if (settledAfterProgress) {
+      return {
+        summary: '页面在产生可见进展后已经稳定，结束当前等待并重新观察。',
+        finalSignals: currentSignals,
+        taskState: observation,
+        taskWait: waitEvidence({ operationType: input.operationType, policy: input.policy, observations, extensionsUsed, finalReason: 'settled_after_progress' }),
       };
     }
 
