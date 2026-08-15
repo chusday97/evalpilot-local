@@ -32,8 +32,10 @@ export interface BlindSetupKnowledgeSource {
   setupTaskId: string;
   sourceCaseId: string | null;
   sourceCaseTitle: string | null;
+  candidateCaseIds: string[];
   knownInformationKeys: string[];
   status: 'ready' | 'missing_baseline';
+  reason: string;
 }
 
 export interface ConfiguredBlindExperiencePreflight {
@@ -67,13 +69,13 @@ interface LoadedBlindContext {
   preflight: ConfiguredBlindExperiencePreflight;
 }
 
-function baselineProducer(cases: EvalCase[], targetCaseId: string, taskId: string): EvalCase | null {
-  return cases.find((item) =>
+function baselineProducers(cases: EvalCase[], targetCaseId: string, taskId: string): EvalCase[] {
+  return cases.filter((item) =>
     item.caseId !== targetCaseId
     && item.taskId === taskId
     && item.setType === 'baseline'
     && item.status === 'stable',
-  ) ?? null;
+  );
 }
 
 function rebuildChainAwarePlan(original: ChainAwareSetupPlan | null, steps: AutoSetupPlan[]): ChainAwareSetupPlan | null {
@@ -92,6 +94,11 @@ function rebuildChainAwarePlan(original: ChainAwareSetupPlan | null, steps: Auto
  * Bind automatic Setup to already-approved baseline fixture knowledge instead of letting a
  * Blind target run invent prerequisite state. Setup remains evaluator-managed and is verified
  * independently before the target Blind Actor starts.
+ *
+ * We deliberately require exactly one stable baseline producer per Setup task. Choosing the
+ * first of multiple baselines would silently assert state equivalence that EvalPilot has not
+ * modeled yet. Ambiguous setup state therefore fails closed until explicit setup-state
+ * parameters/checkpoint equivalence are available.
  */
 export function bindBlindSetupKnownInformation(plan: PrerequisitePlan, cases: EvalCase[]): {
   plan: PrerequisitePlan;
@@ -102,13 +109,21 @@ export function bindBlindSetupKnownInformation(plan: PrerequisitePlan, cases: Ev
   const missingTaskIds: string[] = [];
   const sources: BlindSetupKnowledgeSource[] = [];
   const steps = plan.setupPlans.map((step) => {
-    const producer = baselineProducer(cases, plan.caseId, step.setupTaskId);
+    const candidates = baselineProducers(cases, plan.caseId, step.setupTaskId);
+    const producer = candidates.length === 1 ? candidates[0]! : null;
+    const reason = candidates.length === 0
+      ? `Setup ${step.setupTaskId} 没有可复用的稳定 baseline Case；不会为 Blind 目标猜测前置状态。`
+      : candidates.length > 1
+        ? `Setup ${step.setupTaskId} 存在多个稳定 baseline（${candidates.map((item) => item.caseId).join('、')}），当前无法证明这些状态等价；不会随机选择前置状态。`
+        : `Setup ${step.setupTaskId} 使用稳定 baseline ${producer!.caseId} 的已知测试信息。`;
     sources.push({
       setupTaskId: step.setupTaskId,
       sourceCaseId: producer?.caseId ?? null,
       sourceCaseTitle: producer?.title ?? null,
+      candidateCaseIds: candidates.map((item) => item.caseId),
       knownInformationKeys: producer ? Object.keys(producer.knownInformation).sort() : [],
       status: producer ? 'ready' : 'missing_baseline',
+      reason,
     });
     if (!producer) {
       missingTaskIds.push(step.setupTaskId);
@@ -171,9 +186,7 @@ async function loadBlindContext(cwd: string, input: ConfiguredBlindExperienceInp
   const blockedByPlanner = prerequisitePlan.status === 'blocked';
   const reasons = [
     ...prerequisitePlan.reasons,
-    ...bound.sources.map((source) => source.status === 'ready'
-      ? `Setup ${source.setupTaskId} 使用稳定 baseline ${source.sourceCaseId} 的已知测试信息。`
-      : `Setup ${source.setupTaskId} 没有可复用的稳定 baseline Case；不会为 Blind 目标猜测前置状态。`),
+    ...bound.sources.map((source) => source.reason),
   ];
   const preflight: ConfiguredBlindExperiencePreflight = {
     projectId: input.projectId,
