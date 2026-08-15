@@ -78,12 +78,15 @@ describe.skipIf(!enabled)('dashboard browser', () => {
 
   afterAll(async () => { await close?.(); delete process.env.EVALPILOT_DATA_DIR; delete process.env.EVALPILOT_OPENAI_API_KEY; });
 
-  it('shows the guided home, navigates the four-step loop, and remains usable on mobile', async () => {
+  it('lands on Projects first, preserves the guided home, and remains usable on mobile', async () => {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    expect(await page.getByRole('heading', { name: '选择要评测的项目' }).isVisible()).toBe(true);
+    expect(new URL(page.url()).pathname).toBe('/projects');
+    await page.goto(`${baseUrl}/home`, { waitUntil: 'networkidle' });
     expect(await page.getByRole('heading', { name: '跟着当前任务往下做' }).isVisible()).toBe(true);
     expect(await page.getByRole('complementary', { name: '上一次评测' }).getByText('Dashboard Fixture').isVisible()).toBe(true);
     expect(await page.getByText('1 个严重问题').isVisible()).toBe(true);
