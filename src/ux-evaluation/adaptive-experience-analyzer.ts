@@ -47,6 +47,7 @@ export interface AdaptiveExperienceAnalysis {
   caseId: string;
   personaId: string;
   goal: string;
+  analysisMode: 'functional_run_sidecar';
   actorKnowledgeBoundary: 'goal_persona_visible_ui_only';
   functionalVerdict: EvalCaseResult['verdict'];
   analysisStatus: 'evaluated' | 'suppressed_functional_failure' | 'insufficient_evidence';
@@ -181,7 +182,7 @@ export function analyzeAdaptiveExperience(input: {
   const verifications = new Map(input.packet.stepVerifications.map((item) => [item.verificationId, item]));
   const decisions = new Map(input.decisions.filter((item) => item.decisionId).map((item) => [item.decisionId!, item]));
   const steps: AdaptiveExperienceStep[] = [];
-  const actions: InteractionAction[] = [];
+  const rawActions: InteractionAction[] = [];
 
   for (const stepEvidence of input.packet.stepEvidence) {
     const decision = decisions.get(stepEvidence.decisionId) ?? input.decisions[stepEvidence.stepIndex - 1];
@@ -223,7 +224,7 @@ export function analyzeAdaptiveExperience(input: {
     const packetAction = input.packet.actions[stepEvidence.stepIndex - 1];
     const isInput = type === 'input';
     const noFeedback = type === 'click' && stepEvidence.actionStatus === 'executed' && !observableProgress;
-    actions.push({
+    rawActions.push({
       actionId: packetAction?.actionId ?? `experience-action-${String(stepEvidence.stepIndex).padStart(3, '0')}`,
       type,
       timestampMs: packetAction?.timestampMs ?? stepEvidence.stepIndex,
@@ -247,13 +248,20 @@ export function analyzeAdaptiveExperience(input: {
   }
 
   const completion = completionFor(input.result, input.evalCase);
+  // This analyzer is currently attached to the functional task run. If the objective Judge
+  // proves the user goal complete and the scripted/task Actor then emits a terminal abandon,
+  // that final decision is a termination artifact, not part of the pre-completion UX path.
+  // Preserve it in `steps` for auditability but exclude it from normalized UX actions/metrics.
+  const actions = completion.userGoal.complete === true && rawActions.at(-1)?.type === 'abandon'
+    ? rawActions.slice(0, -1)
+    : rawActions;
   const abandoned = actions.some((action) => action.type === 'abandon');
   const baseMetrics = calculateInteractionMetrics(actions, {
     completion,
     requiredActionIds: [],
     redundantActionIds: [],
     abandoned,
-    abandonmentReason: abandoned ? '模拟用户明确选择放弃当前路径' : null,
+    abandonmentReason: abandoned ? '模拟用户在目标完成前明确选择放弃当前路径' : null,
   });
   const routeSequence = routeSequenceFromSteps(steps);
   // A URL round-trip is not itself a user backtrack: opening a setup sub-route/modal and
@@ -289,6 +297,7 @@ export function analyzeAdaptiveExperience(input: {
     caseId: input.evalCase.caseId,
     personaId: input.evalCase.persona.personaId,
     goal: input.evalCase.goal,
+    analysisMode: 'functional_run_sidecar',
     actorKnowledgeBoundary: 'goal_persona_visible_ui_only',
     functionalVerdict: input.result.verdict,
     analysisStatus,
@@ -302,7 +311,9 @@ export function analyzeAdaptiveExperience(input: {
     findings: functionalPassed ? findingsFrom(frictions) : [],
     authenticityNotice: [
       '这是 AI 模拟用户的可观察交互摩擦，不等同于真实用户情绪或满意度。',
+      '当前是 functional_run_sidecar：Actor Prompt 不接收 Oracle 答案，但功能运行仍可能使用 evaluator-side 完成控制；因此它不是独立的真实模型可用性研究。',
       'Friction 只使用操作、页面状态、验证结果和证据引用；wall-clock 模型延迟不用于判断用户犹豫。',
+      '功能已证实完成后的终止动作保留在 raw Step evidence 中，但不计入 UX actions/metrics。',
       'URL 往返本身不视为回退；只有 Actor 明确执行 back 才计入 backtrack。不同字段使用 grounded element identity 区分，避免同名/无标签字段造成重复输入误报。',
       productFailed
         ? '本轮存在已确认产品功能失败，因此 UX Friction 被抑制，避免把 Bug 包装成体验建议。'
