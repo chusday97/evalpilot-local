@@ -4,7 +4,9 @@ import { analyzeAdaptiveExperience } from '../src/ux-evaluation/adaptive-experie
 
 const now = '2026-08-15T08:00:00.000Z';
 
-function element(elementId: string, label: string) {
+type TestElement = PageObservation['interactableElements'][number];
+
+function element(elementId: string, label: string): TestElement {
   return {
     elementId,
     role: 'button',
@@ -13,12 +15,17 @@ function element(elementId: string, label: string) {
     text: label,
     placeholder: null,
     disabled: false,
-    risk: 'safe' as const,
+    risk: 'safe',
     locatorHint: 'grounded-index:0',
   };
 }
 
-function observation(id: string, url: string, text: string, controls = [element('E001', 'Settings'), element('E002', 'Create tank')]): PageObservation {
+function observation(
+  id: string,
+  url: string,
+  text: string,
+  controls: PageObservation['interactableElements'] = [element('E001', 'Settings'), element('E002', 'Create tank')],
+): PageObservation {
   return {
     observationId: id,
     pageUrl: url,
@@ -70,7 +77,7 @@ const evalCase = {
 
 const home = 'http://127.0.0.1:3000/';
 const settings = 'http://127.0.0.1:3000/settings';
-const formControls = [
+const formControls: PageObservation['interactableElements'] = [
   element('E001', 'Settings'),
   element('E002', 'Create tank'),
   {
