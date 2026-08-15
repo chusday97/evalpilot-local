@@ -100,7 +100,7 @@ export const taskWaitEvidenceSchema = z.object({
   policy: waitPolicySchema,
   observations: z.array(taskStateObservationSchema).min(1),
   extensionsUsed: z.number().int().nonnegative(),
-  finalReason: z.enum(['completed', 'failed', 'blocked', 'settled_after_progress', 'soft_timeout', 'hard_timeout', 'not_needed']),
+  finalReason: z.enum(['completed', 'failed', 'blocked', 'soft_timeout', 'hard_timeout', 'not_needed']),
   consumedPersonaAttempt: z.boolean(),
 }).strict();
 
