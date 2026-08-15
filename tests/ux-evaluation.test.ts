@@ -133,7 +133,7 @@ describe('UX evaluation contracts', () => {
     expect(frictions.every((event) => event.possibleUserReason.startsWith('推测：'))).toBe(true);
   });
 
-  it('does not report an earlier no-feedback click when later evidence proves the user goal completed', () => {
+  it('keeps an earlier no-feedback click as non-blocking UX friction even when the task later succeeds', () => {
     const recorded: InteractionAction[] = [
       { actionId: 'a1', type: 'navigation', timestampMs: 0, page: '/', target: '/', inputField: null, inputLength: null, inputFingerprint: null, outcome: 'started', evidence: ['start.png'] },
       { actionId: 'a2', type: 'click', timestampMs: 100, page: '/', target: '当前标签', inputField: null, inputLength: null, inputFingerprint: null, outcome: 'no_feedback', evidence: ['same.png'] },
@@ -154,7 +154,10 @@ describe('UX evaluation contracts', () => {
       metrics,
       completion: completed,
     });
-    expect(frictions.some((event) => event.type === 'interaction_feedback_issue')).toBe(false);
+    const feedback = frictions.find((event) => event.type === 'interaction_feedback_issue');
+    expect(feedback).toBeDefined();
+    expect(feedback?.severity).toBe('P3');
+    expect(feedback?.observedBehavior).toContain('任务最终完成');
   });
 
   it('compares ideal, actual, and shortest reasonable paths without deleting safety', () => {
