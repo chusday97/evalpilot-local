@@ -25,6 +25,16 @@ function immediateOracleSatisfied(evalCase: EvalCase, observation: PageObservati
 }
 
 const commitControlPattern = /(?:^|\b)(?:save(?:\s+settings)?|submit|apply|confirm|create|record|add(?:\s+to\s+.+)?)(?:\b|$)|保存(?:设置|到鱼缸)?|提交|应用|确认|创建|记录|添加/u;
+const commitTaskPattern = /\b(?:save|submit|create|record|add|update|persist)\b|保存|提交|创建|建立|记录|添加|更新|持久化/u;
+
+function taskRequiresCommit(evalCase: EvalCase): boolean {
+  const taskText = [
+    evalCase.title,
+    evalCase.goal,
+    ...(evalCase.oracle.expectedOutcome ?? []),
+  ].filter(Boolean).join(' ').toLowerCase();
+  return commitTaskPattern.test(taskText);
+}
 
 function hasPendingCommitControl(observation: PageObservation): boolean {
   return observation.interactableElements.some((element) => {
@@ -55,12 +65,12 @@ export async function chooseAgentAction(input: {
   // pre-existing state can already contain the Oracle text. Auto-finish is only a recovery
   // optimization after this run has produced at least one confirmed interaction.
   //
-  // Also fail open to the Actor while a visible commit control remains. Preview/draft UIs
-  // commonly render the eventual success text before Save/Submit is clicked; treating that
-  // text as terminal evidence creates false-positive setup checkpoints and contaminates all
-  // dependent cases with state that was never persisted.
+  // Mutation tasks must also finish their visible Save/Submit step. Read-only/result tasks
+  // may expose an optional follow-up Save button after their actual goal is already proven;
+  // that optional persistence affordance must not block deterministic completion.
+  const pendingRequiredCommit = taskRequiresCommit(input.evalCase) && hasPendingCommitControl(input.observation);
   if (hasVerifiedExecutedProgress(input.history, input.verifications)
-    && !hasPendingCommitControl(input.observation)
+    && !pendingRequiredCommit
     && immediateOracleSatisfied(input.evalCase, input.observation)) {
     return agentDecisionSchema.parse({
       intentSummary: '当前页面已经满足全部可即时验证的确定性成功条件。',
