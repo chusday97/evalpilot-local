@@ -9,6 +9,8 @@ export interface SetupStateSignature {
   fingerprint: string;
 }
 
+type SemanticDeterministicAssertion = Pick<DeterministicAssertion, 'type' | 'target' | 'expected' | 'negated'>;
+
 function canonicalize(value: unknown): unknown {
   if (Array.isArray(value)) return value.map((item) => canonicalize(item));
   if (value && typeof value === 'object') {
@@ -33,8 +35,17 @@ function sortedStrings(values: string[]): string[] {
   return [...values].sort((left, right) => left.localeCompare(right));
 }
 
-function sortedAssertions(values: DeterministicAssertion[]): DeterministicAssertion[] {
-  return [...values].sort((left, right) => stableJson(left).localeCompare(stableJson(right)));
+function semanticAssertion(assertion: DeterministicAssertion): SemanticDeterministicAssertion {
+  return {
+    type: assertion.type,
+    target: assertion.target,
+    expected: assertion.expected,
+    negated: assertion.negated,
+  };
+}
+
+function sortedAssertions(values: DeterministicAssertion[]): SemanticDeterministicAssertion[] {
+  return values.map(semanticAssertion).sort((left, right) => stableJson(left).localeCompare(stableJson(right)));
 }
 
 /**
@@ -42,7 +53,8 @@ function sortedAssertions(values: DeterministicAssertion[]): DeterministicAssert
  *
  * Two baseline cases are considered reusable representations of the same evaluator-managed
  * Setup state only when their task, fixture knowledge and observable state contract hash to
- * the same signature. This is not semantic similarity and does not infer that two different
+ * the same signature. Assertion IDs are deliberately excluded because they are audit metadata,
+ * not state semantics. This is not semantic similarity and does not infer that two different
  * configurations lead to the same business state.
  */
 export function buildSetupStateSignature(evalCase: EvalCase): SetupStateSignature {
