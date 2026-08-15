@@ -51,6 +51,14 @@ describe('operation classifier action locality', () => {
     })).toBe('synchronous');
   });
 
+  it('keeps an ordinary answer button synchronous instead of applying unknown_async timeout', () => {
+    expect(classifyOperation({
+      decision: decision('回答每日检查第 1 项：经常浮头', '每日检查进度变为 1 / 6'),
+      observation: observation('经常浮头'),
+      evalCase,
+    })).toBe('synchronous');
+  });
+
   it('classifies an explicitly AI-generating action from local action semantics', () => {
     expect(classifyOperation({
       decision: decision('Generate AI summary', 'AI summary appears'),
