@@ -23,7 +23,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "test:benchmark": "tsx src/cli/index.ts benchmark --json",
-    "test:real-benchmark": "EVALPILOT_BROWSER_TEST=1 vitest run tests/real-evaluator-benchmark.test.ts",
+    "test:real-benchmark": "EVALPILOT_BROWSER_TEST=1 vitest run tests/real-evaluator-benchmark.test.ts tests/experience-detector-browser-calibration.test.ts",
     "test:evaluator-regression": "EVALPILOT_BROWSER_TEST=1 vitest run tests/evaluator-regression",
     "acceptance:gate": "tsx scripts/evaluate-real-product-acceptance.ts",
     "audit:package": "node scripts/audit-package.mjs",
