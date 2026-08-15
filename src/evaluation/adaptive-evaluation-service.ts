@@ -1,8 +1,10 @@
 import { readFile } from 'node:fs/promises';
+import { resolve } from 'node:path';
 import type { Page } from 'playwright';
 import type { AiProvider } from '../ai/provider.js';
 import type { Badcase, EvalCase, EvalCaseResult, EvaluatorBadcase, PassAnalysis, ProductModel } from '../../types.js';
 import type { SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
+import type { AdaptiveExperienceAnalysis } from '../ux-evaluation/adaptive-experience-analyzer.js';
 import { recordCaseResult } from '../eval-set/case-lifecycle.js';
 import { analyzeCoverage } from '../eval-set/coverage-analyzer.js';
 import { loadCoverageRunEvidence, saveCoverageMatrix } from '../eval-set/coverage-store.js';
@@ -16,6 +18,8 @@ import { runAiTestAgent } from '../test-agent/agent-runner.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
 import { classifyEvaluatorFailure, evaluatorBadcaseFrom, evaluatorFailureResult } from '../evaluator-errors/classifier.js';
 import { saveEvaluatorBadcase } from '../evaluator-errors/store.js';
+import { analyzeAdaptiveExperience } from '../ux-evaluation/adaptive-experience-analyzer.js';
+import { writeJsonAtomic } from '../utils/file-system.js';
 
 export async function runAdaptiveCase(input: {
   page: Page;
@@ -33,8 +37,31 @@ export async function runAdaptiveCase(input: {
   agentWaitTimeoutMs?: number;
   fileFixtures?: SyntheticFileFixture[];
   now?: () => Date;
-}): Promise<{ agentRun: Awaited<ReturnType<typeof runAiTestAgent>>; result: EvalCaseResult; finding: Awaited<ReturnType<typeof triageEvalCaseFinding>>['finding']; badcase: Badcase | null; evaluatorBadcase: EvaluatorBadcase | null; passAnalysis: PassAnalysis | null; report: Awaited<ReturnType<typeof buildAdaptiveEvaluationReport>> }> {
-  const agentRun = await runAiTestAgent(input.page, input.evalCase, input.provider, { outputDir: input.outputDir, startingUrl: input.startingUrl, mode: 'task', maxSteps: input.maxAgentSteps, waitTimeoutMs: input.agentWaitTimeoutMs, targetAppCommit: input.targetAppGitSha ?? null, productModelVersion: input.productModel.version, evalSetVersion: input.evalSetVersion, judgeModel: input.provider.info.model, allowRemoteModel: input.allowRemoteModel, allowScreenshotToProvider: input.allowScreenshotToProvider, fileFixtures: input.fileFixtures, now: input.now });
+}): Promise<{
+  agentRun: Awaited<ReturnType<typeof runAiTestAgent>>;
+  result: EvalCaseResult;
+  finding: Awaited<ReturnType<typeof triageEvalCaseFinding>>['finding'];
+  badcase: Badcase | null;
+  evaluatorBadcase: EvaluatorBadcase | null;
+  passAnalysis: PassAnalysis | null;
+  experience: AdaptiveExperienceAnalysis;
+  report: Awaited<ReturnType<typeof buildAdaptiveEvaluationReport>>;
+}> {
+  const agentRun = await runAiTestAgent(input.page, input.evalCase, input.provider, {
+    outputDir: input.outputDir,
+    startingUrl: input.startingUrl,
+    mode: 'task',
+    maxSteps: input.maxAgentSteps,
+    waitTimeoutMs: input.agentWaitTimeoutMs,
+    targetAppCommit: input.targetAppGitSha ?? null,
+    productModelVersion: input.productModel.version,
+    evalSetVersion: input.evalSetVersion,
+    judgeModel: input.provider.info.model,
+    allowRemoteModel: input.allowRemoteModel,
+    allowScreenshotToProvider: input.allowScreenshotToProvider,
+    fileFixtures: input.fileFixtures,
+    now: input.now,
+  });
   const packet = evidencePacketSchema.parse(JSON.parse(await readFile(agentRun.evidencePacketPath, 'utf8')));
   const rawJudgedResult = await judgeEvalCase({ outputDir: input.outputDir, evalCase: input.evalCase, packet, provider: input.provider, allowRemoteModel: input.allowRemoteModel, createdAt: agentRun.completedAt });
   const safetyGatedResult = agentRun.status === 'blocked_by_safety'
@@ -47,6 +74,18 @@ export async function runAdaptiveCase(input: {
     : null;
   const triage = await triageEvalCaseFinding({ outputDir: input.outputDir, evalCase: input.evalCase, result: judgedResult, packet, createdAt: agentRun.completedAt });
   const result = triage.result;
+
+  // Functional verdict stays authoritative for bugs. Experience analysis is a sidecar that
+  // only emits non-blocking friction when the functional task passed. This prevents a dead
+  // button or broken save from being softened into a UX recommendation.
+  const experience = analyzeAdaptiveExperience({
+    evalCase: input.evalCase,
+    result,
+    packet,
+    decisions: agentRun.decisions,
+  });
+  await writeJsonAtomic(resolve(input.outputDir, 'runs', agentRun.runId, 'experience-analysis.json'), experience);
+
   const updatedCase = recordCaseResult(input.evalCase, result); await saveEvalCase(input.outputDir, updatedCase);
   const badcase: Badcase | null = triage.badcase; let passAnalysis: PassAnalysis | null = null;
   if (result.verdict === 'pass' && result.failureSource === null) {
@@ -66,5 +105,5 @@ export async function runAdaptiveCase(input: {
   }
   await saveCoverageMatrix(input.outputDir, coverage);
   const report = await buildAdaptiveEvaluationReport({ outputDir: input.outputDir, projectId: input.evalCase.projectId, evaluationId: `evaluation-${result.runId}`, evaluationStatus: 'completed', selectedCases: [input.evalCase], results: [result], packets: [packet], coverage, findings: triage.finding ? [triage.finding] : [], badcases: badcase ? [badcase] : [], challengeCases: passAnalysis?.challengeCandidates ?? [], generatedAt: agentRun.completedAt });
-  return { agentRun, result, finding: triage.finding, badcase, evaluatorBadcase, passAnalysis, report };
+  return { agentRun, result, finding: triage.finding, badcase, evaluatorBadcase, passAnalysis, experience, report };
 }
