@@ -117,6 +117,11 @@ function hasObservableProgress(input: {
   return observationSignature(input.before) !== observationSignature(input.after);
 }
 
+function hasSafeActionableElement(observation: PageObservation): boolean {
+  return observation.interactableElements.some((element) => !element.disabled && element.risk === 'safe')
+    || observation.formFields.some((field) => !field.disabled && field.risk === 'safe');
+}
+
 function interactionType(decision: AgentDecision, actionStatus: string, observableProgress: boolean): InteractionAction['type'] | null {
   if (actionStatus === 'failed') return 'error';
   if (decision.action === 'fill' || decision.action === 'select') return 'input';
@@ -224,6 +229,7 @@ export function analyzeAdaptiveExperience(input: {
     const packetAction = input.packet.actions[stepEvidence.stepIndex - 1];
     const isInput = type === 'input';
     const noFeedback = type === 'click' && stepEvidence.actionStatus === 'executed' && !observableProgress;
+    const deadEndAbandon = type === 'abandon' && !hasSafeActionableElement(before);
     rawActions.push({
       actionId: packetAction?.actionId ?? `experience-action-${String(stepEvidence.stepIndex).padStart(3, '0')}`,
       type,
@@ -238,11 +244,13 @@ export function analyzeAdaptiveExperience(input: {
       inputFingerprint: isInput && decision.value ? fingerprintInput(decision.value) : null,
       outcome: stepEvidence.actionStatus === 'failed'
         ? 'action_failed'
-        : noFeedback
-          ? 'no_feedback'
-          : observableProgress
-            ? 'observable_feedback'
-            : 'no_progress',
+        : deadEndAbandon
+          ? 'dead_end_abandon'
+          : noFeedback
+            ? 'no_feedback'
+            : observableProgress
+              ? 'observable_feedback'
+              : 'no_progress',
       evidence,
     });
   }
@@ -315,6 +323,7 @@ export function analyzeAdaptiveExperience(input: {
       'Friction 只使用操作、页面状态、验证结果和证据引用；wall-clock 模型延迟不用于判断用户犹豫。',
       '功能已证实完成后的终止动作保留在 raw Step evidence 中，但不计入 UX actions/metrics。',
       'URL 往返本身不视为回退；只有 Actor 明确执行 back 才计入 backtrack。不同字段使用 grounded element identity 区分，避免同名/无标签字段造成重复输入误报。',
+      '当目标尚未完成、Actor 明确放弃且当前页面没有 enabled + safe 的可交互控件时，证据重建会保留 dead_end 结果；这用于区分普通放弃与无恢复出口的旅程断点。',
       productFailed
         ? '本轮存在已确认产品功能失败，因此 UX Friction 被抑制，避免把 Bug 包装成体验建议。'
         : '功能通过后仍允许保留非阻塞 UX Friction，用于发现“能完成但不好用”的路径。',
