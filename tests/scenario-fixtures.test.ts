@@ -72,8 +72,10 @@ describe('task-aware safe input', () => {
 
 describe('live field constraints', () => {
   it('reads min/max/step and length constraints from the grounded DOM element', async () => {
-    const evaluate = vi.fn().mockResolvedValue({ min: 20, max: 50, minLength: 3, maxLength: 8, step: 5, pattern: '[0-9]+' });
-    const locator = { filter: vi.fn().mockReturnThis(), nth: vi.fn().mockReturnThis(), evaluate };
+    const evaluate = vi.fn()
+      .mockResolvedValueOnce({ tagName: 'input', role: null, label: 'Volume', placeholder: null, fieldName: 'volume', inputType: 'number' })
+      .mockResolvedValueOnce({ min: 20, max: 50, minLength: 3, maxLength: 8, step: 5, pattern: '[0-9]+' });
+    const locator = { nth: vi.fn().mockReturnThis(), evaluate, isVisible: vi.fn().mockResolvedValue(true) };
     const page = { locator: vi.fn(() => locator) } as any;
     const constraints = await readFieldInputConstraints(page, field());
     expect(constraints).toEqual({ min: 20, max: 50, minLength: 3, maxLength: 8, step: 5, pattern: '[0-9]+' });
@@ -87,7 +89,7 @@ describe('select action compatibility', () => {
       .mockResolvedValueOnce(undefined);
     const locator = {
       nth: vi.fn().mockReturnThis(),
-      evaluate: vi.fn().mockResolvedValue('select'),
+      evaluate: vi.fn().mockResolvedValue({ tagName: 'select', role: null, label: 'Water type', placeholder: null, fieldName: 'volume', inputType: 'select-one' }),
       isVisible: vi.fn().mockResolvedValue(true),
       selectOption,
     };
