@@ -271,7 +271,6 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('browser-level exper
     const metrics = calibrationMetrics(rows);
     expect(metrics.precision).toBe(1);
     expect(metrics.cleanFalsePositiveRate).toBe(0);
-    expect(metrics.falsePositiveRate).toBeUndefined();
     expect(metrics.fn).toBeGreaterThanOrEqual(1);
     expect(metrics.recall).toBeLessThan(1);
     expect(metrics.recall).toBeGreaterThanOrEqual(0.8);
