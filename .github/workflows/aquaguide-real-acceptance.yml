@@ -64,93 +64,6 @@ jobs:
           cat aquaguide-vite.log || true
           exit 1
 
-      - name: Configure evidence-backed acceptance contract
-        run: |
-          grep -q "const acceptanceDeadlineMs = 180_000;" scripts/run-aquaguide-real-acceptance-v2.ts
-          sed -i "s/const acceptanceDeadlineMs = 180_000;/const acceptanceDeadlineMs = 420_000;/" scripts/run-aquaguide-real-acceptance-v2.ts
-          python - <<'PY'
-          from pathlib import Path
-          import re
-
-          path = Path('scripts/run-aquaguide-real-acceptance-v2.ts')
-          text = path.read_text()
-
-          replacements = [
-              (
-                  "  const createWater = '鱼缸页面显示已保存的淡水水体';\n  const recordLivestock = '鱼缸主页面显示已保存的咖啡鼠活体记录';",
-                  "  const createWater = '鱼缸页面显示已保存的淡水水体';\n  const createPersisted = '保存后 Tank Settings modal 已关闭';\n  const recordLivestock = '鱼缸主页面显示已保存的 Corydoras aeneus 活体记录';\n  const recordPersisted = '记录页面显示 Recorded，证明生物已保存到当前鱼缸';",
-              ),
-              (
-                  "  const dailyAction = '经常浮头结果显示立即增加供氧或水面扰动';",
-                  "  const dailyAction = '经常浮头结果显示增加打氧或水面扰动的紧急动作';",
-              ),
-              (
-                  "{ signalId: 'signal-daily-action', kind: 'text_visible', target: '立即增加供氧或水面扰动', description: dailyAction, ...taskEvidence },",
-                  "{ signalId: 'signal-daily-action', kind: 'text_visible', target: '增加打氧或水面扰动', description: dailyAction, ...taskEvidence },",
-              ),
-              (
-                  "preconditions: ['项目页面已打开'], successConditions: [createSize, createWater],",
-                  "preconditions: ['项目页面已打开'], successConditions: [createSize, createWater, createPersisted],",
-              ),
-              (
-                  "          { signalId: 'signal-create-water', kind: 'text_visible', target: '淡水', description: createWater, ...taskEvidence },\n",
-                  "          { signalId: 'signal-create-water', kind: 'text_visible', target: '淡水', description: createWater, ...taskEvidence },\n          { signalId: 'signal-create-persisted', kind: 'text_absent', target: 'Save Settings', description: createPersisted, ...taskEvidence },\n",
-              ),
-              (
-                  "preconditions: ['已有鱼缸'], successConditions: [recordLivestock],",
-                  "preconditions: ['已有鱼缸'], successConditions: [recordLivestock, recordPersisted],",
-              ),
-              (
-                  "          { signalId: 'signal-record-livestock', kind: 'text_visible', target: '咖啡鼠', description: recordLivestock, ...taskEvidence },\n",
-                  "          { signalId: 'signal-record-livestock', kind: 'text_visible', target: 'Corydoras aeneus x 1', description: recordLivestock, ...taskEvidence },\n          { signalId: 'signal-record-persisted', kind: 'text_visible', target: 'Recorded', description: recordPersisted, ...taskEvidence },\n",
-              ),
-              (
-                  "successSignalIds: ['signal-create-size', 'signal-create-water']",
-                  "successSignalIds: ['signal-create-size', 'signal-create-water', 'signal-create-persisted']",
-              ),
-              (
-                  "successSignalIds: ['signal-record-livestock']",
-                  "successSignalIds: ['signal-record-livestock', 'signal-record-persisted']",
-              ),
-              (
-                  "    mustObserve: signals.map((signal: any) => signal.target),\n    mustNotObserve: [],",
-                  "    mustObserve: signals.filter((signal: any) => signal.kind !== 'text_absent').map((signal: any) => signal.target),\n    mustNotObserve: signals.filter((signal: any) => signal.kind === 'text_absent').map((signal: any) => signal.target),",
-              ),
-          ]
-          for old, new in replacements:
-              if old not in text:
-                  raise SystemExit(f'acceptance contract fragment not found: {old[:80]}')
-              text = text.replace(old, new)
-
-          settings_selector_old = "labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置', 'Tank Settings'])"
-          settings_selector_new = "labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', 'Create or configure a tank', '鱼缸设置'])"
-          if text.count(settings_selector_old) != 1:
-              raise SystemExit(f'create-task settings selector count={text.count(settings_selector_old)}')
-          text = text.replace(settings_selector_old, settings_selector_new)
-
-          daily_pattern = re.compile(
-              r"    const questionAnswers: Array<\[string, string\]> = \[.*?"
-              r"    const generate = safeButtonClick\(input, \(item\) => labelIncludesAny\(item, \['生成检查结果', 'Generate Results'\]\), '生成每日检查风险结果', '页面显示高风险等级和立即动作'\);\n"
-              r"    if \(generate\) return generate;",
-              re.S,
-          )
-          new_daily = """    const dailyAnswers = ['经常浮头', '清澈', '没有泡沫或油膜', '没有异味', '正常游动和进食', '没有特别操作'];
-            const progressMatch = visible.match(/(?:^|\\s)([0-6])\\s*\\/\\s*6(?:\\s|$)/);
-            const answeredCount = progressMatch ? Number(progressMatch[1]) : 0;
-            if (answeredCount < dailyAnswers.length) {
-              const answer = dailyAnswers[answeredCount]!;
-              const choice = safeButtonClick(input, (item) => String(item.label ?? '') === answer, `回答每日检查第 ${answeredCount + 1} 项：${answer}`, `每日检查进度变为 ${answeredCount + 1} / 6`);
-              if (choice) return choice;
-            }
-            const generate = safeButtonClick(input, (item) => labelIncludesAny(item, ['生成检查结果', 'Generate Results']), '生成每日检查风险结果', '页面显示高风险等级和立即动作');
-            if (generate) return generate;"""
-          text, count = daily_pattern.subn(lambda _match: new_daily, text, count=1)
-          if count != 1:
-              raise SystemExit(f'daily driver replacement count={count}')
-
-          path.write_text(text)
-          PY
-
       - name: Run EvalPilot real acceptance
         run: |
           set -euo pipefail
@@ -159,6 +72,7 @@ jobs:
             --project-root real-products/aquaguide \
             --url http://127.0.0.1:3000 \
             --output real-product-acceptance-output \
+            --deadline-ms 420000 \
             > acceptance-run.log 2>&1 &
           runner_pid=$!
           diagnostic_path="real-product-acceptance-output/aquaguide-real-acceptance.json"
