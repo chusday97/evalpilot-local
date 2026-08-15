@@ -5,7 +5,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/aquaguide-blind-experience.yml'
-      - 'scripts/run-aquaguide-blind-experience.ts'
+      - 'scripts/run-aquaguide-blind-experience-v2.ts'
       - 'src/ux-evaluation/**'
       - 'src/test-agent/**'
       - 'src/judge/**'
@@ -64,7 +64,7 @@ jobs:
 
       - name: Run blind experience contract
         run: |
-          npx tsx scripts/run-aquaguide-blind-experience.ts \
+          npx tsx scripts/run-aquaguide-blind-experience-v2.ts \
             --url http://127.0.0.1:3000 \
             --output blind-experience-output \
             | tee blind-experience-run.log
