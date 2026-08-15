@@ -14,6 +14,7 @@ import type { AutoSetupPlan } from '../scenario/setup-resolver.js';
 import { EvalPilotError } from '../utils/errors.js';
 import { writeJsonAtomic } from '../utils/file-system.js';
 import { runBlindExperienceCase, type BlindExperienceRunResult } from './blind-experience-service.js';
+import { buildSetupStateSignature } from './setup-state-signature.js';
 
 export interface ConfiguredBlindExperienceInput {
   projectId: string;
@@ -33,6 +34,9 @@ export interface BlindSetupKnowledgeSource {
   sourceCaseId: string | null;
   sourceCaseTitle: string | null;
   candidateCaseIds: string[];
+  candidateStateFingerprints: Array<{ caseId: string; fingerprint: string }>;
+  setupStateFingerprint: string | null;
+  equivalence: 'missing' | 'unique' | 'exact_signature_match' | 'ambiguous';
   knownInformationKeys: string[];
   status: 'ready' | 'missing_baseline';
   reason: string;
@@ -75,7 +79,7 @@ function baselineProducers(cases: EvalCase[], targetCaseId: string, taskId: stri
     && item.taskId === taskId
     && item.setType === 'baseline'
     && item.status === 'stable',
-  );
+  ).sort((left, right) => left.caseId.localeCompare(right.caseId));
 }
 
 function rebuildChainAwarePlan(original: ChainAwareSetupPlan | null, steps: AutoSetupPlan[]): ChainAwareSetupPlan | null {
@@ -95,10 +99,10 @@ function rebuildChainAwarePlan(original: ChainAwareSetupPlan | null, steps: Auto
  * Blind target run invent prerequisite state. Setup remains evaluator-managed and is verified
  * independently before the target Blind Actor starts.
  *
- * We deliberately require exactly one stable baseline producer per Setup task. Choosing the
- * first of multiple baselines would silently assert state equivalence that EvalPilot has not
- * modeled yet. Ambiguous setup state therefore fails closed until explicit setup-state
- * parameters/checkpoint equivalence are available.
+ * V1 equivalence is intentionally exact: multiple stable baselines may be reused only when
+ * their task, known fixture inputs and observable Oracle contract produce the same setup-state
+ * signature. Different signatures remain ambiguous and fail closed. This allows duplicate
+ * representations of the same state without guessing that distinct configurations are equal.
  */
 export function bindBlindSetupKnownInformation(plan: PrerequisitePlan, cases: EvalCase[]): {
   plan: PrerequisitePlan;
@@ -110,17 +114,41 @@ export function bindBlindSetupKnownInformation(plan: PrerequisitePlan, cases: Ev
   const sources: BlindSetupKnowledgeSource[] = [];
   const steps = plan.setupPlans.map((step) => {
     const candidates = baselineProducers(cases, plan.caseId, step.setupTaskId);
-    const producer = candidates.length === 1 ? candidates[0]! : null;
+    const signedCandidates = candidates.map((candidate) => ({
+      candidate,
+      signature: buildSetupStateSignature(candidate),
+    }));
+    const distinctFingerprints = [...new Set(signedCandidates.map((item) => item.signature.fingerprint))];
+    const equivalentDuplicates = signedCandidates.length > 1 && distinctFingerprints.length === 1;
+    const producer = signedCandidates.length === 1 || equivalentDuplicates
+      ? signedCandidates[0]!.candidate
+      : null;
+    const equivalence: BlindSetupKnowledgeSource['equivalence'] = candidates.length === 0
+      ? 'missing'
+      : candidates.length === 1
+        ? 'unique'
+        : equivalentDuplicates
+          ? 'exact_signature_match'
+          : 'ambiguous';
+    const setupStateFingerprint = producer ? signedCandidates[0]!.signature.fingerprint : null;
     const reason = candidates.length === 0
       ? `Setup ${step.setupTaskId} 没有可复用的稳定 baseline Case；不会为 Blind 目标猜测前置状态。`
-      : candidates.length > 1
-        ? `Setup ${step.setupTaskId} 存在多个稳定 baseline（${candidates.map((item) => item.caseId).join('、')}），当前无法证明这些状态等价；不会随机选择前置状态。`
-        : `Setup ${step.setupTaskId} 使用稳定 baseline ${producer!.caseId} 的已知测试信息。`;
+      : candidates.length === 1
+        ? `Setup ${step.setupTaskId} 使用稳定 baseline ${producer!.caseId} 的已知测试信息。`
+        : equivalentDuplicates
+          ? `Setup ${step.setupTaskId} 的 ${candidates.length} 个稳定 baseline 具有相同 exact setup-state signature（${setupStateFingerprint!.slice(0, 12)}…）；按 caseId 稳定选择 ${producer!.caseId} 执行。`
+          : `Setup ${step.setupTaskId} 存在多个不等价 setup-state signature（${distinctFingerprints.length} 组；${candidates.map((item) => item.caseId).join('、')}），当前无法证明这些状态等价；不会随机选择前置状态。`;
     sources.push({
       setupTaskId: step.setupTaskId,
       sourceCaseId: producer?.caseId ?? null,
       sourceCaseTitle: producer?.title ?? null,
       candidateCaseIds: candidates.map((item) => item.caseId),
+      candidateStateFingerprints: signedCandidates.map((item) => ({
+        caseId: item.candidate.caseId,
+        fingerprint: item.signature.fingerprint,
+      })),
+      setupStateFingerprint,
+      equivalence,
       knownInformationKeys: producer ? Object.keys(producer.knownInformation).sort() : [],
       status: producer ? 'ready' : 'missing_baseline',
       reason,
