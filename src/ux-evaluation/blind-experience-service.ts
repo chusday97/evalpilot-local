@@ -59,6 +59,13 @@ export async function runBlindExperienceCase(input: {
   now?: () => Date;
 }): Promise<BlindExperienceRunResult> {
   const actorCase = buildBlindActorCase(input.evalCase);
+
+  // A Blind task starts from an explicit user-visible entry state every time. Reload even when
+  // the URL string is unchanged: the previous task may have left a modal/result layer open at
+  // the same route. BrowserContext storage is preserved, so real persisted product state remains
+  // available while transient UI state is reset.
+  await input.page.goto(input.startingUrl, { waitUntil: 'domcontentloaded' });
+
   const agentRun = await runAiTestAgent(input.page, actorCase, input.provider, {
     outputDir: input.outputDir,
     startingUrl: input.startingUrl,
