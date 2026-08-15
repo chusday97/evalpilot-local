@@ -42,10 +42,21 @@ export function classifyOperation(input: { decision: AgentDecision; observation:
   const targetStronglyCommits = includesAny(targetContext, ['save', 'submit', 'confirm', 'send', '保存', '提交', '确认', '发送']);
   if (decision.action === 'click' && (intentCommits || targetStronglyCommits)) return 'form_submit';
 
+  // Explicit "run/start/refresh/sync" controls may start work whose completion is not encoded
+  // in the button itself. Keep those on the bounded unknown-async policy even though they are
+  // ordinary buttons. This preserves safe waiting for generic jobs while letting pure choice
+  // buttons (radio-like answers, tabs, options) take the synchronous fast path.
+  const explicitAsyncControl = decision.action === 'click' && includesAny(`${intentContext} ${targetContext}`, [
+    'run', 'start', 'execute', 'refresh', 'reload', 'sync', 'fetch', 'load more',
+    '运行', '执行', '启动', '刷新', '重新加载', '同步', '获取更多', '加载更多',
+  ]);
+  if (explicitAsyncControl) return 'unknown_async';
+
   // A plain button is a synchronous UI control unless the action semantics above prove that
-  // it starts navigation, upload/processing, generation, or a persisted form submission.
-  // Treating every otherwise-unknown button as async made simple radio/choice interactions
-  // burn the 8s unknown_async soft timeout even when the DOM updated immediately.
+  // it starts navigation, upload/processing, generation, a persisted form submission, or a
+  // generic async job. Treating every otherwise-unknown button as async made simple
+  // radio/choice interactions burn the 8s unknown_async soft timeout even when the DOM updated
+  // immediately.
   if (decision.action === 'click' && target?.tagName === 'button') return 'synchronous';
 
   if (decision.action === 'wait' || decision.action === 'retry') return 'unknown_async';
