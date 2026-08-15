@@ -77,7 +77,7 @@ describe('configured Blind Experience prerequisite binding', () => {
     const result = bindBlindSetupKnownInformation(plan([setupStep('create')]), [source, target]);
 
     expect(result.missingTaskIds).toEqual([]);
-    expect(result.sources).toEqual([expect.objectContaining({ setupTaskId: 'create', sourceCaseId: 'baseline-create', status: 'ready' })]);
+    expect(result.sources).toEqual([expect.objectContaining({ setupTaskId: 'create', sourceCaseId: 'baseline-create', candidateCaseIds: ['baseline-create'], status: 'ready' })]);
     expect(result.plan.setupPlans[0]?.setupCase.knownInformation).toEqual(source.knownInformation);
     expect(result.plan.setupPlans[0]?.setupCase.knownInformation).not.toBe(source.knownInformation);
   });
@@ -87,7 +87,23 @@ describe('configured Blind Experience prerequisite binding', () => {
     const result = bindBlindSetupKnownInformation(plan([setupStep('create')]), [target]);
 
     expect(result.missingTaskIds).toEqual(['create']);
-    expect(result.sources[0]).toEqual(expect.objectContaining({ sourceCaseId: null, status: 'missing_baseline' }));
+    expect(result.sources[0]).toEqual(expect.objectContaining({ sourceCaseId: null, candidateCaseIds: [], status: 'missing_baseline' }));
+    expect(result.plan.setupPlans[0]?.setupCase.knownInformation).toEqual({});
+  });
+
+  it('fails closed rather than arbitrarily choosing among multiple stable Setup baselines', () => {
+    const freshwater = baseline('baseline-create-freshwater', 'create', { waterType: 'freshwater', lengthCm: 60 });
+    const saltwater = baseline('baseline-create-saltwater', 'create', { waterType: 'saltwater', lengthCm: 60 });
+    const target = baseline('target-record', 'record', { scientificName: 'Corydoras aeneus', quantity: 1 });
+    const result = bindBlindSetupKnownInformation(plan([setupStep('create')]), [freshwater, saltwater, target]);
+
+    expect(result.missingTaskIds).toEqual(['create']);
+    expect(result.sources[0]).toEqual(expect.objectContaining({
+      sourceCaseId: null,
+      candidateCaseIds: ['baseline-create-freshwater', 'baseline-create-saltwater'],
+      status: 'missing_baseline',
+    }));
+    expect(result.sources[0]?.reason).toContain('当前无法证明这些状态等价');
     expect(result.plan.setupPlans[0]?.setupCase.knownInformation).toEqual({});
   });
 
