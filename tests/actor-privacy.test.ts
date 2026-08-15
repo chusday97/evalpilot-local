@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { EvalCase, PageObservation } from '../types.js';
+import type { AgentDecision, EvalCase, PageObservation, StepVerification } from '../types.js';
 import { MockAiProvider } from '../src/ai/mock-provider.js';
 import { chooseAgentAction } from '../src/test-agent/actor.js';
 
@@ -20,13 +20,13 @@ const evalCase: EvalCase = {
   knownInformation: {},
   preconditions: ['页面已打开'],
   oracle: {
-    expectedOutcome: ['完成'],
-    mustObserve: ['完成'],
-    mustNotObserve: [],
+    expectedOutcome: ['ORACLE_SECRET_EXPECTED'],
+    mustObserve: ['ORACLE_SECRET_MUST_OBSERVE'],
+    mustNotObserve: ['ORACLE_SECRET_MUST_NOT_OBSERVE'],
     businessRules: [],
     semanticRubric: ['用户可完成安全任务'],
     deterministicAssertions: [],
-    inconclusiveWhen: ['证据不足'],
+    inconclusiveWhen: ['ORACLE_SECRET_INCONCLUSIVE'],
   },
   coverageDimensions: [{ dimension: 'capability', value: 'cap-privacy' }],
   riskLevel: 'P1',
@@ -65,23 +65,27 @@ const progress = {
   currentFocus: 'trigger_or_continue_task' as const,
   currentFocusLabel: '继续任务',
   completedVerifiedSteps: 0,
-  remainingExpectedSignals: ['完成'],
+  remainingExpectedSignals: ['ORACLE_SECRET_PROGRESS_SIGNAL'],
   remainingActionBudget: 8,
   currentActionBudget: 8,
   hardActionBudget: 20,
   failedAttempts: 0,
 };
 
-describe('Actor screenshot privacy', () => {
+function providerReturning(action: AgentDecision['action'] = 'abandon'): MockAiProvider {
+  return new MockAiProvider(() => ({
+    intentSummary: '基于可见页面继续',
+    action,
+    targetElementId: null,
+    value: null,
+    expectedResult: '基于当前页面判断下一步',
+    confidence: 1,
+  }));
+}
+
+describe('Actor privacy and knowledge boundary', () => {
   it('keeps local screenshot evidence out of a remote Actor request when screenshot consent is off', async () => {
-    const provider = new MockAiProvider(() => ({
-      intentSummary: '基于 DOM 继续',
-      action: 'abandon',
-      targetElementId: null,
-      value: null,
-      expectedResult: '停止',
-      confidence: 1,
-    }));
+    const provider = providerReturning();
 
     await chooseAgentAction({
       provider,
@@ -101,14 +105,7 @@ describe('Actor screenshot privacy', () => {
   });
 
   it('attaches the screenshot only when the caller explicitly allows it', async () => {
-    const provider = new MockAiProvider(() => ({
-      intentSummary: '结合截图继续',
-      action: 'abandon',
-      targetElementId: null,
-      value: null,
-      expectedResult: '停止',
-      confidence: 1,
-    }));
+    const provider = providerReturning();
     const screenshot = 'data:image/png;base64,explicitly-allowed';
 
     await chooseAgentAction({
@@ -125,5 +122,86 @@ describe('Actor screenshot privacy', () => {
 
     expect(provider.requests[0]?.imageDataUrls).toEqual([screenshot]);
     expect(provider.requests[0]?.privacy.allowScreenshot).toBe(true);
+  });
+
+  it('does not serialize evaluator Oracle answers or remaining expected signals into the Actor prompt', async () => {
+    const provider = providerReturning();
+
+    await chooseAgentAction({
+      provider,
+      evalCase,
+      observation,
+      history: [],
+      verifications: [],
+      progress,
+      screenshotDataUrl: null,
+      allowRemoteModel: true,
+      allowScreenshot: false,
+    });
+
+    const prompt = provider.requests[0]?.userPrompt ?? '';
+    expect(prompt).toContain(evalCase.goal);
+    expect(prompt).toContain(evalCase.persona.name);
+    expect(prompt).not.toContain('oracleSummary');
+    expect(prompt).not.toContain('ORACLE_SECRET_EXPECTED');
+    expect(prompt).not.toContain('ORACLE_SECRET_MUST_OBSERVE');
+    expect(prompt).not.toContain('ORACLE_SECRET_MUST_NOT_OBSERVE');
+    expect(prompt).not.toContain('ORACLE_SECRET_INCONCLUSIVE');
+    expect(prompt).not.toContain('ORACLE_SECRET_PROGRESS_SIGNAL');
+    expect(prompt).not.toContain('remainingExpectedSignals');
+  });
+
+  it('can disable hidden Oracle auto-finish for a blind UX run', async () => {
+    const provider = providerReturning('abandon');
+    const visibleOracleCase: EvalCase = {
+      ...evalCase,
+      oracle: {
+        ...evalCase.oracle,
+        deterministicAssertions: [{
+          assertionId: 'assertion-visible-result',
+          type: 'text_visible',
+          target: 'VISIBLE_RESULT',
+          expected: true,
+          negated: false,
+        }],
+      },
+    };
+    const visibleResultObservation: PageObservation = {
+      ...observation,
+      visibleStateSummary: 'VISIBLE_RESULT',
+    };
+    const history: AgentDecision[] = [{
+      decisionId: 'decision-001',
+      intentSummary: '先执行一步',
+      action: 'wait',
+      targetElementId: null,
+      value: null,
+      expectedResult: '页面出现变化',
+      confidence: 1,
+    }];
+    const verifications: StepVerification[] = [{
+      verificationId: 'verification-001',
+      expectation: '页面出现变化',
+      observed: '已出现可见变化',
+      status: 'confirmed',
+      evidenceRefs: ['after.png'],
+      confidence: 1,
+    }];
+
+    const decision = await chooseAgentAction({
+      provider,
+      evalCase: visibleOracleCase,
+      observation: visibleResultObservation,
+      history,
+      verifications,
+      progress: { ...progress, completedVerifiedSteps: 1 },
+      screenshotDataUrl: null,
+      allowRemoteModel: true,
+      allowScreenshot: false,
+      allowOracleAutoFinish: false,
+    });
+
+    expect(provider.requests).toHaveLength(1);
+    expect(decision.action).toBe('abandon');
   });
 });
