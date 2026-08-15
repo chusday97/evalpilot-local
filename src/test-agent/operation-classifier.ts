@@ -21,7 +21,7 @@ export function classifyOperation(input: { decision: AgentDecision; observation:
     decision.intentSummary,
     decision.expectedResult,
   ].filter((value): value is string => Boolean(value)).join(' ').toLocaleLowerCase();
-  const decisionContext = `${decision.intentSummary} ${decision.expectedResult}`.toLocaleLowerCase();
+  const intentContext = decision.intentSummary.toLocaleLowerCase();
   const targetContext = `${target?.label ?? ''} ${target?.text ?? ''}`.trim().toLocaleLowerCase();
 
   if (decision.action === 'back'
@@ -34,13 +34,13 @@ export function classifyOperation(input: { decision: AgentDecision; observation:
 
   if (includesAny(actionContext, ['generate', 'generating', 'stream', 'streaming', 'ai ', 'assistant', 'chat', 'summarize', 'transcribe', '生成', '流式', '智能', '助手', '对话', '总结', '转写'])) return 'ai_generation';
 
-  // Creation/recording words are often used on entry-point buttons ("Create or configure",
-  // "Record existing ...") that merely open a local form. Treat them as a submit only when
-  // the Agent's own intent/expectation says it is committing state. Strong submit labels such
-  // as Save/Submit/Confirm remain sufficient on their own.
-  const decisionCommits = includesAny(decisionContext, ['submit', 'save', 'create', 'update', 'confirm', 'send', 'sign in', 'log in', '提交', '保存', '创建', '更新', '确认', '发送', '登录']);
+  // Creation/recording words are often used on entry-point buttons or in expected-result copy
+  // (for example "enter the create flow") that merely opens a local form. Treat them as a
+  // submit only when the Agent's own intent says it is committing state. Strong submit labels
+  // such as Save/Submit/Confirm remain sufficient on their own.
+  const intentCommits = includesAny(intentContext, ['submit', 'save', 'create', 'update', 'confirm', 'send', 'sign in', 'log in', '提交', '保存', '创建', '更新', '确认', '发送', '登录']);
   const targetStronglyCommits = includesAny(targetContext, ['save', 'submit', 'confirm', 'send', '保存', '提交', '确认', '发送']);
-  if (decision.action === 'click' && (decisionCommits || targetStronglyCommits)) return 'form_submit';
+  if (decision.action === 'click' && (intentCommits || targetStronglyCommits)) return 'form_submit';
 
   // A plain button is a synchronous UI control unless the action semantics above prove that
   // it starts navigation, upload/processing, generation, or a persisted form submission.
