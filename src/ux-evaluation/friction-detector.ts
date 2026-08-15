@@ -75,7 +75,12 @@ export function detectFrictions(input: FrictionInput): FrictionEvent[] {
   if (input.completion.userGoal.complete === true && input.completion.followUp.complete === false) {
     events.push(event(input, events.length, 'journey_breakpoint', '用户目标结果已出现，但没有证据证明可保存、修改、继续或结束', '结果页可能缺少清晰的后续行动'));
   }
-  if (input.metrics.abandoned) {
+  // A terminal abandon emitted after the deterministic Judge has already proven the user
+  // goal is not evidence of pre-completion abandonment. In task-mode/scripted baselines it
+  // can simply mean the Actor did not recognize the evaluator's hidden completion signal.
+  // A future blind UX run may model completion-recognition friction separately, but it must
+  // not be conflated with abandonment risk here.
+  if (input.metrics.abandoned && input.completion.userGoal.complete !== true) {
     events.push(event(input, events.length, 'abandonment_risk', `模拟用户放弃：${input.metrics.abandonmentReason ?? '原因未记录'}`, '操作成本或失败次数超过 Persona 的行为限制'));
   }
   return events;
