@@ -1,9 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { chooseAgentAction } from '../src/test-agent/actor.js';
 
-function baseCase(assertions: any[]) {
+function baseCase(assertions: any[], options: { title?: string; goal?: string } = {}) {
   return {
     caseId: 'case-oracle-guard',
+    title: options.title ?? '查看结果',
+    goal: options.goal ?? '查看结果',
     oracle: {
       deterministicAssertions: assertions,
       expectedOutcome: [],
@@ -50,8 +52,8 @@ function input(evalCase: any, currentObservation: any, provider: any, progressed
     provider,
     evalCase,
     observation: currentObservation,
-    history: progressed ? [{ intentSummary: '保存', action: 'click', targetElementId: 'E001', value: null, expectedResult: 'saved', confidence: 1 }] : [],
-    verifications: progressed ? [{ verificationId: 'v1', expectation: 'saved', observed: 'saved', status: 'confirmed', evidenceRefs: [], confidence: 1 }] : [],
+    history: progressed ? [{ intentSummary: '执行任务动作', action: 'click', targetElementId: 'E001', value: null, expectedResult: 'result', confidence: 1 }] : [],
+    verifications: progressed ? [{ verificationId: 'v1', expectation: 'result', observed: 'result', status: 'confirmed', evidenceRefs: [], confidence: 1 }] : [],
     progress: { currentFocus: 'task', remainingExpectedSignals: [], completedVerifiedSteps: progressed ? 1 : 0, remainingBudget: 8, failedAttempts: 0 },
     screenshotDataUrl: null,
     allowRemoteModel: true,
@@ -112,13 +114,13 @@ describe('Actor deterministic completion guard', () => {
     expect(generateStructured).toHaveBeenCalledOnce();
   });
 
-  it('does not auto-finish a matching preview while an explicit Save control is still pending', async () => {
+  it('does not auto-finish a create-task preview while an explicit Save control is still pending', async () => {
     const generateStructured = vi.fn(async () => ({ intentSummary: '提交设置', action: 'click', targetElementId: 'E-save', value: null, expectedResult: '设置被真正保存', confidence: 1 }));
     const provider = { info: { remote: true }, generateStructured } as any;
     const evalCase = baseCase([
       { assertionId: 'a1', type: 'text_visible', target: '60x30x30cm', negated: false },
       { assertionId: 'a2', type: 'text_visible', target: 'Freshwater', negated: false },
-    ]);
+    ], { title: 'Create aquarium', goal: 'Create and save a usable aquarium' });
 
     const decision = await chooseAgentAction(input(
       evalCase,
@@ -132,10 +134,13 @@ describe('Actor deterministic completion guard', () => {
     expect(generateStructured).toHaveBeenCalledOnce();
   });
 
-  it('does not auto-finish a livestock preview while 保存到鱼缸 is still pending', async () => {
+  it('does not auto-finish a record-task preview while 保存到鱼缸 is still pending', async () => {
     const generateStructured = vi.fn(async () => ({ intentSummary: '保存记录', action: 'click', targetElementId: 'E-save', value: null, expectedResult: '记录持久化', confidence: 1 }));
     const provider = { info: { remote: true }, generateStructured } as any;
-    const evalCase = baseCase([{ assertionId: 'a1', type: 'text_visible', target: 'Corydoras aeneus x 1', negated: false }]);
+    const evalCase = baseCase(
+      [{ assertionId: 'a1', type: 'text_visible', target: 'Corydoras aeneus x 1', negated: false }],
+      { title: 'Record existing livestock', goal: 'Record and save livestock already in the aquarium' },
+    );
 
     const decision = await chooseAgentAction(input(
       evalCase,
@@ -146,5 +151,24 @@ describe('Actor deterministic completion guard', () => {
 
     expect(decision.action).toBe('click');
     expect(generateStructured).toHaveBeenCalledOnce();
+  });
+
+  it('allows a read-only result task to finish even when an optional follow-up save button is visible', async () => {
+    const generateStructured = vi.fn(() => { throw new Error('provider should not be called'); });
+    const provider = { info: { remote: true }, generateStructured } as any;
+    const evalCase = baseCase([
+      { assertionId: 'a1', type: 'text_visible', target: 'Act now', negated: false },
+      { assertionId: 'a2', type: 'text_visible', target: '增加打氧或水面扰动', negated: false },
+    ], { title: 'Daily Check risk result', goal: 'Run the daily check and identify the risk action' });
+
+    const decision = await chooseAgentAction(input(
+      evalCase,
+      observation('Act now 立刻增加打氧或水面扰动 保存今天记录', 'http://127.0.0.1/aquarium', [button('保存今天记录')]),
+      provider,
+      true,
+    ));
+
+    expect(decision.action).toBe('finish');
+    expect(generateStructured).not.toHaveBeenCalled();
   });
 });
