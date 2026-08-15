@@ -86,7 +86,7 @@ export function CaseEvaluationModePage({ active, mode, go }: { active: Json; mod
     finally { setRunning(false); }
   }
 
-  if (cases.loading || summary.loading) return <><Header title={title} intro={intro} project={active.name}/><Skeleton rows={5}/></>;
+  if (cases.loading || summary.loading) return <><Header title="正在读取评测任务" intro="正在读取当前项目的任务、历史状态和可运行条件。" project={active.name}/><Skeleton rows={5}/></>;
   if (cases.error || summary.error) return <><Header title={title} intro={intro} project={active.name}/><ErrorPanel message={cases.error ?? summary.error ?? '评测任务读取失败'} retry={() => { cases.reload(); summary.reload(); }}/></>;
 
   return <>
