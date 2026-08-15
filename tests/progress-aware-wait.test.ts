@@ -73,7 +73,7 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('progress-aware brow
 
   it('returns control after visible progress settles instead of burning the extended timeout', async () => {
     const browser = await chromium.launch({ headless: true }); const page = await browser.newPage();
-    await page.setContent('<main><button id="run">Run panel</button><div role="status">Idle</div></main><script>document.querySelector("#run").onclick=()=>{const s=document.querySelector("[role=status]");s.setAttribute("aria-busy","true");s.textContent="Loading panel";setTimeout(()=>{s.removeAttribute("aria-busy");s.textContent="Panel open"},100)}</script>');
+    await page.setContent('<main><button id="run">Run panel</button><div role="status">Stage 0</div></main><script>document.querySelector("#run").onclick=()=>{const s=document.querySelector("[role=status]");s.textContent="Stage 1";setTimeout(()=>{s.textContent="Stage 2"},100)}</script>');
     const action = decision('Run panel'); action.expectedResult = 'Never terminal marker';
     const before = await captureTaskStateSignals(page, action); await page.locator('#run').click();
     const startedAt = performance.now();
