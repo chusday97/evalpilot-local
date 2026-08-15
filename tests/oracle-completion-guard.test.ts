@@ -16,7 +16,7 @@ function baseCase(assertions: any[]) {
   } as any;
 }
 
-function observation(text: string, url = 'http://127.0.0.1/result') {
+function observation(text: string, url = 'http://127.0.0.1/result', interactableElements: any[] = []) {
   return {
     observationId: 'obs-1',
     pageUrl: url,
@@ -24,10 +24,24 @@ function observation(text: string, url = 'http://127.0.0.1/result') {
     visibleStateSummary: text,
     primaryAreas: [],
     visibleProblems: [],
-    interactableElements: [],
+    interactableElements,
     formFields: [],
     evidenceRefs: [],
     confidence: 1,
+  } as any;
+}
+
+function button(label: string) {
+  return {
+    elementId: 'E-save',
+    role: null,
+    tagName: 'button',
+    label,
+    text: label,
+    placeholder: null,
+    disabled: false,
+    risk: 'safe',
+    locatorHint: 'grounded-index:0',
   } as any;
 }
 
@@ -95,6 +109,42 @@ describe('Actor deterministic completion guard', () => {
     const decision = await chooseAgentAction(input(evalCase, observation('Saved'), provider, true));
 
     expect(decision.action).toBe('wait');
+    expect(generateStructured).toHaveBeenCalledOnce();
+  });
+
+  it('does not auto-finish a matching preview while an explicit Save control is still pending', async () => {
+    const generateStructured = vi.fn(async () => ({ intentSummary: '提交设置', action: 'click', targetElementId: 'E-save', value: null, expectedResult: '设置被真正保存', confidence: 1 }));
+    const provider = { info: { remote: true }, generateStructured } as any;
+    const evalCase = baseCase([
+      { assertionId: 'a1', type: 'text_visible', target: '60x30x30cm', negated: false },
+      { assertionId: 'a2', type: 'text_visible', target: 'Freshwater', negated: false },
+    ]);
+
+    const decision = await chooseAgentAction(input(
+      evalCase,
+      observation('Tank Settings 60x30x30cm Freshwater Save Settings', 'http://127.0.0.1/aquarium', [button('Save Settings')]),
+      provider,
+      true,
+    ));
+
+    expect(decision.action).toBe('click');
+    expect(decision.targetElementId).toBe('E-save');
+    expect(generateStructured).toHaveBeenCalledOnce();
+  });
+
+  it('does not auto-finish a livestock preview while 保存到鱼缸 is still pending', async () => {
+    const generateStructured = vi.fn(async () => ({ intentSummary: '保存记录', action: 'click', targetElementId: 'E-save', value: null, expectedResult: '记录持久化', confidence: 1 }));
+    const provider = { info: { remote: true }, generateStructured } as any;
+    const evalCase = baseCase([{ assertionId: 'a1', type: 'text_visible', target: 'Corydoras aeneus x 1', negated: false }]);
+
+    const decision = await chooseAgentAction(input(
+      evalCase,
+      observation('将记录：Corydoras aeneus x 1 保存到鱼缸', 'http://127.0.0.1/aquarium/record', [button('保存到鱼缸')]),
+      provider,
+      true,
+    ));
+
+    expect(decision.action).toBe('click');
     expect(generateStructured).toHaveBeenCalledOnce();
   });
 });
