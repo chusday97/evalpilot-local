@@ -137,14 +137,6 @@ function routeSequenceFromSteps(steps: AdaptiveExperienceStep[]): string[] {
   return sequence;
 }
 
-function routeBacktracks(sequence: string[]): number {
-  let count = 0;
-  for (let index = 2; index < sequence.length; index += 1) {
-    if (sequence[index] === sequence[index - 2] && sequence[index] !== sequence[index - 1]) count += 1;
-  }
-  return count;
-}
-
 function recommendationFor(type: UxIssueType): string {
   switch (type) {
     case 'repeated_input_issue':
@@ -237,7 +229,10 @@ export function analyzeAdaptiveExperience(input: {
       timestampMs: packetAction?.timestampMs ?? stepEvidence.stepIndex,
       page: before.pageUrl,
       target: targetLabel(before, decision),
-      inputField: isInput ? targetLabel(before, decision) : null,
+      // Repeated-input identity must come from the grounded field identity, not its visible
+      // label. Distinct unlabeled dimension fields may all render as “input”; treating that
+      // shared label as identity creates false repeated-input findings (e.g. 60×30×30).
+      inputField: isInput ? decision.targetElementId : null,
       inputLength: isInput ? decision.value?.length ?? 0 : null,
       inputFingerprint: isInput && decision.value ? fingerprintInput(decision.value) : null,
       outcome: stepEvidence.actionStatus === 'failed'
@@ -261,11 +256,14 @@ export function analyzeAdaptiveExperience(input: {
     abandonmentReason: abandoned ? '模拟用户明确选择放弃当前路径' : null,
   });
   const routeSequence = routeSequenceFromSteps(steps);
-  const routeBacktrackCount = routeBacktracks(routeSequence);
+  // A URL round-trip is not itself a user backtrack: opening a setup sub-route/modal and
+  // returning after Save is a normal successful path. Count only an explicit Actor back
+  // action as behavioral backtracking. Route history remains available as evidence.
+  const routeBacktrackCount = actions.filter((action) => action.type === 'backtrack').length;
   const metrics = simulatedUserMetricsSchema.parse({
     ...baseMetrics,
     pageTransitions: Math.max(0, routeSequence.length - 1),
-    backtrackCount: Math.max(baseMetrics.backtrackCount, routeBacktrackCount),
+    backtrackCount: routeBacktrackCount,
   });
 
   const functionalPassed = input.result.verdict === 'pass' && input.result.failureSource === null;
@@ -305,6 +303,7 @@ export function analyzeAdaptiveExperience(input: {
     authenticityNotice: [
       '这是 AI 模拟用户的可观察交互摩擦，不等同于真实用户情绪或满意度。',
       'Friction 只使用操作、页面状态、验证结果和证据引用；wall-clock 模型延迟不用于判断用户犹豫。',
+      'URL 往返本身不视为回退；只有 Actor 明确执行 back 才计入 backtrack。不同字段使用 grounded element identity 区分，避免同名/无标签字段造成重复输入误报。',
       productFailed
         ? '本轮存在已确认产品功能失败，因此 UX Friction 被抑制，避免把 Bug 包装成体验建议。'
         : '功能通过后仍允许保留非阻塞 UX Friction，用于发现“能完成但不好用”的路径。',
