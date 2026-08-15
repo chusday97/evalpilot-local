@@ -28,11 +28,9 @@ const commitControlPattern = /(?:^|\b)(?:save(?:\s+settings)?|submit|apply|confi
 const commitTaskPattern = /\b(?:save|submit|create|record|add|update|persist)\b|保存|提交|创建|建立|记录|添加|更新|持久化/u;
 
 function taskRequiresCommit(evalCase: EvalCase): boolean {
-  const taskText = [
-    evalCase.title,
-    evalCase.goal,
-    ...(evalCase.oracle.expectedOutcome ?? []),
-  ].filter(Boolean).join(' ').toLowerCase();
+  // Actor-side execution policy may use the user's stated task, but never hidden Oracle
+  // outcomes. Hidden success strings belong to the Judge/evaluator boundary only.
+  const taskText = [evalCase.title, evalCase.goal].filter(Boolean).join(' ').toLowerCase();
   return commitTaskPattern.test(taskText);
 }
 
@@ -60,6 +58,10 @@ export async function chooseAgentAction(input: {
   screenshotDataUrl: string | null;
   allowRemoteModel: boolean;
   allowScreenshot: boolean;
+  /** Functional task runs may use a hidden evaluator-side auto-finish optimization.
+   * Blind UX/exploration runs must set this false so the simulated user has to recognize
+   * completion from visible evidence itself. */
+  allowOracleAutoFinish?: boolean;
 }): Promise<AgentDecision> {
   // Do not declare a task complete from its initial page alone: examples, placeholders or
   // pre-existing state can already contain the Oracle text. Auto-finish is only a recovery
@@ -68,8 +70,12 @@ export async function chooseAgentAction(input: {
   // Mutation tasks must also finish their visible Save/Submit step. Read-only/result tasks
   // may expose an optional follow-up Save button after their actual goal is already proven;
   // that optional persistence affordance must not block deterministic completion.
+  //
+  // Crucially, this branch is evaluator-side control flow. It is disabled for blind UX runs
+  // and none of the Oracle values are serialized into the Actor prompt.
   const pendingRequiredCommit = taskRequiresCommit(input.evalCase) && hasPendingCommitControl(input.observation);
-  if (hasVerifiedExecutedProgress(input.history, input.verifications)
+  if (input.allowOracleAutoFinish !== false
+    && hasVerifiedExecutedProgress(input.history, input.verifications)
     && !pendingRequiredCommit
     && immediateOracleSatisfied(input.evalCase, input.observation)) {
     return agentDecisionSchema.parse({
