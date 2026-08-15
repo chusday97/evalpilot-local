@@ -59,7 +59,12 @@ export function orderCasesBySetupDependencies(cases: EvalCase[], plans: Prerequi
   const originalIndex = new Map(cases.map((evalCase, index) => [evalCase.caseId, index]));
   const caseByTaskId = new Map<string, EvalCase>();
   for (const evalCase of cases) {
-    if (evalCase.taskId && !caseByTaskId.has(evalCase.taskId)) caseByTaskId.set(evalCase.taskId, evalCase);
+    // Only baseline cases are allowed to act as reusable setup producers. Regression and
+    // challenge cases may intentionally exercise failure paths and must never be promoted
+    // ahead of another case merely because they share the same taskId.
+    if (evalCase.taskId && evalCase.setType === 'baseline' && !caseByTaskId.has(evalCase.taskId)) {
+      caseByTaskId.set(evalCase.taskId, evalCase);
+    }
   }
   const planByCaseId = new Map(plans.map((plan) => [plan.caseId, plan]));
   const dependents = new Map<string, Set<string>>();
