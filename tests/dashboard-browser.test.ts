@@ -150,7 +150,8 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     expect(await page.getByText('实际运行覆盖').isVisible()).toBe(true);
     expect(await page.getByText('已验证覆盖', { exact: true }).first().isVisible()).toBe(true);
     expect(await page.getByText('已定义，未运行').isVisible()).toBe(true);
-    await page.getByRole('button', { name: '用 AI 用户运行这个案例' }).click();
+    expect(await page.getByRole('button', { name: 'Blind Experience' }).isVisible()).toBe(true);
+    await page.getByRole('button', { name: '功能 AI 运行' }).click();
     expect(await page.getByRole('dialog', { name: '确认运行 AI 用户' }).isVisible()).toBe(true);
     await page.getByRole('button', { name: '确认并开始运行' }).click();
     await page.getByText(/尚未连接 AI 评测能力。请先在评测页选择一个模型服务/).waitFor({ state: 'visible' });
