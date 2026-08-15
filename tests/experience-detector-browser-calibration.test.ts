@@ -240,7 +240,7 @@ function calibrationMetrics(rows: Array<{ expected: UxIssueType[]; predicted: Ux
 }
 
 describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('browser-level experience detector calibration', () => {
-  it('measures Observer → Actor → evidence reconstruction → friction detection without hiding known false negatives', async () => {
+  it('measures Observer → Actor → evidence reconstruction → friction detection against browser ground truth', async () => {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage();
     const rows: Array<{ fixtureId: string; expected: UxIssueType[]; predicted: UxIssueType[] }> = [];
@@ -259,20 +259,13 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('browser-level exper
     expect(byId.get('backtrack-recovery')?.predicted).toContain('path_efficiency_issue');
     expect(byId.get('repeated-input')?.predicted).toContain('repeated_input_issue');
     expect(byId.get('hesitation-then-success')?.predicted).toContain('path_efficiency_issue');
+    expect(byId.get('dead-end-abandonment')?.predicted).toContain('journey_breakpoint');
     expect(byId.get('dead-end-abandonment')?.predicted).toContain('abandonment_risk');
-
-    // Known calibration gap: browser evidence reconstruction does not currently preserve an
-    // explicit `dead_end` outcome, so the detector cannot emit journey_breakpoint here even
-    // though the controlled page has no available recovery action. Keep this as a measured
-    // false negative instead of relabeling the fixture to make the benchmark look perfect.
-    expect(byId.get('dead-end-abandonment')?.expected).toContain('journey_breakpoint');
-    expect(byId.get('dead-end-abandonment')?.predicted).not.toContain('journey_breakpoint');
 
     const metrics = calibrationMetrics(rows);
     expect(metrics.precision).toBe(1);
     expect(metrics.cleanFalsePositiveRate).toBe(0);
-    expect(metrics.fn).toBeGreaterThanOrEqual(1);
-    expect(metrics.recall).toBeLessThan(1);
-    expect(metrics.recall).toBeGreaterThanOrEqual(0.8);
+    expect(metrics.fn).toBe(0);
+    expect(metrics.recall).toBe(1);
   }, 120_000);
 });
