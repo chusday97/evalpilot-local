@@ -16,6 +16,7 @@ function plan(caseId: string, setupTaskIds: string[]): PrerequisitePlan {
     setupPlans: setupTaskIds.map((setupTaskId, index) => ({
       setupId: `setup-${caseId}-${index}`,
       targetCaseId: caseId,
+      targetTaskId: `target-${caseId}`,
       setupTaskId,
       reason: 'test dependency',
       setupCase: {} as never,
