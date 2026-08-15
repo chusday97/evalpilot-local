@@ -5,7 +5,7 @@ on:
   pull_request:
     paths:
       - '.github/workflows/aquaguide-blind-experience.yml'
-      - 'scripts/run-aquaguide-blind-experience-v2.ts'
+      - 'scripts/run-aquaguide-blind-experience-v3.ts'
       - 'src/ux-evaluation/**'
       - 'src/test-agent/**'
       - 'src/judge/**'
@@ -64,7 +64,7 @@ jobs:
 
       - name: Run blind experience contract
         run: |
-          npx tsx scripts/run-aquaguide-blind-experience-v2.ts \
+          npx tsx scripts/run-aquaguide-blind-experience-v3.ts \
             --url http://127.0.0.1:3000 \
             --output blind-experience-output \
             | tee blind-experience-run.log
@@ -80,6 +80,7 @@ jobs:
           if (!diagnostic.allBlind) failures.push('not all tasks emitted evaluated blind_experience_run artifacts');
           if (diagnostic.actorOracleLeakCount !== 0) failures.push(`Actor Oracle leaks=${diagnostic.actorOracleLeakCount}`);
           if (!diagnostic.judgeOracleVisible) failures.push('Judge did not receive the hidden Oracle contract');
+          if (!diagnostic.knownInformationFaithful) failures.push('Blind Actor fabricated information outside knownInformation');
           if (!diagnostic.falsePositiveFree) failures.push('scripted ideal path produced UX false positives');
           if (failures.length) {
             console.error(failures.join('\n'));
