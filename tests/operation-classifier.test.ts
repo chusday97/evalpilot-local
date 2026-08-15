@@ -51,9 +51,9 @@ describe('operation classifier action locality', () => {
     })).toBe('synchronous');
   });
 
-  it('does not treat a Create entry-point button as a persisted form submit', () => {
+  it('does not treat a Create entry-point button or create-flow result copy as a persisted form submit', () => {
     expect(classifyOperation({
-      decision: decision('打开鱼缸配置流程', '显示尺寸和水体设置'),
+      decision: decision('沿真实 onboarding 建立第一个鱼缸', '进入鱼缸创建流程'),
       observation: observation('Create or configure a tank'),
       evalCase,
     })).toBe('synchronous');
