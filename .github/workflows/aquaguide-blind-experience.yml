@@ -1,0 +1,100 @@
+name: AquaGuide Blind Experience
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/aquaguide-blind-experience.yml'
+      - 'scripts/run-aquaguide-blind-experience.ts'
+      - 'src/ux-evaluation/**'
+      - 'src/test-agent/**'
+      - 'src/judge/**'
+      - 'tests/blind-experience-evaluation.test.ts'
+
+permissions:
+  contents: read
+
+jobs:
+  blind-experience:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout EvalPilot
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned AquaGuide
+        uses: actions/checkout@v4
+        with:
+          repository: chusday97/aquaguide-tank-guide
+          ref: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+          path: real-products/aquaguide
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install EvalPilot
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Install AquaGuide
+        working-directory: real-products/aquaguide
+        run: npm ci
+
+      - name: Start AquaGuide web
+        working-directory: real-products/aquaguide
+        run: |
+          npm run dev:web > ../../aquaguide-blind-vite.log 2>&1 &
+          echo $! > ../../aquaguide-blind-vite.pid
+
+      - name: Wait for AquaGuide
+        run: |
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent http://127.0.0.1:3000/ >/dev/null; then
+              exit 0
+            fi
+            sleep 0.25
+          done
+          cat aquaguide-blind-vite.log || true
+          exit 1
+
+      - name: Run blind experience contract
+        run: |
+          npx tsx scripts/run-aquaguide-blind-experience.ts \
+            --url http://127.0.0.1:3000 \
+            --output blind-experience-output \
+            | tee blind-experience-run.log
+
+      - name: Verify blind experience diagnostic
+        run: |
+          node - <<'NODE'
+          const fs = require('node:fs');
+          const path = 'blind-experience-output/aquaguide-blind-experience.json';
+          const diagnostic = JSON.parse(fs.readFileSync(path, 'utf8'));
+          const failures = [];
+          if (!diagnostic.allPassed) failures.push('not all tasks passed the independent Judge');
+          if (!diagnostic.allBlind) failures.push('not all tasks emitted evaluated blind_experience_run artifacts');
+          if (diagnostic.actorOracleLeakCount !== 0) failures.push(`Actor Oracle leaks=${diagnostic.actorOracleLeakCount}`);
+          if (!diagnostic.judgeOracleVisible) failures.push('Judge did not receive the hidden Oracle contract');
+          if (!diagnostic.falsePositiveFree) failures.push('scripted ideal path produced UX false positives');
+          if (failures.length) {
+            console.error(failures.join('\n'));
+            process.exit(1);
+          }
+          console.log('Blind Experience contract passed.');
+          NODE
+
+      - name: Upload blind experience evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aquaguide-blind-experience
+          path: |
+            blind-experience-output/
+            aquaguide-blind-vite.log
+            blind-experience-run.log
+          if-no-files-found: warn
