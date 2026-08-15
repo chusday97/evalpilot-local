@@ -134,7 +134,9 @@ export async function waitForProgressAwareOutcome(input: ProgressAwareWaitInput)
         summary: '页面在产生可见进展后已经稳定，结束当前等待并重新观察。',
         finalSignals: currentSignals,
         taskState: observation,
-        taskWait: waitEvidence({ operationType: input.operationType, policy: input.policy, observations, extensionsUsed, finalReason: 'settled_after_progress' }),
+        // Keep the public evidence schema stable: not_needed means no further waiting is
+        // required, while the summary above records why this particular wait stopped.
+        taskWait: waitEvidence({ operationType: input.operationType, policy: input.policy, observations, extensionsUsed, finalReason: 'not_needed' }),
       };
     }
 
