@@ -13,6 +13,12 @@ function arg(name: string, fallback?: string): string {
   throw new Error(`Missing required argument: ${name}`);
 }
 
+function positiveIntegerArg(name: string, fallback: number): number {
+  const value = Number(arg(name, String(fallback)));
+  if (!Number.isInteger(value) || value <= 0) throw new Error(`${name} must be a positive integer`);
+  return value;
+}
+
 const projectRoot = resolve(arg('--project-root'));
 const targetUrl = arg('--url', 'http://127.0.0.1:3000');
 const outputDir = resolve(arg('--output', 'real-product-acceptance-output'));
@@ -22,7 +28,7 @@ const children: ChildProcess[] = [];
 const servers: Server[] = [];
 const providerCalls: Array<{ at: string; schemaName: string }> = [];
 const sessionSnapshots: Array<{ at: string; status: string; stage: string; message: string | null; runIds: string[] }> = [];
-const acceptanceDeadlineMs = 180_000;
+const acceptanceDeadlineMs = positiveIntegerArg('--deadline-ms', 180_000);
 
 await mkdir(outputDir, { recursive: true });
 await mkdir(dataDir, { recursive: true });
@@ -83,9 +89,11 @@ function productUnderstanding(input: any) {
 
   const createSize = '鱼缸页面显示已保存的 60x30x30cm 尺寸';
   const createWater = '鱼缸页面显示已保存的淡水水体';
-  const recordLivestock = '鱼缸主页面显示已保存的咖啡鼠活体记录';
+  const createPersisted = '保存后 Tank Settings modal 已关闭';
+  const recordLivestock = '鱼缸主页面显示已保存的 Corydoras aeneus 活体记录';
+  const recordPersisted = '记录页面显示 Recorded，证明生物已保存到当前鱼缸';
   const dailyRisk = '每日检查结果保持高风险并显示 Act now';
-  const dailyAction = '经常浮头结果显示立即增加供氧或水面扰动';
+  const dailyAction = '经常浮头结果显示增加打氧或水面扰动的紧急动作';
 
   return {
     capabilities: [
@@ -96,17 +104,19 @@ function productUnderstanding(input: any) {
     userTasks: [
       {
         taskId: 'task-create-usable-aquarium', capabilityId: 'cap-create-aquarium', name: '创建一个可用淡水鱼缸', goal: '创建一个可用淡水鱼缸',
-        preconditions: ['项目页面已打开'], successConditions: [createSize, createWater],
+        preconditions: ['项目页面已打开'], successConditions: [createSize, createWater, createPersisted],
         successSignals: [
           { signalId: 'signal-create-size', kind: 'text_visible', target: '60x30x30cm', description: createSize, ...taskEvidence },
           { signalId: 'signal-create-water', kind: 'text_visible', target: '淡水', description: createWater, ...taskEvidence },
+          { signalId: 'signal-create-persisted', kind: 'text_absent', target: 'Save Settings', description: createPersisted, ...taskEvidence },
         ], businessRuleIds: [], ...taskEvidence,
       },
       {
         taskId: 'task-record-existing-livestock', capabilityId: 'cap-record-livestock', name: '向已有鱼缸记录生物', goal: '记录已有生物到当前鱼缸',
-        preconditions: ['已有鱼缸'], successConditions: [recordLivestock],
+        preconditions: ['已有鱼缸'], successConditions: [recordLivestock, recordPersisted],
         successSignals: [
-          { signalId: 'signal-record-livestock', kind: 'text_visible', target: '咖啡鼠', description: recordLivestock, ...taskEvidence },
+          { signalId: 'signal-record-livestock', kind: 'text_visible', target: 'Corydoras aeneus x 1', description: recordLivestock, ...taskEvidence },
+          { signalId: 'signal-record-persisted', kind: 'text_visible', target: 'Recorded', description: recordPersisted, ...taskEvidence },
         ], businessRuleIds: [], ...taskEvidence,
       },
       {
@@ -114,15 +124,15 @@ function productUnderstanding(input: any) {
         preconditions: ['已有鱼缸', '已有生物记录'], successConditions: [dailyRisk, dailyAction],
         successSignals: [
           { signalId: 'signal-daily-high-risk', kind: 'text_visible', target: 'Act now', description: dailyRisk, ...taskEvidence },
-          { signalId: 'signal-daily-action', kind: 'text_visible', target: '立即增加供氧或水面扰动', description: dailyAction, ...taskEvidence },
+          { signalId: 'signal-daily-action', kind: 'text_visible', target: '增加打氧或水面扰动', description: dailyAction, ...taskEvidence },
         ], businessRuleIds: ['rule-daily-high-risk'], ...taskEvidence,
       },
     ],
     objectLifecycles: [{
       lifecycleId: 'lifecycle-aquarium', objectName: '鱼缸', states: ['empty', 'usable', 'stocked', 'checked'],
       transitions: [
-        { transitionId: 'transition-create', fromState: 'empty', toState: 'usable', trigger: '保存 60×30×30cm 尺寸和 Freshwater 水体', successSignalIds: ['signal-create-size', 'signal-create-water'] },
-        { transitionId: 'transition-stock', fromState: 'usable', toState: 'stocked', trigger: '记录已有咖啡鼠', successSignalIds: ['signal-record-livestock'] },
+        { transitionId: 'transition-create', fromState: 'empty', toState: 'usable', trigger: '保存 60×30×30cm 尺寸和 Freshwater 水体', successSignalIds: ['signal-create-size', 'signal-create-water', 'signal-create-persisted'] },
+        { transitionId: 'transition-stock', fromState: 'usable', toState: 'stocked', trigger: '记录已有咖啡鼠', successSignalIds: ['signal-record-livestock', 'signal-record-persisted'] },
         { transitionId: 'transition-check', fromState: 'stocked', toState: 'checked', trigger: '完成每日检查', successSignalIds: ['signal-daily-high-risk', 'signal-daily-action'] },
       ], ...taskEvidence,
     }],
@@ -140,8 +150,8 @@ function oracleBuilder(input: any) {
   const signals = input.task?.successSignals ?? [];
   return {
     expectedOutcome: signals.map((signal: any) => signal.description || signal.target),
-    mustObserve: signals.map((signal: any) => signal.target),
-    mustNotObserve: [],
+    mustObserve: signals.filter((signal: any) => signal.kind !== 'text_absent').map((signal: any) => signal.target),
+    mustNotObserve: signals.filter((signal: any) => signal.kind === 'text_absent').map((signal: any) => signal.target),
     businessRules: input.task?.businessRuleIds ?? [],
     semanticRubric: [`用户是否真实完成：${input.task?.goal ?? '目标任务'}`],
     deterministicAssertions: signals
@@ -192,7 +202,7 @@ function actorDecision(input: any) {
       if (expected.length > 0 && expected.every((item: string) => visible.includes(item))) {
         return { intentSummary: '已保存的建缸结果在主页面可见', action: 'finish', targetElementId: null, value: null, expectedResult: expected.join('；'), confidence: 1 };
       }
-      return safeButtonClick(input, (item) => labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', '鱼缸设置', 'Tank Settings']), '打开鱼缸设置', '显示尺寸和水体设置')
+      return safeButtonClick(input, (item) => labelIncludesAny(item, ['建立或完善鱼缸', 'Build or complete aquarium', 'Create or configure a tank', '鱼缸设置']), '打开鱼缸设置', '显示尺寸和水体设置')
         ?? { intentSummary: '没有找到鱼缸设置入口', action: 'abandon', targetElementId: null, value: null, expectedResult: '停止并保留证据', confidence: 1 };
     }
 
@@ -239,18 +249,12 @@ function actorDecision(input: any) {
   }
 
   if (goal.includes('每日') && goal.includes('检查')) {
-    const questionAnswers: Array<[string, string]> = [
-      ['鱼是否浮头或呼吸急促？', '经常浮头'],
-      ['水体是否发白、发绿或浑浊？', '清澈'],
-      ['水面是否有持续泡沫或油膜？', '没有泡沫或油膜'],
-      ['鱼缸是否出现异味？', '没有异味'],
-      ['鱼是否拒食、趴底、躲藏或追咬？', '正常游动和进食'],
-      ['最近 48 小时做过什么？', '没有特别操作'],
-      ['还有其他情况想补充吗？', '跳过'],
-    ];
-    for (const [question, answer] of questionAnswers) {
-      if (!visible.includes(question)) continue;
-      const choice = safeButtonClick(input, (item) => String(item.label ?? '') === answer, `回答每日检查：${answer}`, '进入下一项检查问题');
+    const dailyAnswers = ['经常浮头', '清澈', '没有泡沫或油膜', '没有异味', '正常游动和进食', '没有特别操作'];
+    const progressMatch = visible.match(/(?:^|\s)([0-6])\s*\/\s*6(?:\s|$)/);
+    const answeredCount = progressMatch ? Number(progressMatch[1]) : 0;
+    if (answeredCount < dailyAnswers.length) {
+      const answer = dailyAnswers[answeredCount]!;
+      const choice = safeButtonClick(input, (item) => String(item.label ?? '') === answer, `回答每日检查第 ${answeredCount + 1} 项：${answer}`, `每日检查进度变为 ${answeredCount + 1} / 6`);
       if (choice) return choice;
     }
     const generate = safeButtonClick(input, (item) => labelIncludesAny(item, ['生成检查结果', 'Generate Results']), '生成每日检查风险结果', '页面显示高风险等级和立即动作');
