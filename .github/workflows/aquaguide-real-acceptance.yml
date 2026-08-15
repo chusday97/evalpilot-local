@@ -78,7 +78,7 @@ jobs:
           replacements = [
               (
                   "  const createWater = '鱼缸页面显示已保存的淡水水体';\n  const recordLivestock = '鱼缸主页面显示已保存的咖啡鼠活体记录';",
-                  "  const createWater = '鱼缸页面显示已保存的淡水水体';\n  const createPersisted = '鱼缸主页面不再显示 Water type unknown，证明设置已经保存';\n  const recordLivestock = '鱼缸主页面显示已保存的 Corydoras aeneus 活体记录';",
+                  "  const createWater = '鱼缸页面显示已保存的淡水水体';\n  const createPersisted = '保存后 Tank Settings modal 已关闭';\n  const recordLivestock = '鱼缸主页面显示已保存的 Corydoras aeneus 活体记录';\n  const recordPersisted = '记录页面显示 Recorded，证明生物已保存到当前鱼缸';",
               ),
               (
                   "preconditions: ['项目页面已打开'], successConditions: [createSize, createWater],",
@@ -86,15 +86,27 @@ jobs:
               ),
               (
                   "          { signalId: 'signal-create-water', kind: 'text_visible', target: '淡水', description: createWater, ...taskEvidence },\n",
-                  "          { signalId: 'signal-create-water', kind: 'text_visible', target: '淡水', description: createWater, ...taskEvidence },\n          { signalId: 'signal-create-persisted', kind: 'text_absent', target: 'Water type unknown', description: createPersisted, ...taskEvidence },\n",
+                  "          { signalId: 'signal-create-water', kind: 'text_visible', target: '淡水', description: createWater, ...taskEvidence },\n          { signalId: 'signal-create-persisted', kind: 'text_absent', target: 'Save Settings', description: createPersisted, ...taskEvidence },\n",
               ),
               (
-                  "{ signalId: 'signal-record-livestock', kind: 'text_visible', target: '咖啡鼠', description: recordLivestock, ...taskEvidence },",
-                  "{ signalId: 'signal-record-livestock', kind: 'text_visible', target: 'Corydoras aeneus x 1', description: recordLivestock, ...taskEvidence },",
+                  "preconditions: ['已有鱼缸'], successConditions: [recordLivestock],",
+                  "preconditions: ['已有鱼缸'], successConditions: [recordLivestock, recordPersisted],",
+              ),
+              (
+                  "          { signalId: 'signal-record-livestock', kind: 'text_visible', target: '咖啡鼠', description: recordLivestock, ...taskEvidence },\n",
+                  "          { signalId: 'signal-record-livestock', kind: 'text_visible', target: 'Corydoras aeneus x 1', description: recordLivestock, ...taskEvidence },\n          { signalId: 'signal-record-persisted', kind: 'text_visible', target: 'Recorded', description: recordPersisted, ...taskEvidence },\n",
               ),
               (
                   "successSignalIds: ['signal-create-size', 'signal-create-water']",
                   "successSignalIds: ['signal-create-size', 'signal-create-water', 'signal-create-persisted']",
+              ),
+              (
+                  "successSignalIds: ['signal-record-livestock']",
+                  "successSignalIds: ['signal-record-livestock', 'signal-record-persisted']",
+              ),
+              (
+                  "    mustObserve: signals.map((signal: any) => signal.target),\n    mustNotObserve: [],",
+                  "    mustObserve: signals.filter((signal: any) => signal.kind !== 'text_absent').map((signal: any) => signal.target),\n    mustNotObserve: signals.filter((signal: any) => signal.kind === 'text_absent').map((signal: any) => signal.target),",
               ),
           ]
           for old, new in replacements:
