@@ -35,14 +35,13 @@ export function classifyOperation(input: { decision: AgentDecision; observation:
   if (decision.action === 'click'
     && includesAny(actionContext, ['submit', 'save', 'create', 'update', 'confirm', 'send', 'sign in', 'log in', '提交', '保存', '创建', '更新', '确认', '发送', '登录'])) return 'form_submit';
 
-  const synchronousUiControl = decision.action === 'click'
-    && target?.tagName === 'button'
-    && includesAny(actionContext, [
-      'settings', 'parameters', 'tab', 'option', 'toggle', 'expand', 'collapse', 'panel', 'menu',
-      '设置', '参数', '选项', '选择', '切换', '展开', '收起', '面板', '菜单',
-    ]);
-  if (synchronousUiControl) return 'synchronous';
+  // A plain button is a synchronous UI control unless the action semantics above prove that
+  // it starts navigation, upload/processing, generation, or a persisted form submission.
+  // Treating every otherwise-unknown button as async made simple radio/choice interactions
+  // burn the 8s unknown_async soft timeout even when the DOM updated immediately.
+  if (decision.action === 'click' && target?.tagName === 'button') return 'synchronous';
 
-  if (decision.action === 'wait' || decision.action === 'retry' || decision.action === 'click') return 'unknown_async';
+  if (decision.action === 'wait' || decision.action === 'retry') return 'unknown_async';
+  if (decision.action === 'click') return 'unknown_async';
   return 'synchronous';
 }
