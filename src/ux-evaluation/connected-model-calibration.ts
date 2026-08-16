@@ -2,8 +2,9 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
+import type { ZodType } from 'zod';
 import { AiProviderError, type AiProvider } from '../ai/provider.js';
-import type { AiTestAgentRun, EvalCase, EvalCaseResult, EvidencePacket, UxIssueType } from '../../types.js';
+import type { AiStructuredRequest, AiTestAgentRun, EvalCase, EvalCaseResult, EvidencePacket, UxIssueType } from '../../types.js';
 import { runAiTestAgent } from '../test-agent/agent-runner.js';
 import { analyzeBlindExperience } from './blind-experience-analyzer.js';
 import { buildBlindActorCase } from './blind-experience-service.js';
@@ -168,7 +169,7 @@ function trackProviderFailures(provider: AiProvider): {
   let failure: ConnectedModelProviderFailureCode | null = null;
   const trackedProvider: AiProvider = {
     info: provider.info,
-    async generateStructured<T>(request, schema) {
+    async generateStructured<T>(request: AiStructuredRequest, schema: ZodType<T>): Promise<T> {
       try {
         return await provider.generateStructured(request, schema);
       } catch (providerError) {
