@@ -46,6 +46,7 @@ export interface BlindExperienceRunResult {
   result: EvalCaseResult;
   experience: BlindExperienceAnalysis;
   experiencePath: string;
+  runtimeFailureSource: 'evaluator' | null;
 }
 
 async function runtimeFailureResult(input: {
@@ -129,6 +130,7 @@ export async function runBlindExperienceCase(input: {
     now: input.now,
   });
   const packet = evidencePacketSchema.parse(JSON.parse(await readFile(agentRun.evidencePacketPath, 'utf8')));
+  let runtimeFailureSource: BlindExperienceRunResult['runtimeFailureSource'] = agentRun.failureSource;
 
   // A runner-level evaluator interruption means the target journey did not finish under a
   // trustworthy evaluator runtime. Preserve deterministic evidence, but do not let missing
@@ -155,6 +157,7 @@ export async function runBlindExperienceCase(input: {
         createdAt: agentRun.completedAt,
       });
     } catch (judgeError) {
+      runtimeFailureSource = 'evaluator';
       rawJudgedResult = await runtimeFailureResult({
         outputDir: input.outputDir,
         evalCase: input.evalCase,
@@ -185,6 +188,7 @@ export async function runBlindExperienceCase(input: {
       },
     })
     : rawJudgedResult;
+  if (agentRun.status === 'blocked_by_safety') runtimeFailureSource = 'evaluator';
 
   // A normal Blind Actor abandonment is behavioral evidence, not automatically an evaluator
   // failure. Only runner/Judge runtime interruptions are forced inconclusive above. This is
@@ -198,5 +202,5 @@ export async function runBlindExperienceCase(input: {
   });
   const experiencePath = resolve(input.outputDir, 'runs', agentRun.runId, 'blind-experience-analysis.json');
   await writeJsonAtomic(experiencePath, experience);
-  return { agentRun, result, experience, experiencePath };
+  return { agentRun, result, experience, experiencePath, runtimeFailureSource };
 }
