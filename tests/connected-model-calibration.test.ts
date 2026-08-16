@@ -5,6 +5,7 @@ import { connectedModelCalibrationProbes, summarizeConnectedModelCalibration } f
 function row(overrides: Partial<ConnectedModelCalibrationRow> & Pick<ConnectedModelCalibrationRow, 'probeId' | 'expectedTypes' | 'predictedTypes'>): ConnectedModelCalibrationRow {
   return {
     purpose: overrides.probeId,
+    observedVerdict: 'inconclusive',
     actorActions: [],
     agentStatus: 'completed',
     failureSource: null,
@@ -27,9 +28,9 @@ describe('connected-model behavior calibration', () => {
 
   it('separates preserved signals from clean actor-induced drift', () => {
     const metrics = summarizeConnectedModelCalibration([
-      row({ probeId: 'clean', expectedTypes: [], predictedTypes: ['path_efficiency_issue'] }),
-      row({ probeId: 'feedback', expectedTypes: ['interaction_feedback_issue'], predictedTypes: ['interaction_feedback_issue'] }),
-      row({ probeId: 'dead-end', expectedTypes: ['journey_breakpoint', 'abandonment_risk'], predictedTypes: ['journey_breakpoint'] }),
+      row({ probeId: 'clean', expectedTypes: [], predictedTypes: ['path_efficiency_issue'], observedVerdict: 'inconclusive' }),
+      row({ probeId: 'feedback', expectedTypes: ['interaction_feedback_issue'], predictedTypes: ['interaction_feedback_issue'], observedVerdict: 'pass' }),
+      row({ probeId: 'dead-end', expectedTypes: ['journey_breakpoint', 'abandonment_risk'], predictedTypes: ['journey_breakpoint'], observedVerdict: 'inconclusive' }),
     ]);
 
     expect(metrics.precisionAgainstProbeGroundTruth).toBeCloseTo(2 / 3);
@@ -42,8 +43,8 @@ describe('connected-model behavior calibration', () => {
 
   it('counts evaluator/provider failures independently from UX detector metrics', () => {
     const metrics = summarizeConnectedModelCalibration([
-      row({ probeId: 'clean', expectedTypes: [], predictedTypes: [], agentStatus: 'inconclusive', failureSource: 'evaluator' }),
-      row({ probeId: 'dead-end', expectedTypes: ['journey_breakpoint'], predictedTypes: ['journey_breakpoint'] }),
+      row({ probeId: 'clean', expectedTypes: [], predictedTypes: [], observedVerdict: 'inconclusive', agentStatus: 'inconclusive', failureSource: 'evaluator' }),
+      row({ probeId: 'dead-end', expectedTypes: ['journey_breakpoint'], predictedTypes: ['journey_breakpoint'], observedVerdict: 'inconclusive' }),
     ]);
 
     expect(metrics.providerFailureCount).toBe(1);
