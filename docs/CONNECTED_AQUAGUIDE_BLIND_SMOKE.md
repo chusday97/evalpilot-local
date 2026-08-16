@@ -81,3 +81,31 @@ The connected benchmark now fixes:
 Both preflight and final diagnostic expose `benchmarkLocale` and `applicationLocale`. The benchmark also seeds AquaGuide's `aquaguide_locale` preference before application code runs, so the Oracle does not silently depend on the GitHub runner's host locale.
 
 A zero-call regression must pass before another paid run. Smoke #4 is only justified after that gate and should answer one question: whether the corrected locale-stable Oracle removes the Smoke #3 false Product Failure under the same pinned product/provider conditions.
+
+## Smoke #4: locale contract held, provider timeout blocked validation
+
+Smoke #4 ran on EvalPilot `b02ae26acb5d556078454fce1469a2b8ad2f69ac` against the same pinned AquaGuide commit. The zero-call preflight and real diagnostic both confirmed the repaired locale contract:
+
+- `benchmarkLocale=en-US`
+- `applicationLocale=en`
+- create aquarium: `pass`
+- record livestock: `inconclusive` with `runtimeFailureSource=provider`
+- Daily Check: `blocked_prerequisite`
+- provider failures: `1`
+- evaluator failures: `0`
+- unknown failures: `0`
+- Actor Oracle leaks: `0`
+
+The livestock journey ended on `DeepSeek 请求超时，请稍后重试。` before Daily Check could execute. This run therefore does **not** disprove the Smoke #3 Oracle-locale repair; it is simply not an eligible real-product validation of Daily Check.
+
+This timeout is no longer a one-off observation. Provider timeouts have interrupted multiple real connected AquaGuide smokes. Inspection of `OpenAiCompatibleProvider` found a smaller infrastructure defect: the provider exposes `maxRetries` (default `1`), but an `AbortError` caused by the request timeout was thrown immediately instead of consuming the configured retry budget. Other transient transport errors could retry, while timeout aborts could not.
+
+Smallest responsible-layer repair:
+
+```text
+request timeout / AbortError
+  → retry while retry budget remains
+  → preserve the same final REQUEST_FAILED timeout error after exhaustion
+```
+
+The repair does not change HTTP-error handling, prompts, model selection, AquaGuide, Judge policy, or benchmark step limits. A dedicated zero-call provider regression must prove both recovery-on-second-attempt and final timeout-after-budget-exhaustion before another paid smoke is justified.
