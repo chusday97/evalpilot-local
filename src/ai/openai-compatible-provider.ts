@@ -80,7 +80,10 @@ export class OpenAiCompatibleProvider implements AiProvider {
         invalidOutput = true;
       } catch (error) {
         if (error instanceof AiProviderError) throw error;
-        if (error instanceof Error && error.name === 'AbortError') throw new AiProviderError(`${this.options.displayName} 请求超时，请稍后重试。`, 'REQUEST_FAILED');
+        if (error instanceof Error && error.name === 'AbortError') {
+          if (attempt >= this.maxRetries) throw new AiProviderError(`${this.options.displayName} 请求超时，请稍后重试。`, 'REQUEST_FAILED');
+          continue;
+        }
         if (attempt >= this.maxRetries) throw new AiProviderError(`${this.options.displayName} 暂时无法完成请求，请检查网络和模型设置。`, 'REQUEST_FAILED');
       } finally {
         clearTimeout(timeout);
