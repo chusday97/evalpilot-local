@@ -2,8 +2,9 @@ import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { chromium } from 'playwright';
-import type { AiProvider } from '../ai/provider.js';
-import type { AiTestAgentRun, EvalCase, EvalCaseResult, EvidencePacket, UxIssueType } from '../../types.js';
+import type { ZodType } from 'zod';
+import { AiProviderError, type AiProvider } from '../ai/provider.js';
+import type { AiStructuredRequest, AiTestAgentRun, EvalCase, EvalCaseResult, EvidencePacket, UxIssueType } from '../../types.js';
 import { runAiTestAgent } from '../test-agent/agent-runner.js';
 import { analyzeBlindExperience } from './blind-experience-analyzer.js';
 import { buildBlindActorCase } from './blind-experience-service.js';
@@ -26,6 +27,12 @@ export type { ConnectedModelCalibrationProbe, ConnectedModelProbeSuiteIdentity }
 
 const calibratedTypes = new Set<UxIssueType>(connectedModelCalibratedTypes);
 
+export type ConnectedModelProviderFailureCode =
+  | 'INVALID_OUTPUT'
+  | 'REQUEST_FAILED'
+  | 'PRIVACY_BLOCKED'
+  | 'UNKNOWN_PROVIDER_ERROR';
+
 export interface ConnectedModelCalibrationRow {
   probeId: string;
   purpose: string;
@@ -36,6 +43,7 @@ export interface ConnectedModelCalibrationRow {
   actorActions: string[];
   agentStatus: AiTestAgentRun['status'];
   failureSource: AiTestAgentRun['failureSource'];
+  providerFailure: ConnectedModelProviderFailureCode | null;
   runId: string;
 }
 
@@ -47,6 +55,7 @@ export interface ConnectedModelCalibrationMetrics {
   extraSignalCount: number;
   missingSignalCount: number;
   providerFailureCount: number;
+  evaluatorFailureCount: number;
   eligibleProbeExecutionCount: number;
   tp: number;
   fp: number;
@@ -153,6 +162,25 @@ function calibrated(values: UxIssueType[]): UxIssueType[] {
   return [...new Set(values.filter((value) => calibratedTypes.has(value)))];
 }
 
+function trackProviderFailures(provider: AiProvider): {
+  provider: AiProvider;
+  failure: () => ConnectedModelProviderFailureCode | null;
+} {
+  let failure: ConnectedModelProviderFailureCode | null = null;
+  const trackedProvider: AiProvider = {
+    info: provider.info,
+    async generateStructured<T>(request: AiStructuredRequest, schema: ZodType<T>): Promise<T> {
+      try {
+        return await provider.generateStructured(request, schema);
+      } catch (providerError) {
+        failure = providerError instanceof AiProviderError ? providerError.code : 'UNKNOWN_PROVIDER_ERROR';
+        throw providerError;
+      }
+    },
+  };
+  return { provider: trackedProvider, failure: () => failure };
+}
+
 export function summarizeConnectedModelCalibration(rows: ConnectedModelCalibrationRow[]): ConnectedModelCalibrationMetrics {
   let tp = 0;
   let fp = 0;
@@ -160,12 +188,13 @@ export function summarizeConnectedModelCalibration(rows: ConnectedModelCalibrati
   let exact = 0;
   let clean = 0;
   let cleanWithSignal = 0;
-  const eligibleRows = rows.filter((row) => row.failureSource !== 'evaluator');
-  const providerFailureCount = rows.length - eligibleRows.length;
+  const providerFailureCount = rows.filter((row) => row.providerFailure !== null).length;
+  const evaluatorFailureCount = rows.filter((row) => row.providerFailure === null && row.failureSource === 'evaluator').length;
+  const eligibleRows = rows.filter((row) => row.providerFailure === null && row.failureSource !== 'evaluator');
 
-  // Provider/evaluator failures describe runtime availability, not UX-detector behavior.
-  // Excluding them from the signal denominators prevents a timeout or invalid model response
-  // from masquerading as a detector false negative or clean-probe success.
+  // Provider failures and non-provider evaluator failures are separate availability signals.
+  // Neither belongs in UX-detector behavior denominators: doing so would turn remote outages,
+  // invalid model output, browser/runtime crashes, or evaluator stalls into false UX misses.
   for (const row of eligibleRows) {
     const expected = new Set(calibrated(row.expectedTypes));
     const predicted = new Set(calibrated(row.predictedTypes));
@@ -186,6 +215,7 @@ export function summarizeConnectedModelCalibration(rows: ConnectedModelCalibrati
     extraSignalCount: fp,
     missingSignalCount: fn,
     providerFailureCount,
+    evaluatorFailureCount,
     eligibleProbeExecutionCount: eligibleRows.length,
     tp,
     fp,
@@ -215,7 +245,8 @@ export async function runConnectedModelCalibration(input: {
         const page = await context.newPage();
         await page.setContent(`<!doctype html><html><head><title>${probe.probeId}</title></head><body>${probe.html}</body></html>`);
         const { judgeCase: item, actorCase } = buildConnectedModelProbeCases(probe, generatedAt);
-        const agentRun = await runAiTestAgent(page, actorCase, input.provider, {
+        const providerTracker = trackProviderFailures(input.provider);
+        const agentRun = await runAiTestAgent(page, actorCase, providerTracker.provider, {
           outputDir: join(outputDir, probe.probeId),
           startingUrl: page.url(),
           maxSteps: executionConfig.maxSteps,
@@ -244,6 +275,7 @@ export async function runConnectedModelCalibration(input: {
           actorActions: agentRun.decisions.map((decision) => decision.action),
           agentStatus: agentRun.status,
           failureSource: agentRun.failureSource,
+          providerFailure: providerTracker.failure(),
           runId: agentRun.runId,
         });
       } finally {
@@ -272,7 +304,7 @@ export async function runConnectedModelCalibration(input: {
       'Actor execution uses the production Blind knowledge boundary: the real probe Oracle is removed before the model and runner heuristics see the Actor case.',
       'Expected friction classes come from independent probe design; the model never receives those labels.',
       'The run verdict is independently derived from the actual final page state (Done visible or not), not from the fixture expectation.',
-      'Provider/evaluator failures are reported separately and excluded from UX signal denominators.',
+      'Remote provider failures and non-provider evaluator failures are reported separately and both are excluded from UX signal denominators.',
       'Probe-suite fingerprint covers probe content, Actor contract, calibrated detector classes, and the fixed probe wait policy.',
       'Execution config records maxSteps and screenshot policy separately so runs with different model inputs/budgets are not pooled as variance.',
     ],
