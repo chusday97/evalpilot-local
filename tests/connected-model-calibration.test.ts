@@ -7,6 +7,7 @@ import {
   connectedModelProbeSuiteIdentity,
   summarizeConnectedModelCalibration,
 } from '../src/ux-evaluation/connected-model-calibration.js';
+import { connectedModelProbeRuntimeContract } from '../src/ux-evaluation/connected-model-probe-suite.js';
 
 function row(overrides: Partial<ConnectedModelCalibrationRow> & Pick<ConnectedModelCalibrationRow, 'probeId' | 'expectedTypes' | 'predictedTypes'>): ConnectedModelCalibrationRow {
   return {
@@ -31,7 +32,7 @@ describe('connected-model behavior calibration', () => {
     expect(connectedModelCalibrationProbes[0]?.expectedTypes).toEqual([]);
     expect(connectedModelCalibrationProbes[1]?.expectedTypes).toEqual(['interaction_feedback_issue']);
     expect(connectedModelCalibrationProbes[2]?.expectedTypes).toEqual(['journey_breakpoint', 'abandonment_risk']);
-    expect(connectedModelProbeSuiteIdentity).toEqual(expect.objectContaining({ version: 1 }));
+    expect(connectedModelProbeSuiteIdentity).toEqual(expect.objectContaining({ version: 2 }));
     expect(connectedModelProbeSuiteIdentity.fingerprint).toMatch(/^[a-f0-9]{64}$/);
     expect(connectedModelProbeSuiteIdentity.probeIds).toEqual(connectedModelCalibrationProbes.map((probe) => probe.probeId));
   });
@@ -41,6 +42,15 @@ describe('connected-model behavior calibration', () => {
       ? { ...probe, html: `${probe.html}<p>changed fixture</p>` }
       : { ...probe });
     expect(buildConnectedModelProbeSuiteIdentity(changed).fingerprint).not.toBe(connectedModelProbeSuiteIdentity.fingerprint);
+  });
+
+  it('changes the suite fingerprint when the Blind runtime semantics change', () => {
+    const changedRuntime = {
+      ...connectedModelProbeRuntimeContract,
+      actorMode: 'task' as never,
+    };
+    expect(buildConnectedModelProbeSuiteIdentity(connectedModelCalibrationProbes, changedRuntime).fingerprint)
+      .not.toBe(connectedModelProbeSuiteIdentity.fingerprint);
   });
 
   it('keeps the real probe Oracle for independent evaluation but removes it from the connected-model Actor case', () => {
