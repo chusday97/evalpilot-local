@@ -21,6 +21,8 @@ export function classifyOperation(input: { decision: AgentDecision; observation:
     decision.intentSummary,
     decision.expectedResult,
   ].filter((value): value is string => Boolean(value)).join(' ').toLocaleLowerCase();
+  const intentContext = decision.intentSummary.toLocaleLowerCase();
+  const targetContext = `${target?.label ?? ''} ${target?.text ?? ''}`.trim().toLocaleLowerCase();
 
   if (decision.action === 'back'
     || target?.tagName === 'a'
@@ -32,17 +34,32 @@ export function classifyOperation(input: { decision: AgentDecision; observation:
 
   if (includesAny(actionContext, ['generate', 'generating', 'stream', 'streaming', 'ai ', 'assistant', 'chat', 'summarize', 'transcribe', '生成', '流式', '智能', '助手', '对话', '总结', '转写'])) return 'ai_generation';
 
-  if (decision.action === 'click'
-    && includesAny(actionContext, ['submit', 'save', 'create', 'update', 'confirm', 'send', 'sign in', 'log in', '提交', '保存', '创建', '更新', '确认', '发送', '登录'])) return 'form_submit';
+  // Creation/recording words are often used on entry-point buttons or in expected-result copy
+  // (for example "enter the create flow") that merely opens a local form. Treat them as a
+  // submit only when the Agent's own intent says it is committing state. Strong submit labels
+  // such as Save/Submit/Confirm remain sufficient on their own.
+  const intentCommits = includesAny(intentContext, ['submit', 'save', 'create', 'update', 'confirm', 'send', 'sign in', 'log in', '提交', '保存', '创建', '更新', '确认', '发送', '登录']);
+  const targetStronglyCommits = includesAny(targetContext, ['save', 'submit', 'confirm', 'send', '保存', '提交', '确认', '发送']);
+  if (decision.action === 'click' && (intentCommits || targetStronglyCommits)) return 'form_submit';
 
-  const synchronousUiControl = decision.action === 'click'
-    && target?.tagName === 'button'
-    && includesAny(actionContext, [
-      'settings', 'parameters', 'tab', 'option', 'toggle', 'expand', 'collapse', 'panel', 'menu',
-      '设置', '参数', '选项', '选择', '切换', '展开', '收起', '面板', '菜单',
-    ]);
-  if (synchronousUiControl) return 'synchronous';
+  // Explicit "run/start/refresh/sync" controls may start work whose completion is not encoded
+  // in the button itself. Keep those on the bounded unknown-async policy even though they are
+  // ordinary buttons. This preserves safe waiting for generic jobs while letting pure choice
+  // buttons (radio-like answers, tabs, options) take the synchronous fast path.
+  const explicitAsyncControl = decision.action === 'click' && includesAny(`${intentContext} ${targetContext}`, [
+    'run', 'start', 'execute', 'refresh', 'reload', 'sync', 'fetch', 'load more',
+    '运行', '执行', '启动', '刷新', '重新加载', '同步', '获取更多', '加载更多',
+  ]);
+  if (explicitAsyncControl) return 'unknown_async';
 
-  if (decision.action === 'wait' || decision.action === 'retry' || decision.action === 'click') return 'unknown_async';
+  // A plain button is a synchronous UI control unless the action semantics above prove that
+  // it starts navigation, upload/processing, generation, a persisted form submission, or a
+  // generic async job. Treating every otherwise-unknown button as async made simple
+  // radio/choice interactions burn the 8s unknown_async soft timeout even when the DOM updated
+  // immediately.
+  if (decision.action === 'click' && target?.tagName === 'button') return 'synchronous';
+
+  if (decision.action === 'wait' || decision.action === 'retry') return 'unknown_async';
+  if (decision.action === 'click') return 'unknown_async';
   return 'synchronous';
 }

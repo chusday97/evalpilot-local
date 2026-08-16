@@ -53,6 +53,71 @@ function chainAwareSetupPlan(caseId: string, setupPlans: AutoSetupPlan[]): Chain
   });
 }
 
+export function orderCasesBySetupDependencies(cases: EvalCase[], plans: PrerequisitePlan[]): EvalCase[] {
+  if (cases.length <= 1) return [...cases];
+
+  const originalIndex = new Map(cases.map((evalCase, index) => [evalCase.caseId, index]));
+  const caseByTaskId = new Map<string, EvalCase>();
+  for (const evalCase of cases) {
+    // Only baseline cases are allowed to act as reusable setup producers. Regression and
+    // challenge cases may intentionally exercise failure paths and must never be promoted
+    // ahead of another case merely because they share the same taskId.
+    if (evalCase.taskId && evalCase.setType === 'baseline' && !caseByTaskId.has(evalCase.taskId)) {
+      caseByTaskId.set(evalCase.taskId, evalCase);
+    }
+  }
+  const planByCaseId = new Map(plans.map((plan) => [plan.caseId, plan]));
+  const dependents = new Map<string, Set<string>>();
+  const indegree = new Map(cases.map((evalCase) => [evalCase.caseId, 0]));
+
+  for (const evalCase of cases) {
+    const plan = planByCaseId.get(evalCase.caseId);
+    if (!plan) continue;
+    const dependencyCaseIds = new Set<string>();
+    for (const setup of plan.setupPlans) {
+      const dependency = caseByTaskId.get(setup.setupTaskId);
+      if (!dependency || dependency.caseId === evalCase.caseId) continue;
+      dependencyCaseIds.add(dependency.caseId);
+    }
+    for (const dependencyCaseId of dependencyCaseIds) {
+      const children = dependents.get(dependencyCaseId) ?? new Set<string>();
+      children.add(evalCase.caseId);
+      dependents.set(dependencyCaseId, children);
+      indegree.set(evalCase.caseId, (indegree.get(evalCase.caseId) ?? 0) + 1);
+    }
+  }
+
+  const byOriginalOrder = (left: string, right: string) => (originalIndex.get(left) ?? Number.MAX_SAFE_INTEGER) - (originalIndex.get(right) ?? Number.MAX_SAFE_INTEGER);
+  const ready = cases.filter((evalCase) => (indegree.get(evalCase.caseId) ?? 0) === 0).map((evalCase) => evalCase.caseId).sort(byOriginalOrder);
+  const emitted = new Set<string>();
+  const orderedIds: string[] = [];
+
+  while (ready.length) {
+    const caseId = ready.shift()!;
+    if (emitted.has(caseId)) continue;
+    emitted.add(caseId);
+    orderedIds.push(caseId);
+    const children = [...(dependents.get(caseId) ?? [])].sort(byOriginalOrder);
+    for (const child of children) {
+      const remaining = Math.max(0, (indegree.get(child) ?? 0) - 1);
+      indegree.set(child, remaining);
+      if (remaining === 0) {
+        ready.push(child);
+        ready.sort(byOriginalOrder);
+      }
+    }
+  }
+
+  // A cycle should already have been rejected by the Setup resolver. Preserve the original
+  // relative order for any unresolved remainder rather than inventing a dependency order.
+  for (const evalCase of cases) {
+    if (!emitted.has(evalCase.caseId)) orderedIds.push(evalCase.caseId);
+  }
+
+  const caseById = new Map(cases.map((evalCase) => [evalCase.caseId, evalCase]));
+  return orderedIds.map((caseId) => caseById.get(caseId)!).filter(Boolean);
+}
+
 export async function planScenarioPrerequisites(input: {
   scenario: ExecutableScenario;
   evalCase: EvalCase;
@@ -154,7 +219,7 @@ export async function planScenarioPrerequisiteSet(input: {
   generatedAt?: string;
 }): Promise<PrerequisitePlan[]> {
   const caseById = new Map(input.cases.map((item) => [item.caseId, item]));
-  return Promise.all(input.scenarios.map(async (scenario) => {
+  const plans = await Promise.all(input.scenarios.map(async (scenario) => {
     const evalCase = caseById.get(scenario.caseId);
     if (!evalCase) return {
       caseId: scenario.caseId,
@@ -169,6 +234,13 @@ export async function planScenarioPrerequisiteSet(input: {
     };
     return planScenarioPrerequisites({ scenario, evalCase, productModel: input.productModel, targetUrl: input.targetUrl, projectRoot: input.projectRoot, authStorageStatePath: input.authStorageStatePath, generatedAt: input.generatedAt });
   }));
+
+  // The orchestrator receives this same mutable selection array. Normalize it here after the
+  // complete Setup graph is known so prerequisite target cases run first and their verified
+  // checkpoints can satisfy downstream cases instead of rerunning the same Setup work.
+  const orderedCases = orderCasesBySetupDependencies(input.cases, plans);
+  input.cases.splice(0, input.cases.length, ...orderedCases);
+  return plans;
 }
 
 export function summarizePrerequisitePlan(plan: PrerequisitePlan): PrerequisitePlanSummary {

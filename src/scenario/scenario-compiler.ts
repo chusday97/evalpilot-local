@@ -57,8 +57,9 @@ const trivialPreconditionPatterns = [
 const authPatterns = [/\b(?:logged?\s*in|signed?\s*in|authenticated|auth session|test account)\b/i, /(?:已登录|登录态|测试账号|认证状态|用户会话)/];
 const testDataPatterns = [
   /\b(?:test file|fixture file|uploaded file|sample file|seed data|test data|csv file|json file|text file|txt file)\b/i,
+  /\b(?:test|sample|fixture|uploaded)\s+(?:csv|json|txt|text|pdf|xlsx?|zip|image|photo|picture|video|audio|docx?|document)\s+file\b/i,
   /(?:测试文件|样例文件|待上传文件|测试数据|样例数据|种子数据)/,
-  /(?:测试|样例|待上传).*(?:CSV|JSON|TXT|文件|数据)|(?:CSV|JSON|TXT).*(?:文件|数据|已准备)/i,
+  /(?:测试|样例|待上传).*(?:CSV|JSON|TXT|PDF|XLSX?|XLS|ZIP|图片|照片|视频|音频|Word|文档|文件|数据)|(?:CSV|JSON|TXT|PDF|XLSX?|XLS|ZIP).*(?:文件|数据|已准备)/i,
 ];
 const humanInputPatterns = [/\b(?:human confirmation|business decision|business rule|real expectation|manual approval)\b/i, /(?:人工确认|业务判断|业务规则|真实期望|人工审批|需要确认)/];
 const setupPatterns = [

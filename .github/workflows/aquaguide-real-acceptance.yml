@@ -1,0 +1,150 @@
+name: AquaGuide Real Acceptance
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/aquaguide-real-acceptance.yml'
+      - 'scripts/run-aquaguide-real-acceptance-v2.ts'
+      - 'src/acceptance/**'
+      - 'src/scenario/**'
+      - 'src/test-agent/**'
+      - 'src/judge/**'
+      - 'src/product-model/**'
+      - 'acceptance/real-products/aquaguide.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout EvalPilot
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned AquaGuide
+        uses: actions/checkout@v4
+        with:
+          repository: chusday97/aquaguide-tank-guide
+          ref: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+          path: real-products/aquaguide
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install EvalPilot
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Install AquaGuide
+        working-directory: real-products/aquaguide
+        run: npm ci
+
+      - name: Start AquaGuide web
+        working-directory: real-products/aquaguide
+        run: |
+          npm run dev:web > ../../aquaguide-vite.log 2>&1 &
+          echo $! > ../../aquaguide-vite.pid
+
+      - name: Wait for AquaGuide
+        run: |
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent http://127.0.0.1:3000/ >/dev/null; then
+              exit 0
+            fi
+            sleep 0.25
+          done
+          cat aquaguide-vite.log || true
+          exit 1
+
+      - name: Run EvalPilot real acceptance
+        run: |
+          set -euo pipefail
+          rm -f acceptance-run.log
+          setsid npx tsx scripts/run-aquaguide-real-acceptance-v2.ts \
+            --project-root real-products/aquaguide \
+            --url http://127.0.0.1:3000 \
+            --output real-product-acceptance-output \
+            --deadline-ms 420000 \
+            > acceptance-run.log 2>&1 &
+          runner_pid=$!
+          diagnostic_path="real-product-acceptance-output/aquaguide-real-acceptance.json"
+          diagnostic_ready=0
+
+          for attempt in $(seq 1 450); do
+            if [ -f "$diagnostic_path" ] && node - "$diagnostic_path" <<'NODE'
+          const fs = require('node:fs');
+          const path = process.argv[2];
+          try {
+            const diagnostic = JSON.parse(fs.readFileSync(path, 'utf8'));
+            const terminal = Boolean(diagnostic.error) || ['completed', 'failed'].includes(diagnostic.session?.status);
+            process.exit(terminal ? 0 : 1);
+          } catch {
+            process.exit(1);
+          }
+          NODE
+            then
+              diagnostic_ready=1
+              break
+            fi
+            if ! kill -0 "$runner_pid" 2>/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          if kill -0 "$runner_pid" 2>/dev/null; then
+            kill -TERM -- "-$runner_pid" 2>/dev/null || true
+            for attempt in $(seq 1 20); do
+              if ! kill -0 "$runner_pid" 2>/dev/null; then
+                break
+              fi
+              sleep 0.25
+            done
+            if kill -0 "$runner_pid" 2>/dev/null; then
+              kill -KILL -- "-$runner_pid" 2>/dev/null || true
+            fi
+          fi
+          wait "$runner_pid" 2>/dev/null || true
+          cat acceptance-run.log || true
+
+          if [ "$diagnostic_ready" -ne 1 ]; then
+            echo "Acceptance runner did not publish a terminal diagnostic before the watchdog expired." >&2
+            exit 1
+          fi
+
+          node - "$diagnostic_path" <<'NODE'
+          const fs = require('node:fs');
+          const path = process.argv[2];
+          const diagnostic = JSON.parse(fs.readFileSync(path, 'utf8'));
+          if (diagnostic.error) {
+            console.error(`Acceptance harness error: ${diagnostic.error}`);
+            process.exit(1);
+          }
+          if (diagnostic.timedOut) {
+            console.error('Acceptance session timed out before reaching a terminal evaluation state.');
+            process.exit(1);
+          }
+          if (!diagnostic.gate?.passed) {
+            console.error(`Acceptance gate failed: ${diagnostic.gate?.counts?.passed ?? 0}/${diagnostic.gate?.counts?.planned ?? 0} tasks passed.`);
+            process.exit(1);
+          }
+          NODE
+
+      - name: Upload real acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: aquaguide-real-acceptance
+          path: |
+            real-product-acceptance-output/
+            aquaguide-vite.log
+            acceptance-run.log
+          if-no-files-found: warn

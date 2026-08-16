@@ -35,6 +35,7 @@ import { aiConnectionStatus, connectAiSession, disconnectAiSession } from '../ai
 import { loadEvalSetManifest } from '../eval-set/eval-set-store.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
 import { nextActionForEvaluation } from '../decision/next-action-engine.js';
+import { planConfiguredBlindExperience, runConfiguredBlindExperience } from '../ux-evaluation/configured-blind-experience-runner.js';
 
 interface ApiResult { status: number; body: ApiResponse<unknown> }
 const execFileAsync = promisify(execFile);
@@ -112,7 +113,7 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
         status: 'ok',
         packageVersion: runtime.packageVersion,
         contractVersion: runtime.contractVersion,
-        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'in_memory_ai_provider', 'adaptive_eval_set', 'adaptive_default_evaluation', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder', 'next_action_engine'],
+        capabilities: ['guidance', 'structured_evidence', 'not_applicable_runs', 'workspace_discovery', 'task_package_handoff', 'in_memory_ai_provider', 'adaptive_eval_set', 'adaptive_default_evaluation', 'hybrid_judge_assets', 'finding_triage', 'product_task_understanding', 'oracle_builder', 'next_action_engine', 'blind_experience_evaluation'],
         runtime,
         aiProviderConnection,
         aiTestAgent: { configured: aiProviderConnection.configured, provider: aiProviderConnection.provider, source: aiProviderConnection.source, model: aiProviderConnection.model, screenshotDefault: false },
@@ -205,7 +206,24 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
     const fixAction = pathname.match(/^\/api\/fix-tasks\/([^/]+)\/(run|apply)$/);
     if (fixAction && method === 'POST') { const id = decodeURIComponent(fixAction[1] ?? ''); const input = recordBody(body); if (input?.confirmed !== true) return fail(409, 'CONFIRMATION_REQUIRED', '该操作需要明确确认。'); return ok(fixAction[2] === 'run' ? await startAgent(cwd, id, body) : await applyFix(cwd, id, body)); }
     if (method === 'GET' && /^\/api\/agent-runs\/[^/]+$/.test(pathname)) { const id = decodeURIComponent(pathname.slice('/api/agent-runs/'.length)); const snapshot = agentSnapshot(id); return snapshot ? ok(snapshot) : fail(404, 'AGENT_RUN_NOT_FOUND', `没有找到 Agent 运行：${id}`); }
-    const query = new URLSearchParams(search); const requestedProjectId = query.get('projectId') ?? undefined; const config = await configForProject(cwd, requestedProjectId);
+    const query = new URLSearchParams(search); const requestedProjectId = query.get('projectId') ?? undefined; const config = await configForProject(cwd, requestedProjectId); const resolvedProjectId = requestedProjectId ?? (await activeProject(cwd)).projectId;
+    const blindReadinessRoute = pathname.match(/^\/api\/eval-cases\/([^/]+)\/blind-readiness$/);
+    if (method === 'GET' && blindReadinessRoute) {
+      const caseId = decodeURIComponent(blindReadinessRoute[1] ?? '');
+      return ok(await planConfiguredBlindExperience(cwd, { projectId: resolvedProjectId, caseId }));
+    }
+    const blindRunRoute = pathname.match(/^\/api\/eval-cases\/([^/]+)\/blind-run$/);
+    if (method === 'POST' && blindRunRoute) {
+      const input = recordBody(body);
+      if (input?.confirmed !== true || input.allowRemoteModel !== true) return fail(409, 'CONFIRMATION_REQUIRED', 'Blind Experience 会调用当前已连接模型；开始前必须确认最小化页面文本传输。');
+      const caseId = decodeURIComponent(blindRunRoute[1] ?? '');
+      return ok(await runConfiguredBlindExperience(cwd, {
+        projectId: resolvedProjectId,
+        caseId,
+        startingUrl: typeof input.startingUrl === 'string' ? input.startingUrl : undefined,
+        allowScreenshot: input.allowScreenshot === true,
+      }));
+    }
     if (method === 'POST' && /^\/api\/eval-cases\/[^/]+\/run$/.test(pathname)) {
       const input = recordBody(body); if (input?.confirmed !== true || input.allowRemoteModel !== true) return fail(409, 'CONFIRMATION_REQUIRED', '运行 AI Test Agent 前必须确认远程模型和最小化页面文本传输。');
       const provider = configuredEvaluationProvider();
@@ -241,12 +259,25 @@ export async function dispatchDashboardApi(cwd: string, method: string, pathname
       if (findingAction[2] === 'mark-evaluator-failure') return ok(await markEvaluatorFailure(config.outputDir, findingId));
       return ok(await dismissFinding(config.outputDir, findingId));
     }
-    const adaptiveRunRoute = pathname.match(/^\/api\/runs\/([^/]+)\/(evidence|result)$/);
+    const adaptiveRunRoute = pathname.match(/^\/api\/runs\/([^/]+)\/(evidence|result|experience)$/);
     if (method === 'GET' && adaptiveRunRoute) {
       const runId = storageIdSchema.parse(decodeURIComponent(adaptiveRunRoute[1] ?? ''));
       if (adaptiveRunRoute[2] === 'result') {
         const path = evalCaseResultPath(config.outputDir, runId);
         return await pathExists(path) ? ok(await loadEvalCaseResult(config.outputDir, runId)) : fail(404, 'RUN_RESULT_NOT_FOUND', `没有找到运行结果：${runId}`);
+      }
+      if (adaptiveRunRoute[2] === 'experience') {
+        const runDirectory = resolve(config.outputDir, 'runs', runId);
+        const [blindText, functionalText, prerequisiteText] = await Promise.all([
+          readOptionalText(resolve(runDirectory, 'blind-experience-analysis.json')),
+          readOptionalText(resolve(runDirectory, 'experience-analysis.json')),
+          readOptionalText(resolve(runDirectory, 'blind-prerequisite.json')),
+        ]);
+        return ok({
+          mode: blindText ? 'blind_experience_run' : functionalText ? 'functional_run_sidecar' : 'none',
+          analysis: blindText ? JSON.parse(blindText) : functionalText ? JSON.parse(functionalText) : null,
+          prerequisite: prerequisiteText ? JSON.parse(prerequisiteText) : null,
+        });
       }
       const path = resolve(config.outputDir, 'runs', runId, 'evidence-packet.json');
       const evidence = await readOptionalText(path);

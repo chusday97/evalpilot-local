@@ -1,20 +1,17 @@
 import type { Page } from 'playwright';
 import type { AgentActionResult, AgentDecision, PageObservation } from '../../types.js';
 import type { SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
+import { resolveGroundedTarget } from './grounding.js';
 
 function targetFor(observation: PageObservation, decision: AgentDecision) {
   return observation.interactableElements.find((item) => item.elementId === decision.targetElementId) ?? null;
 }
 
 async function selectVisibleOption(locator: ReturnType<Page['locator']>, value: string): Promise<void> {
-  try {
-    await locator.selectOption(value);
-  } catch (valueError) {
-    try {
-      await locator.selectOption({ label: value });
-    } catch {
-      throw valueError;
-    }
+  try { await locator.selectOption(value); }
+  catch (valueError) {
+    try { await locator.selectOption({ label: value }); }
+    catch { throw valueError; }
   }
 }
 
@@ -26,8 +23,16 @@ export async function executeAgentAction(page: Page, observation: PageObservatio
     if (target.risk !== 'safe') return { status: 'blocked_by_safety', action: decision.action, targetElementId: target.elementId, summary: `已阻止 ${target.risk} 风险操作。`, evidenceRefs: observation.evidenceRefs };
   }
   try {
-    const index = target ? Number(target.locatorHint.split(':')[1]) : null;
-    const locator = index === null ? null : page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').filter({ visible: true }).nth(index);
+    let locator: ReturnType<Page['locator']> | null = null;
+    if (target) {
+      const field = observation.formFields.find((item) => item.elementId === target.elementId) ?? null;
+      const resolution = await resolveGroundedTarget(page, target, field);
+      if (resolution.status === 'drifted') {
+        return { status: 'failed', action: decision.action, targetElementId: target.elementId, summary: resolution.reason, evidenceRefs: observation.evidenceRefs };
+      }
+      locator = resolution.locator;
+    }
+
     if (decision.action === 'click') await locator!.click();
     else if (decision.action === 'fill') {
       const field = observation.formFields.find((item) => item.elementId === decision.targetElementId);

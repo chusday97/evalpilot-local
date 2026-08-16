@@ -117,6 +117,7 @@ export function compareTaskStateSignals(before: TaskStateSignalSnapshot, after: 
   const completionSignals: string[] = [];
   if (after.visibleTextLength > before.visibleTextLength + 2) progressSignals.push('页面可见内容增加');
   if (after.nodeCount > before.nodeCount) progressSignals.push('页面新增了内容节点');
+  if (after.nodeCount < before.nodeCount && after.visibleText !== before.visibleText) progressSignals.push('页面结构收敛且可见内容发生变化');
   if (after.statusTexts.some((value) => !before.statusTexts.includes(value))) progressSignals.push('运行状态文字发生变化');
   if (after.progressValues.some((value) => !before.progressValues.includes(value))) progressSignals.push('进度数值发生变化');
   const newExpected = after.expectedMatches.filter((value) => !before.expectedMatches.includes(value));

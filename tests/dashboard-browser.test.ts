@@ -78,12 +78,15 @@ describe.skipIf(!enabled)('dashboard browser', () => {
 
   afterAll(async () => { await close?.(); delete process.env.EVALPILOT_DATA_DIR; delete process.env.EVALPILOT_OPENAI_API_KEY; });
 
-  it('shows the guided home, navigates the four-step loop, and remains usable on mobile', async () => {
+  it('lands on Projects first, makes evaluation modes explicit, and remains usable on mobile', async () => {
     const browser = await chromium.launch({ headless: true });
     const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.message));
     await page.goto(baseUrl, { waitUntil: 'networkidle' });
+    expect(await page.getByRole('heading', { name: '选择要评测的项目' }).isVisible()).toBe(true);
+    expect(new URL(page.url()).pathname).toBe('/projects');
+    await page.goto(`${baseUrl}/home`, { waitUntil: 'networkidle' });
     expect(await page.getByRole('heading', { name: '跟着当前任务往下做' }).isVisible()).toBe(true);
     expect(await page.getByRole('complementary', { name: '上一次评测' }).getByText('Dashboard Fixture').isVisible()).toBe(true);
     expect(await page.getByText('1 个严重问题').isVisible()).toBe(true);
@@ -99,13 +102,33 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.getByRole('button', { name: /添加项目/ }).first().click();
     expect(await page.getByRole('dialog', { name: '添加本地项目' }).isVisible()).toBe(true);
     await page.getByRole('button', { name: '取消' }).click();
-    for (const [path, heading] of [['/evaluate', '系统已经替你选好评测方案'], ['/issues', '评测发现了什么'], ['/fixes', '把修复任务交给 Codex']] as const) {
+    for (const [path, heading] of [['/evaluate', '你想知道这个项目的什么？'], ['/issues', '评测发现了什么'], ['/fixes', '把修复任务交给 Codex']] as const) {
       await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
       const title = page.getByRole('heading', { name: heading, exact: true });
       await title.waitFor({ state: 'visible' });
       expect(await title.isVisible(), `页面标题未显示：${heading}`).toBe(true);
     }
     await page.goto(`${baseUrl}/evaluate`, { waitUntil: 'networkidle' });
+    expect(await page.getByRole('heading', { name: '检查核心流程' }).isVisible()).toBe(true);
+    expect(await page.getByRole('heading', { name: '验证一个具体任务' }).isVisible()).toBe(true);
+    expect(await page.getByRole('heading', { name: '模拟新用户体验' }).isVisible()).toBe(true);
+    await page.getByRole('button', { name: '选择要验证的任务' }).click();
+    await page.waitForURL(/\/evaluate\?mode=functional$/);
+    const functionalHeading = page.getByRole('heading', { name: '验证一个具体任务', exact: true }).first();
+    await functionalHeading.waitFor({ state: 'visible' });
+    expect(await functionalHeading.isVisible()).toBe(true);
+    expect(await page.getByRole('button', { name: '运行功能验证' }).isVisible()).toBe(true);
+    expect(await page.getByRole('button', { name: /Blind Experience/ }).count()).toBe(0);
+    await page.goto(`${baseUrl}/evaluate`, { waitUntil: 'networkidle' });
+    await page.getByRole('button', { name: '选择 Blind Experience 任务' }).click();
+    await page.waitForURL(/\/evaluate\?mode=blind$/);
+    const blindHeading = page.getByRole('heading', { name: '模拟新用户体验', exact: true }).first();
+    await blindHeading.waitFor({ state: 'visible' });
+    expect(await blindHeading.isVisible()).toBe(true);
+    expect(await page.getByRole('button', { name: '检查并开始 Blind Experience' }).isVisible()).toBe(true);
+    expect(await page.getByRole('button', { name: '运行功能验证' }).count()).toBe(0);
+    await page.goto(`${baseUrl}/evaluate?mode=core`, { waitUntil: 'networkidle' });
+    expect(await page.getByRole('heading', { name: '系统已经替你选好评测方案', exact: true }).isVisible()).toBe(true);
     await page.getByRole('button', { name: '选择 AI 模型并连接' }).click();
     expect(await page.getByText('DeepSeek', { exact: true }).first().isVisible()).toBe(true);
     expect(await page.getByText('Kimi', { exact: true }).first().isVisible()).toBe(true);
@@ -150,7 +173,8 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     expect(await page.getByText('实际运行覆盖').isVisible()).toBe(true);
     expect(await page.getByText('已验证覆盖', { exact: true }).first().isVisible()).toBe(true);
     expect(await page.getByText('已定义，未运行').isVisible()).toBe(true);
-    await page.getByRole('button', { name: '用 AI 用户运行这个案例' }).click();
+    expect(await page.getByRole('button', { name: 'Blind Experience' }).isVisible()).toBe(true);
+    await page.getByRole('button', { name: '功能 AI 运行' }).click();
     expect(await page.getByRole('dialog', { name: '确认运行 AI 用户' }).isVisible()).toBe(true);
     await page.getByRole('button', { name: '确认并开始运行' }).click();
     await page.getByText(/尚未连接 AI 评测能力。请先在评测页选择一个模型服务/).waitFor({ state: 'visible' });
@@ -186,11 +210,11 @@ describe.skipIf(!enabled)('dashboard browser', () => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto(`${baseUrl}/home`, { waitUntil: 'networkidle' });
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-    for (const path of ['/evaluate', '/eval-set', '/runs?evaluationId=evaluation-adaptive-result', '/findings', '/regression', '/fixes']) {
+    for (const path of ['/evaluate', '/evaluate?mode=functional', '/evaluate?mode=blind', '/eval-set', '/runs?evaluationId=evaluation-adaptive-result', '/findings', '/regression', '/fixes']) {
       await page.goto(`${baseUrl}${path}`, { waitUntil: 'networkidle' });
       expect(await page.evaluate(() => ({ root: document.documentElement.scrollWidth, viewport: window.innerWidth, buttons: [...document.querySelectorAll('main button')].filter((button) => { const rect = button.getBoundingClientRect(); return rect.width > 0 && rect.height > 0 && (rect.right > window.innerWidth + 1 || rect.left < -1); }).length }))).toEqual({ root: 390, viewport: 390, buttons: 0 });
     }
-    await page.goto(`${baseUrl}/evaluate`, { waitUntil: 'networkidle' });
+    await page.goto(`${baseUrl}/evaluate?mode=core`, { waitUntil: 'networkidle' });
     await page.getByRole('button', { name: '选择 AI 模型并连接' }).click();
     await page.getByRole('radio', { name: /其他兼容服务/ }).check();
     await page.getByRole('textbox', { name: /^API 地址/ }).fill('https://models.example.com/v1');

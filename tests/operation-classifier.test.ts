@@ -51,6 +51,22 @@ describe('operation classifier action locality', () => {
     })).toBe('synchronous');
   });
 
+  it('does not treat a Create entry-point button or create-flow result copy as a persisted form submit', () => {
+    expect(classifyOperation({
+      decision: decision('沿真实 onboarding 建立第一个鱼缸', '进入鱼缸创建流程'),
+      observation: observation('Create or configure a tank'),
+      evalCase,
+    })).toBe('synchronous');
+  });
+
+  it('keeps an ordinary answer button synchronous instead of applying unknown_async timeout', () => {
+    expect(classifyOperation({
+      decision: decision('回答每日检查第 1 项：经常浮头', '每日检查进度变为 1 / 6'),
+      observation: observation('经常浮头'),
+      evalCase,
+    })).toBe('synchronous');
+  });
+
   it('classifies an explicitly AI-generating action from local action semantics', () => {
     expect(classifyOperation({
       decision: decision('Generate AI summary', 'AI summary appears'),
@@ -59,7 +75,7 @@ describe('operation classifier action locality', () => {
     })).toBe('ai_generation');
   });
 
-  it('keeps save/create submissions on the form-submit wait policy', () => {
+  it('keeps save/create submissions on the form-submit wait policy when the Agent intent commits state', () => {
     expect(classifyOperation({
       decision: decision('保存鱼缸设置', '已保存设置'),
       observation: observation('Save Settings'),

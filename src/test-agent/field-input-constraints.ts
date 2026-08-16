@@ -1,5 +1,6 @@
 import type { Page } from 'playwright';
 import type { GroundedField } from '../../types.js';
+import { resolveGroundedTarget } from './grounding.js';
 
 export interface FieldInputConstraints {
   min: number | null;
@@ -23,13 +24,10 @@ function integer(value: number | null): number | null {
 }
 
 export async function readFieldInputConstraints(page: Page, field: GroundedField): Promise<FieldInputConstraints> {
-  const index = Number(field.locatorHint.split(':')[1]);
-  if (!Number.isInteger(index) || index < 0) return { min: null, max: null, minLength: null, maxLength: null, step: null, pattern: null };
-  const locator = page.locator('a,button,input,select,textarea,[role="button"],[role="link"],[tabindex]').filter({ visible: true }).nth(index);
+  const resolution = await resolveGroundedTarget(page, field, field);
+  if (resolution.status === 'drifted') throw new Error(resolution.reason);
+  const locator = resolution.locator;
 
-  // Keep the browser-evaluated callback self-contained and free of nested helpers.
-  // Transpilers may inject helper references such as `__name` for nested functions;
-  // those helpers do not exist inside Playwright's browser execution context.
   const attributes = await locator.evaluate((node) => {
     const element = node as HTMLElement;
     return {

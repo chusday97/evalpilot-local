@@ -2,6 +2,7 @@ import type { Page } from 'playwright';
 import type { AgentActionResult, AgentDecision, OperationType, TaskStateObservation, TaskWaitEvidence, WaitPolicy } from '../../types.js';
 import { observeTaskState } from './task-state-monitor.js';
 import { captureTaskStateSignals, type TaskStateSignalSnapshot } from './task-state-signals.js';
+import { partitionNetworkFailuresForPage } from './network-failure-boundary.js';
 
 interface RuntimeSignalSnapshot {
   activeRequests: number;
@@ -74,6 +75,8 @@ export async function waitForProgressAwareOutcome(input: ProgressAwareWaitInput)
   let lastProgressAtMs: number | null = null;
   let pollIndex = 0;
   const noWait = input.operationType === 'synchronous' || input.decision.action === 'finish' || input.decision.action === 'abandon' || input.actionResult.status !== 'executed';
+  const canSettleAfterProgress = !noWait && input.operationType !== 'ai_generation' && input.operationType !== 'file_processing';
+  const settleWindowMs = Math.min(1_000, Math.max(250, input.policy.pollIntervalMs));
 
   while (true) {
     const elapsedBeforeWait = performance.now() - startedAt;
@@ -85,6 +88,7 @@ export async function waitForProgressAwareOutcome(input: ProgressAwareWaitInput)
     const elapsedMs = performance.now() - startedAt;
     const currentSignals = await captureTaskStateSignals(input.page, input.decision);
     const currentRuntime = input.readRuntimeSignals();
+    const networkBoundary = partitionNetworkFailuresForPage(currentRuntime.coreNetworkFailures, input.page.url());
     pollIndex += 1;
     const evidenceRef = `task-state-observations.jsonl#step-${String(input.stepIndex).padStart(3, '0')}-poll-${String(pollIndex).padStart(3, '0')}`;
     let observation = observeTaskState({
@@ -96,7 +100,7 @@ export async function waitForProgressAwareOutcome(input: ProgressAwareWaitInput)
       elapsedMs,
       networkActivity: currentRuntime.activeRequests > 0 ? 'active' : 'idle',
       networkResponses: Math.max(0, currentRuntime.responseCount - previousRuntime.responseCount),
-      coreNetworkFailures: currentRuntime.coreNetworkFailures,
+      coreNetworkFailures: networkBoundary.hardFailures,
       consoleErrors: currentRuntime.consoleErrors,
       evidenceRefs: [evidenceRef],
     });
@@ -114,6 +118,27 @@ export async function waitForProgressAwareOutcome(input: ProgressAwareWaitInput)
         finalSignals: currentSignals,
         taskState: observation,
         taskWait: waitEvidence({ operationType: input.operationType, policy: input.policy, observations, extensionsUsed, finalReason }),
+      };
+    }
+
+    // Once a short/ordinary async interaction has produced visible progress, do not keep
+    // burning the entire extended soft-timeout after the page has become quiet again. This
+    // is deliberately not a success verdict: it only hands control back to the Actor for a
+    // fresh observation. Long-running AI/file operations keep their existing wait semantics.
+    const settledAfterProgress = canSettleAfterProgress
+      && lastProgressAtMs !== null
+      && observation.state === 'interacting'
+      && observation.networkActivity === 'idle'
+      && observation.loadingSignals.length === 0
+      && elapsedMs - lastProgressAtMs >= settleWindowMs;
+    if (settledAfterProgress) {
+      return {
+        summary: '页面在产生可见进展后已经稳定，结束当前等待并重新观察。',
+        finalSignals: currentSignals,
+        taskState: observation,
+        // Keep the public evidence schema stable: not_needed means no further waiting is
+        // required, while the summary above records why this particular wait stopped.
+        taskWait: waitEvidence({ operationType: input.operationType, policy: input.policy, observations, extensionsUsed, finalReason: 'not_needed' }),
       };
     }
 

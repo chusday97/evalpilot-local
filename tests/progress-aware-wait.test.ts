@@ -70,4 +70,20 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('progress-aware brow
     expect(result.taskWait).toMatchObject({ finalReason: 'soft_timeout', extensionsUsed: 1, consumedPersonaAttempt: false });
     await browser.close();
   });
+
+  it('returns control after visible progress settles instead of burning the extended timeout', async () => {
+    const browser = await chromium.launch({ headless: true }); const page = await browser.newPage();
+    await page.setContent('<main><button id="run">Run panel</button><div role="status">Stage 0</div></main><script>document.querySelector("#run").onclick=()=>{const s=document.querySelector("[role=status]");s.textContent="Stage 1";setTimeout(()=>{s.textContent="Stage 2"},100)}</script>');
+    const action = decision('Run panel'); action.expectedResult = 'Never terminal marker';
+    const before = await captureTaskStateSignals(page, action); await page.locator('#run').click();
+    const startedAt = performance.now();
+    const result = await waitForProgressAwareOutcome({ page, before, decision: action, actionResult: { status: 'executed', action: 'click', targetElementId: 'E001', summary: 'clicked', evidenceRefs: [] }, operationType: 'unknown_async', policy: waitPolicyFor('unknown_async', { initialObservationMs: 40, pollIntervalMs: 50, softTimeoutMs: 180, hardTimeoutMs: 900, progressExtensionMs: 500, maxProgressExtensions: 2 }), stepIndex: 1, readRuntimeSignals: () => ({ activeRequests: 0, responseCount: 0, coreNetworkFailures: [], consoleErrors: [] }) });
+    const elapsedMs = performance.now() - startedAt;
+    expect(result.taskWait.observations.some((item) => item.state === 'progressing')).toBe(true);
+    expect(result.taskState.state).toBe('interacting');
+    expect(result.taskWait.finalReason).toBe('not_needed');
+    expect(result.summary).toContain('已经稳定');
+    expect(elapsedMs).toBeLessThan(650);
+    await browser.close();
+  });
 });
