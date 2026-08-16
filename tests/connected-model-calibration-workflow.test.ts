@@ -58,18 +58,36 @@ describe('connected-model calibration workflow safety', () => {
     expect(steps[confirmationIndex]?.run).toContain('EVALPILOT_OPENAI_API_KEY');
   });
 
-  it('runs a no-call preflight before calibration, captures pure JSON, and retains evidence on failure', async () => {
+  it('validates a ready zero-call preflight before the paid calibration step', async () => {
     const document = await workflow();
     const steps = document.jobs?.calibrate?.steps ?? [];
     const preflightIndex = steps.findIndex((step) => step.name === 'Record no-call preflight');
+    const validationIndex = steps.findIndex((step) => step.name === 'Validate no-call preflight');
     const calibrationIndex = steps.findIndex((step) => step.name === 'Run connected-model calibration');
     expect(preflightIndex).toBeGreaterThanOrEqual(0);
-    expect(preflightIndex).toBeLessThan(calibrationIndex);
+    expect(preflightIndex).toBeLessThan(validationIndex);
+    expect(validationIndex).toBeLessThan(calibrationIndex);
     expect(steps[preflightIndex]?.run).toContain('--preflight');
     expect(steps[preflightIndex]?.run).toContain('npm run --silent calibrate:connected-model');
-    expect(steps[calibrationIndex]?.run).toContain('npm run --silent calibrate:connected-model');
+    expect(steps[validationIndex]?.run).toContain('JSON.parse');
+    expect(steps[validationIndex]?.run).toContain("preflight.status !== 'ready'");
+    expect(steps[validationIndex]?.run).toContain('preflight.remoteCallsMade !== false');
+  });
 
-    const upload = steps.find((step) => step.name === 'Upload calibration evidence');
+  it('captures valid result JSON and retains evidence even when later validation fails', async () => {
+    const document = await workflow();
+    const steps = document.jobs?.calibrate?.steps ?? [];
+    const calibrationIndex = steps.findIndex((step) => step.name === 'Run connected-model calibration');
+    const resultValidationIndex = steps.findIndex((step) => step.name === 'Validate calibration result');
+    const uploadIndex = steps.findIndex((step) => step.name === 'Upload calibration evidence');
+    expect(calibrationIndex).toBeGreaterThanOrEqual(0);
+    expect(calibrationIndex).toBeLessThan(resultValidationIndex);
+    expect(resultValidationIndex).toBeLessThan(uploadIndex);
+    expect(steps[calibrationIndex]?.run).toContain('npm run --silent calibrate:connected-model');
+    expect(steps[resultValidationIndex]?.run).toContain('JSON.parse');
+    expect(steps[resultValidationIndex]?.run).toContain('connected_model_behavior_variance');
+
+    const upload = steps[uploadIndex];
     expect(upload).toEqual(expect.objectContaining({
       if: 'always()',
       uses: 'actions/upload-artifact@v4',
