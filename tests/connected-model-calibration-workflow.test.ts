@@ -58,7 +58,7 @@ describe('connected-model calibration workflow safety', () => {
     expect(steps[confirmationIndex]?.run).toContain('EVALPILOT_OPENAI_API_KEY');
   });
 
-  it('runs a no-call preflight before calibration and retains evidence even on failure', async () => {
+  it('runs a no-call preflight before calibration, captures pure JSON, and retains evidence on failure', async () => {
     const document = await workflow();
     const steps = document.jobs?.calibrate?.steps ?? [];
     const preflightIndex = steps.findIndex((step) => step.name === 'Record no-call preflight');
@@ -66,6 +66,8 @@ describe('connected-model calibration workflow safety', () => {
     expect(preflightIndex).toBeGreaterThanOrEqual(0);
     expect(preflightIndex).toBeLessThan(calibrationIndex);
     expect(steps[preflightIndex]?.run).toContain('--preflight');
+    expect(steps[preflightIndex]?.run).toContain('npm run --silent calibrate:connected-model');
+    expect(steps[calibrationIndex]?.run).toContain('npm run --silent calibrate:connected-model');
 
     const upload = steps.find((step) => step.name === 'Upload calibration evidence');
     expect(upload).toEqual(expect.objectContaining({
@@ -73,6 +75,7 @@ describe('connected-model calibration workflow safety', () => {
       uses: 'actions/upload-artifact@v4',
     }));
     expect(upload?.with?.path).toContain('connected-model-preflight.json');
+    expect(upload?.with?.path).toContain('connected-model-result.json');
     expect(upload?.with?.path).toContain('connected-model-artifacts/');
   });
 });
