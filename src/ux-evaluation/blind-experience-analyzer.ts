@@ -10,7 +10,7 @@ import type {
 } from '../../types.js';
 import { simulatedUserMetricsSchema } from '../schemas/ux-evaluation.js';
 import { analyzeAdaptiveExperience, type AdaptiveExperienceStep } from './adaptive-experience-analyzer.js';
-import { detectFrictions } from './friction-detector.js';
+import { detectDeterministicExecutionFrictions, detectFrictions } from './friction-detector.js';
 import { calculateInteractionMetrics } from './interaction-recorder.js';
 
 export interface BlindExperienceFinding {
@@ -101,6 +101,8 @@ function recommendationFor(type: UxIssueType): string {
       return '检查核心入口的命名、层级和主次视觉关系，让首次用户更容易识别与当前目标最相关的操作。';
     case 'interaction_feedback_issue':
       return '为操作增加立即可见且与结果一致的状态反馈，避免用户通过重复点击确认是否生效。';
+    case 'interaction_target_conflict':
+      return '检查主要可点击目标与次级控件的点击热区，避免覆盖或竞争，并保证主要目标的默认点击区域能够稳定命中。';
     case 'journey_breakpoint':
     case 'recovery_issue':
       return '为当前状态提供清晰、安全的继续、修改、重试或返回路径，并验证用户可以恢复任务。';
@@ -175,18 +177,31 @@ export function analyzeBlindExperience(input: {
       ? 'insufficient_evidence'
       : 'evaluated';
 
-  // Unlike the functional sidecar, a Blind run may legitimately emit UX friction when the
-  // independent Judge is inconclusive: getting lost, explicitly going back, retrying, or
-  // abandoning before success is exactly the behavior this mode is meant to observe.
-  const frictions = analysisStatus === 'evaluated'
-    ? detectFrictions({
-      featureId: input.evalCase.capabilityId,
-      personaId: input.evalCase.persona.personaId,
-      actions: normalized.actions,
-      metrics,
-      completion,
-    })
-    : [];
+  const deterministicExecutionFrictions = detectDeterministicExecutionFrictions({
+    featureId: input.evalCase.capabilityId,
+    personaId: input.evalCase.persona.personaId,
+    packet: input.packet,
+    decisions: input.agentRun.decisions,
+  });
+
+  // Unlike inference-based friction, a deterministic pointer interception happened before
+  // the terminal evaluator/provider interruption and is independently preserved in the
+  // browser evidence. Keep only that narrow evidence class when the terminal run is
+  // insufficient; do not reopen backtrack/no-feedback/abandonment inference.
+  const frictions = confirmedProductFailure
+    ? []
+    : analysisStatus === 'evaluated'
+      ? [
+        ...deterministicExecutionFrictions,
+        ...detectFrictions({
+          featureId: input.evalCase.capabilityId,
+          personaId: input.evalCase.persona.personaId,
+          actions: normalized.actions,
+          metrics,
+          completion,
+        }),
+      ]
+      : deterministicExecutionFrictions;
 
   return {
     schemaVersion: 1,
@@ -215,7 +230,9 @@ export function analyzeBlindExperience(input: {
       'wall-clock 模型/API 延迟被记录但不用于推断用户犹豫。',
       confirmedProductFailure
         ? '独立 Judge 已确认 Product Failure，因此本轮 UX Finding 被抑制，避免把 Bug 包装成体验建议。'
-        : '即使功能 Judge 未能确认 PASS，只要不存在确认的 Product/Evaluator Failure，Blind Actor 的回退、重试、无反馈和放弃仍可形成体验证据。',
+        : evaluatorFailure || unknownFailure
+          ? '终局证据仍不足；仅保留中断前由浏览器确定性证明的交互目标冲突，不据此把 provider/evaluator interruption 改判为 Product Failure。'
+          : '即使功能 Judge 未能确认 PASS，只要不存在确认的 Product/Evaluator Failure，Blind Actor 的回退、重试、无反馈和放弃仍可形成体验证据。',
     ],
   };
 }
