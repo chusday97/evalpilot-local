@@ -14,6 +14,7 @@ export interface FunctionalEntryStabilizationResult {
   mode: 'functional_entry_stabilization';
   requestedUrl: string;
   finalUrl: string;
+  navigationPerformed: boolean;
   networkIdleObserved: boolean;
   domChangedDuringStabilization: boolean;
   loadingObserved: boolean;
@@ -54,12 +55,26 @@ function stableFingerprint(snapshot: TaskStateSignalSnapshot): string {
   });
 }
 
+function isWebUrl(value: string): boolean {
+  try {
+    const protocol = new URL(value).protocol;
+    return protocol === 'http:' || protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Functional evaluation answers whether a known task works from a prepared entry state. SPA
  * hydration is evaluator-managed startup, not a user action, so the Functional Actor should not
  * be asked to interpret a transient first render while route effects/local state are still
  * settling. Blind Experience deliberately does NOT call this helper because loading/discovery
  * friction belongs in the Blind journey evidence.
+ *
+ * Navigation is deliberately conservative. If Setup/tests already prepared the requested page,
+ * do not reload it and destroy in-memory or same-route state. Only navigate when the current page
+ * differs from an explicit http(s) starting URL. Synthetic `about:blank`/`data:` fixtures are
+ * stabilized in place.
  *
  * This is bounded and signal-driven: wait for network-idle when available, then require several
  * consecutive DOM/task-signal polls to be quiet. A timeout never becomes PASS or Product FAIL;
@@ -72,7 +87,8 @@ export async function stabilizeFunctionalEntry(
 ): Promise<FunctionalEntryStabilizationResult> {
   const policy = { ...defaultPolicy, ...override };
   const startedAt = performance.now();
-  await page.goto(startingUrl, { waitUntil: 'domcontentloaded' });
+  const navigationPerformed = page.url() !== startingUrl && isWebUrl(startingUrl);
+  if (navigationPerformed) await page.goto(startingUrl, { waitUntil: 'domcontentloaded' });
   const initial = await captureTaskStateSignals(page, waitDecision);
   let previous = initial;
   let previousFingerprint = stableFingerprint(initial);
@@ -108,6 +124,7 @@ export async function stabilizeFunctionalEntry(
         mode: 'functional_entry_stabilization',
         requestedUrl: startingUrl,
         finalUrl: page.url(),
+        navigationPerformed,
         networkIdleObserved,
         domChangedDuringStabilization,
         loadingObserved,
@@ -133,6 +150,7 @@ export async function stabilizeFunctionalEntry(
     mode: 'functional_entry_stabilization',
     requestedUrl: startingUrl,
     finalUrl: page.url(),
+    navigationPerformed,
     networkIdleObserved,
     domChangedDuringStabilization,
     loadingObserved,
