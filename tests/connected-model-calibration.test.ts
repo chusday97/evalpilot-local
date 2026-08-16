@@ -17,6 +17,7 @@ function row(overrides: Partial<ConnectedModelCalibrationRow> & Pick<ConnectedMo
     actorActions: [],
     agentStatus: 'completed',
     failureSource: null,
+    providerFailure: null,
     runId: `run-${overrides.probeId}`,
     ...overrides,
   };
@@ -88,19 +89,32 @@ describe('connected-model behavior calibration', () => {
     expect(metrics.cleanActorDriftRate).toBe(1);
     expect(metrics.extraSignalCount).toBe(1);
     expect(metrics.missingSignalCount).toBe(1);
+    expect(metrics.providerFailureCount).toBe(0);
+    expect(metrics.evaluatorFailureCount).toBe(0);
     expect(metrics.eligibleProbeExecutionCount).toBe(3);
   });
 
-  it('excludes evaluator/provider failures from UX detector denominators while keeping availability visible', () => {
+  it('separates provider failures from non-provider evaluator failures while excluding both from UX denominators', () => {
     const metrics = summarizeConnectedModelCalibration([
       row({
-        probeId: 'failed-dead-end',
+        probeId: 'provider-failed-dead-end',
         expectedTypes: ['journey_breakpoint'],
         predictedTypes: [],
         expectedVerdict: 'inconclusive',
         observedVerdict: 'inconclusive',
         agentStatus: 'inconclusive',
         failureSource: 'evaluator',
+        providerFailure: 'REQUEST_FAILED',
+      }),
+      row({
+        probeId: 'evaluator-failed-clean',
+        expectedTypes: [],
+        predictedTypes: [],
+        expectedVerdict: 'pass',
+        observedVerdict: 'inconclusive',
+        agentStatus: 'inconclusive',
+        failureSource: 'evaluator',
+        providerFailure: null,
       }),
       row({
         probeId: 'feedback',
@@ -112,6 +126,7 @@ describe('connected-model behavior calibration', () => {
     ]);
 
     expect(metrics.providerFailureCount).toBe(1);
+    expect(metrics.evaluatorFailureCount).toBe(1);
     expect(metrics.eligibleProbeExecutionCount).toBe(1);
     expect(metrics.precisionAgainstProbeGroundTruth).toBe(1);
     expect(metrics.signalPreservationRecall).toBe(1);
