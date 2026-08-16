@@ -14,6 +14,7 @@ export const uxIssueTypeSchema = z.enum([
   'repeated_input_issue',
   'content_clarity_issue',
   'interaction_feedback_issue',
+  'interaction_target_conflict',
   'recovery_issue',
   'trust_issue',
   'accessibility_issue',
