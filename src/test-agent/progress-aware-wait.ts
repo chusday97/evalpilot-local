@@ -2,6 +2,7 @@ import type { Page } from 'playwright';
 import type { AgentActionResult, AgentDecision, OperationType, TaskStateObservation, TaskWaitEvidence, WaitPolicy } from '../../types.js';
 import { observeTaskState } from './task-state-monitor.js';
 import { captureTaskStateSignals, type TaskStateSignalSnapshot } from './task-state-signals.js';
+import { partitionNetworkFailuresForPage } from './network-failure-boundary.js';
 
 interface RuntimeSignalSnapshot {
   activeRequests: number;
@@ -87,6 +88,7 @@ export async function waitForProgressAwareOutcome(input: ProgressAwareWaitInput)
     const elapsedMs = performance.now() - startedAt;
     const currentSignals = await captureTaskStateSignals(input.page, input.decision);
     const currentRuntime = input.readRuntimeSignals();
+    const networkBoundary = partitionNetworkFailuresForPage(currentRuntime.coreNetworkFailures, input.page.url());
     pollIndex += 1;
     const evidenceRef = `task-state-observations.jsonl#step-${String(input.stepIndex).padStart(3, '0')}-poll-${String(pollIndex).padStart(3, '0')}`;
     let observation = observeTaskState({
@@ -98,7 +100,7 @@ export async function waitForProgressAwareOutcome(input: ProgressAwareWaitInput)
       elapsedMs,
       networkActivity: currentRuntime.activeRequests > 0 ? 'active' : 'idle',
       networkResponses: Math.max(0, currentRuntime.responseCount - previousRuntime.responseCount),
-      coreNetworkFailures: currentRuntime.coreNetworkFailures,
+      coreNetworkFailures: networkBoundary.hardFailures,
       consoleErrors: currentRuntime.consoleErrors,
       evidenceRefs: [evidenceRef],
     });

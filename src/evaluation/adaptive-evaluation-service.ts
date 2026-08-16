@@ -16,6 +16,7 @@ import { triageEvalCaseFinding } from '../findings/finding-triage.js';
 import { buildAdaptiveEvaluationReport } from '../report/adaptive-report.js';
 import { runAiTestAgent } from '../test-agent/agent-runner.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
+import { stabilizeFunctionalEntry } from '../test-agent/functional-entry-stabilization.js';
 import { classifyEvaluatorFailure, evaluatorBadcaseFrom, evaluatorFailureResult } from '../evaluator-errors/classifier.js';
 import { saveEvaluatorBadcase } from '../evaluator-errors/store.js';
 import { analyzeAdaptiveExperience } from '../ux-evaluation/adaptive-experience-analyzer.js';
@@ -47,9 +48,13 @@ export async function runAdaptiveCase(input: {
   experience: AdaptiveExperienceAnalysis;
   report: Awaited<ReturnType<typeof buildAdaptiveEvaluationReport>>;
 }> {
+  // Functional evaluation starts only after evaluator-managed SPA hydration settles. This is
+  // deliberately not shared with Blind Experience: Blind should observe genuine loading and
+  // discoverability friction, while Functional should answer whether the prepared task works.
+  const entryStabilization = await stabilizeFunctionalEntry(input.page, input.startingUrl);
   const agentRun = await runAiTestAgent(input.page, input.evalCase, input.provider, {
     outputDir: input.outputDir,
-    startingUrl: input.startingUrl,
+    startingUrl: entryStabilization.finalUrl,
     mode: 'task',
     maxSteps: input.maxAgentSteps,
     waitTimeoutMs: input.agentWaitTimeoutMs,
@@ -62,6 +67,7 @@ export async function runAdaptiveCase(input: {
     fileFixtures: input.fileFixtures,
     now: input.now,
   });
+  await writeJsonAtomic(resolve(input.outputDir, 'runs', agentRun.runId, 'functional-entry-stabilization.json'), entryStabilization);
   const packet = evidencePacketSchema.parse(JSON.parse(await readFile(agentRun.evidencePacketPath, 'utf8')));
   const rawJudgedResult = await judgeEvalCase({ outputDir: input.outputDir, evalCase: input.evalCase, packet, provider: input.provider, allowRemoteModel: input.allowRemoteModel, createdAt: agentRun.completedAt });
   const safetyGatedResult = agentRun.status === 'blocked_by_safety'
