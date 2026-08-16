@@ -18,15 +18,35 @@ The workflow preserves:
 - execution config (`maxSteps`, screenshot policy);
 - provider failures and evaluator failures as separate availability signals.
 
+## Current calibration provider
+
+The maintainer workflow is currently pinned to **DeepSeek** because that is the provider used for the first real cohort.
+
+The environment credential path is:
+
+- `EVALPILOT_AI_PROVIDER=deepseek`
+- `EVALPILOT_DEEPSEEK_API_KEY`
+- `EVALPILOT_DEEPSEEK_MODEL`
+
+The default workflow model is `deepseek-v4-flash`. The operator may intentionally select another currently supported DeepSeek model, but a different model is a different calibration cohort.
+
+The general EvalPilot provider connection code still supports session-based OpenAI, DeepSeek, Kimi, and OpenAI-compatible services. The connected-model GitHub Actions workflow is deliberately narrower: it should collect one trustworthy provider/model cohort before the experiment matrix is broadened.
+
 ## Required repository secret
 
 Configure this GitHub Actions repository secret before the first real run:
 
-- `EVALPILOT_OPENAI_API_KEY`
+- `EVALPILOT_DEEPSEEK_API_KEY`
 
 The workflow passes the key only as an environment variable to the calibration process. The key is not written to calibration artifacts by the workflow.
 
-The initial remote workflow deliberately supports only the existing OpenAI environment-credential path. Do not add more providers merely to broaden the matrix before the first cohort is understood.
+## Environment provider selection
+
+Environment credentials now support both OpenAI and DeepSeek for developer/maintainer execution.
+
+If exactly one environment credential exists, EvalPilot uses that provider. If multiple provider credentials exist at the same time, EvalPilot does **not** guess: set `EVALPILOT_AI_PROVIDER=openai` or `EVALPILOT_AI_PROVIDER=deepseek` explicitly.
+
+The calibration workflow always sets `EVALPILOT_AI_PROVIDER=deepseek`, so an unrelated OpenAI environment credential cannot silently change the cohort identity.
 
 ## Safety gates
 
@@ -38,7 +58,14 @@ Before remote calls can start, the operator must type this exact acknowledgement
 RUN_CONNECTED_MODEL_CALIBRATION
 ```
 
-The workflow then checks that `EVALPILOT_OPENAI_API_KEY` exists. If either check fails, it exits before calibration and reports that no remote model calls were made.
+The workflow then checks that `EVALPILOT_DEEPSEEK_API_KEY` exists. If either check fails, it exits before calibration and reports that no remote model calls were made.
+
+The no-call preflight is parsed as JSON and must report all of the following before the paid step can start:
+
+- `status = ready`
+- `canRun = true`
+- `remoteCallsMade = false`
+- `provider.providerId = deepseek`
 
 Screenshots are **disabled by default**. Enable them only when the experiment explicitly requires visual input and the controlled probe screenshots are authorized for remote transmission.
 
@@ -46,14 +73,15 @@ Screenshots are **disabled by default**. Enable them only when the experiment ex
 
 Start with the smallest evidence-producing run:
 
-- model: `gpt-5-mini` unless a different model is intentionally selected;
+- provider: `deepseek`;
+- model: `deepseek-v4-flash` unless another model is intentionally selected;
 - runs: `1`;
 - max steps: `6`;
 - screenshots: `false`.
 
 Inspect that artifact before increasing repetitions. The first run is a protocol and evidence sanity check, not a variance estimate.
 
-If the raw artifact is structurally valid and failure attribution is trustworthy, run the **same model + same probe-suite fingerprint + same execution config** with `3` or `5` repetitions.
+If the raw artifact is structurally valid and failure attribution is trustworthy, run the **same provider + same model + same probe-suite fingerprint + same execution config** with `3` or `5` repetitions.
 
 Do not change the model, max-step budget, screenshot policy, or probe suite midway through a variance cohort.
 
@@ -63,9 +91,10 @@ Do not change the model, max-step budget, screenshot policy, or probe suite midw
 2. Select **Connected Model Calibration**.
 3. Choose **Run workflow** on `main`.
 4. Enter `RUN_CONNECTED_MODEL_CALIBRATION` in the authorization field.
-5. Select the model, repetitions, max steps, and screenshot policy.
-6. Run the workflow.
-7. Download the `connected-model-calibration-<run-id>-<attempt>` artifact after completion.
+5. Keep `deepseek-v4-flash` or intentionally enter the DeepSeek model ID for this cohort.
+6. Select repetitions, max steps, and screenshot policy.
+7. Run the workflow.
+8. Download the `connected-model-calibration-<run-id>-<attempt>` artifact after completion.
 
 ## Artifact structure
 
@@ -89,7 +118,7 @@ The run directories also retain the underlying browser/evidence output produced 
 
 For the first real run, inspect in this order:
 
-1. `provider.providerId` and `provider.model` are the intended cohort identity.
+1. `provider.providerId` is `deepseek` and `provider.model` is the intended model.
 2. `probeSuite.version` and `probeSuite.fingerprint` are present.
 3. `executionConfig` matches the operator inputs.
 4. `providerFailureCount` and `evaluatorFailureCount` are interpreted separately.

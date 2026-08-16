@@ -15,6 +15,14 @@ export interface AiCredential {
   connectedAt: string | null;
 }
 
+type EnvironmentProviderName = 'openai' | 'deepseek';
+
+interface EnvironmentCredentialCandidate {
+  provider: EnvironmentProviderName;
+  apiKey: string;
+  model: string | undefined;
+}
+
 let sessionCredential: AiCredential | null = null;
 
 function testBaseUrl(provider: AiProviderName): string | undefined {
@@ -29,12 +37,57 @@ function testBaseUrl(provider: AiProviderName): string | undefined {
   return value.replace(/\/$/, '');
 }
 
+function environmentCredential(): AiCredential | null {
+  const requestedProvider = process.env.EVALPILOT_AI_PROVIDER?.trim().toLowerCase();
+  if (requestedProvider && requestedProvider !== 'openai' && requestedProvider !== 'deepseek') {
+    throw new EvalPilotError('EVALPILOT_AI_PROVIDER 仅支持 openai 或 deepseek。', 'AI_PROVIDER_INVALID');
+  }
+
+  const candidates: EnvironmentCredentialCandidate[] = [];
+  const openAiKey = process.env.EVALPILOT_OPENAI_API_KEY?.trim();
+  if (openAiKey) {
+    candidates.push({
+      provider: 'openai',
+      apiKey: openAiKey,
+      model: process.env.EVALPILOT_OPENAI_MODEL?.trim() || undefined,
+    });
+  }
+
+  const deepSeekKey = process.env.EVALPILOT_DEEPSEEK_API_KEY?.trim();
+  if (deepSeekKey) {
+    candidates.push({
+      provider: 'deepseek',
+      apiKey: deepSeekKey,
+      model: process.env.EVALPILOT_DEEPSEEK_MODEL?.trim() || undefined,
+    });
+  }
+
+  let selected: EnvironmentCredentialCandidate | undefined;
+  if (requestedProvider) {
+    selected = candidates.find((candidate) => candidate.provider === requestedProvider);
+    if (!selected) return null;
+  } else {
+    if (candidates.length > 1) {
+      throw new EvalPilotError('检测到多个环境变量 AI Provider，请用 EVALPILOT_AI_PROVIDER 明确选择 openai 或 deepseek。', 'AI_PROVIDER_INVALID');
+    }
+    selected = candidates[0];
+  }
+
+  if (!selected) return null;
+  const preset = presetProvider(selected.provider);
+  return {
+    ...preset,
+    apiKey: selected.apiKey,
+    model: selected.model || preset.defaultModel,
+    baseUrl: testBaseUrl(selected.provider) ?? preset.baseUrl,
+    source: 'environment',
+    connectedAt: null,
+  };
+}
+
 export function currentAiCredential(): AiCredential | null {
   if (sessionCredential) return { ...sessionCredential };
-  const apiKey = process.env.EVALPILOT_OPENAI_API_KEY?.trim();
-  if (!apiKey) return null;
-  const preset = presetProvider('openai');
-  return { ...preset, apiKey, model: process.env.EVALPILOT_OPENAI_MODEL?.trim() || preset.defaultModel, baseUrl: testBaseUrl('openai') ?? preset.baseUrl, source: 'environment', connectedAt: null };
+  return environmentCredential();
 }
 
 export function aiConnectionStatus(): AiProviderConnectionStatus {
