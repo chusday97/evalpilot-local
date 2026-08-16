@@ -1,5 +1,14 @@
-import type { CompletionDefinition, FrictionEvent, InteractionAction, SimulatedUserMetrics, UxIssueType } from '../../types.js';
+import type {
+  AgentDecision,
+  CompletionDefinition,
+  EvidencePacket,
+  FrictionEvent,
+  InteractionAction,
+  SimulatedUserMetrics,
+  UxIssueType,
+} from '../../types.js';
 import { frictionEventSchema } from '../schemas/ux-evaluation.js';
+import { parsePointerInterceptionDetails } from './pre-failure-signals.js';
 import { repeatedInputActionIds } from './repeated-input-detector.js';
 
 export interface FrictionInput {
@@ -8,6 +17,13 @@ export interface FrictionInput {
   actions: InteractionAction[];
   metrics: SimulatedUserMetrics;
   completion: CompletionDefinition;
+}
+
+export interface DeterministicExecutionFrictionInput {
+  featureId: string;
+  personaId: string;
+  packet: EvidencePacket;
+  decisions: AgentDecision[];
 }
 
 function severityFor(input: FrictionInput, type: UxIssueType): FrictionEvent['severity'] {
@@ -39,6 +55,63 @@ function event(
     severity: severityFor(input, type),
     confidence: action?.evidence.length ? 'high' : input.actions.some((item) => item.evidence.length) ? 'medium' : 'low',
   });
+}
+
+function uniqueStrings(values: Array<string | null | undefined>): string[] {
+  return [...new Set(values.filter((value): value is string => Boolean(value && value.trim())))];
+}
+
+export function detectDeterministicExecutionFrictions(input: DeterministicExecutionFrictionInput): FrictionEvent[] {
+  const observations = new Map(input.packet.observations.map((observation) => [observation.observationId, observation]));
+  const verifications = new Map(input.packet.stepVerifications.map((verification) => [verification.verificationId, verification]));
+  const decisions = new Map(input.decisions.filter((decision) => decision.decisionId).map((decision) => [decision.decisionId!, decision]));
+  const events: FrictionEvent[] = [];
+
+  for (const step of input.packet.stepEvidence) {
+    if (step.actionStatus !== 'failed') continue;
+    const verification = verifications.get(step.verificationId);
+    const details = uniqueStrings([
+      ...(step.taskState?.failureSignals ?? []),
+      verification?.observed,
+    ]);
+    const pointerDetail = details.map(parsePointerInterceptionDetails).find((detail) => detail !== null) ?? null;
+    if (!pointerDetail) continue;
+
+    const decision = decisions.get(step.decisionId) ?? input.decisions[step.stepIndex - 1];
+    const before = observations.get(step.beforeObservationId);
+    const targetElementId = decision?.targetElementId ?? null;
+    const targetElement = targetElementId
+      ? [...(before?.interactableElements ?? []), ...(before?.formFields ?? [])]
+        .find((element) => element.elementId === targetElementId)
+      : undefined;
+    const targetLabel = targetElement?.label || targetElement?.text || targetElementId || 'unknown';
+    const interceptorLabel = pointerDetail.label || pointerDetail.id || '另一个可交互控件';
+    const recoveredLater = input.packet.stepEvidence.some((candidate) => (
+      candidate.stepIndex > step.stepIndex && candidate.actionStatus === 'executed'
+    ));
+    const evidence = uniqueStrings([
+      step.beforeScreenshotPath,
+      step.afterScreenshotPath,
+      ...(step.taskState?.evidenceRefs ?? []),
+      ...(verification?.evidenceRefs ?? []),
+    ]);
+
+    events.push(frictionEventSchema.parse({
+      frictionId: `friction-${input.featureId}-target-conflict-${step.stepIndex}`,
+      type: 'interaction_target_conflict',
+      featureId: input.featureId,
+      page: before?.pageUrl ?? '/',
+      step: input.packet.actions[step.stepIndex - 1]?.actionId ?? step.decisionId ?? `step-${step.stepIndex}`,
+      persona: input.personaId,
+      observedBehavior: `可点击目标「${targetLabel}」的操作被「${interceptorLabel}」拦截，默认点击无法稳定命中预期目标。`,
+      possibleUserReason: '推测：主要目标与次级控件的点击热区发生覆盖或竞争，导致同一区域存在互相抢占的交互目标。',
+      evidence,
+      severity: recoveredLater ? 'P3' : 'P2',
+      confidence: evidence.length > 0 ? 'high' : 'medium',
+    }));
+  }
+
+  return events;
 }
 
 export function detectFrictions(input: FrictionInput): FrictionEvent[] {
