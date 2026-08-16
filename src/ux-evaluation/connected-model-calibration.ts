@@ -6,6 +6,7 @@ import type { AiProvider } from '../ai/provider.js';
 import type { AiTestAgentRun, EvalCase, EvalCaseResult, EvidencePacket, UxIssueType } from '../../types.js';
 import { runAiTestAgent } from '../test-agent/agent-runner.js';
 import { analyzeBlindExperience } from './blind-experience-analyzer.js';
+import { buildBlindActorCase } from './blind-experience-service.js';
 import {
   connectedModelCalibratedTypes,
   connectedModelCalibrationProbes,
@@ -108,6 +109,19 @@ function evalCase(probe: ConnectedModelCalibrationProbe, now: string): EvalCase 
   };
 }
 
+/**
+ * Keep the connected-model Actor under the exact same knowledge boundary as a production
+ * Blind Experience run. The judge case retains the probe Oracle; the Actor case removes it so
+ * hidden success strings cannot influence prompts, task-progress heuristics, or auto-finish.
+ */
+export function buildConnectedModelProbeCases(
+  probe: ConnectedModelCalibrationProbe,
+  now: string,
+): { judgeCase: EvalCase; actorCase: EvalCase } {
+  const judgeCase = evalCase(probe, now);
+  return { judgeCase, actorCase: buildBlindActorCase(judgeCase) };
+}
+
 function independentProbeResult(item: EvalCase, runId: string, verdict: EvalCaseResult['verdict'], now: string): EvalCaseResult {
   const complete = verdict === 'pass';
   return {
@@ -200,11 +214,12 @@ export async function runConnectedModelCalibration(input: {
       try {
         const page = await context.newPage();
         await page.setContent(`<!doctype html><html><head><title>${probe.probeId}</title></head><body>${probe.html}</body></html>`);
-        const item = evalCase(probe, generatedAt);
-        const agentRun = await runAiTestAgent(page, item, input.provider, {
+        const { judgeCase: item, actorCase } = buildConnectedModelProbeCases(probe, generatedAt);
+        const agentRun = await runAiTestAgent(page, actorCase, input.provider, {
           outputDir: join(outputDir, probe.probeId),
           startingUrl: page.url(),
           maxSteps: executionConfig.maxSteps,
+          mode: 'exploration',
           allowRemoteModel: true,
           allowScreenshotToProvider: executionConfig.allowScreenshotToProvider,
           waitPolicy: connectedModelProbeWaitPolicy,
@@ -254,6 +269,7 @@ export async function runConnectedModelCalibration(input: {
     rows,
     methodology: [
       'Runs a connected remote model through a fingerprinted controlled Chromium probe suite with screenshots withheld by default.',
+      'Actor execution uses the production Blind knowledge boundary: the real probe Oracle is removed before the model and runner heuristics see the Actor case.',
       'Expected friction classes come from independent probe design; the model never receives those labels.',
       'The run verdict is independently derived from the actual final page state (Done visible or not), not from the fixture expectation.',
       'Provider/evaluator failures are reported separately and excluded from UX signal denominators.',
