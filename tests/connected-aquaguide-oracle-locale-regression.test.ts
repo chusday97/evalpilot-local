@@ -17,6 +17,7 @@ const smoke3DailyText = [
   'Check if filter is running normally',
   'Stop feeding for 12-24 hours',
 ].join(' ');
+const savedHighRiskDailyText = `${smoke3DailyText} Re-check Recommended`;
 
 function dailyCase(): EvalCase {
   return {
@@ -34,7 +35,7 @@ function dailyCase(): EvalCase {
     knownInformation: {},
     preconditions: [],
     oracle: {
-      expectedOutcome: ['Daily Check result is visible'],
+      expectedOutcome: ['Daily Check result is visible and the high-risk daily record is saved'],
       mustObserve: [],
       mustNotObserve: [],
       businessRules: [],
@@ -42,6 +43,7 @@ function dailyCase(): EvalCase {
       deterministicAssertions: [
         { assertionId: 'blind-daily-risk', type: 'text_visible', target: 'High Risk', expected: true, negated: false },
         { assertionId: 'blind-daily-action', type: 'text_visible', target: 'Increase aeration or surface disturbance immediately', expected: true, negated: false },
+        { assertionId: 'blind-daily-recorded-high-risk', type: 'text_visible', target: 'Re-check Recommended', expected: true, negated: false },
       ],
       inconclusiveWhen: ['没有足够可见证据确认成功或产品失败'],
     },
@@ -58,7 +60,7 @@ function dailyCase(): EvalCase {
   };
 }
 
-function dailyPacket(): EvidencePacket {
+function dailyPacket(visibleText = smoke3DailyText): EvidencePacket {
   return {
     runId: 'run-smoke-3-daily-locale-regression',
     caseId: 'blind-daily-check-risk',
@@ -67,19 +69,19 @@ function dailyPacket(): EvidencePacket {
     actorPromptVersion: '1.0.0',
     startedAt: now,
     completedAt: now,
-    actions: [{ actionId: 'agent-action-001', type: 'navigation', timestampMs: 1, page: '/aquarium', target: null, inputField: null, inputLength: null, inputFingerprint: null, outcome: 'Daily Check completed', evidence: ['screenshots/step-001-before.png', 'screenshots/step-001-after.png'] }],
+    actions: [{ actionId: 'agent-action-001', type: 'navigation', timestampMs: 1, page: '/aquarium', target: null, inputField: null, inputLength: null, inputFingerprint: null, outcome: 'Daily Check result visible', evidence: ['screenshots/step-001-before.png', 'screenshots/step-001-after.png'] }],
     observations: [
       { observationId: 'observation-001-before', pageUrl: 'http://127.0.0.1:3000/aquarium', pagePurpose: 'Daily Check', visibleStateSummary: 'Quick check in progress', primaryAreas: ['Daily Check'], visibleProblems: [], interactableElements: [], formFields: [], evidenceRefs: ['screenshots/step-001-before.png'], confidence: 1 },
-      { observationId: 'observation-001-after', pageUrl: 'http://127.0.0.1:3000/aquarium', pagePurpose: 'Daily Check Result', visibleStateSummary: smoke3DailyText, primaryAreas: ['Daily Check Result'], visibleProblems: [], interactableElements: [], formFields: [], evidenceRefs: ['screenshots/step-001-after.png'], confidence: 1 },
+      { observationId: 'observation-001-after', pageUrl: 'http://127.0.0.1:3000/aquarium', pagePurpose: 'Daily Check Result', visibleStateSummary: visibleText, primaryAreas: ['Daily Check Result'], visibleProblems: [], interactableElements: [], formFields: [], evidenceRefs: ['screenshots/step-001-after.png'], confidence: 1 },
     ],
-    stepVerifications: [{ verificationId: 'verification-001', expectation: 'Daily Check result is visible', observed: smoke3DailyText, status: 'confirmed', evidenceRefs: ['screenshots/step-001-after.png'], confidence: 1 }],
+    stepVerifications: [{ verificationId: 'verification-001', expectation: 'Daily Check result is visible', observed: visibleText, status: 'confirmed', evidenceRefs: ['screenshots/step-001-after.png'], confidence: 1 }],
     stepEvidence: [{ stepIndex: 1, beforeObservationId: 'observation-001-before', afterObservationId: 'observation-001-after', beforeScreenshotPath: 'screenshots/step-001-before.png', afterScreenshotPath: 'screenshots/step-001-after.png', decisionId: 'decision-001', verificationId: 'verification-001', actionStatus: 'executed', taskState: null, taskWait: null }],
     screenshots: ['screenshots/step-001-before.png', 'screenshots/step-001-after.png'],
     tracePath: 'trace.zip',
     evidenceCompleteness: { complete: true, hasInitialObservation: true, hasFinalObservation: true, hasBeforeAfterScreenshots: true, hasStepVerifications: true, hasTrace: true, missing: [] },
     consoleEvidence: [],
     networkEvidence: [],
-    finalState: { url: 'http://127.0.0.1:3000/aquarium', visibleTextSummary: smoke3DailyText },
+    finalState: { url: 'http://127.0.0.1:3000/aquarium', visibleTextSummary: visibleText },
     versions: { targetAppGitSha: '8663b469c50605529367daf1b69ac0cd7cfb0cac', productModelVersion: 1, evalSetVersion: 1, caseVersion: 1, evalPilotVersion: '0.6.0-alpha.0', actorModel: 'deepseek-v4-flash', judgeModel: 'deepseek-v4-flash', actorPromptVersion: '1.0.0', judgePromptVersion: '1.0.0', toolSchemaVersion: '1.0.0', timestamp: now },
   };
 }
@@ -99,14 +101,23 @@ describe('connected AquaGuide Oracle locale regression', () => {
     expect(targets).toContain('Freshwater');
     expect(targets).toContain('High Risk');
     expect(targets).toContain('Increase aeration or surface disturbance immediately');
+    expect(targets).toContain('Re-check Recommended');
+    expect(targets).not.toContain('Checked Today');
     expect(targets).not.toContain('Act now');
     expect(targets.some((target) => /[\u3400-\u9fff]/u.test(target))).toBe(false);
   });
 
-  it('passes the deterministic Daily Check Oracle against the retained Smoke #3 visible result', () => {
+  it('rejects the retained Smoke #3 Quick Check-only result as a completed Daily Check', () => {
     const deterministic = runDeterministicJudge(dailyCase(), dailyPacket());
+    expect(deterministic.hardFailure).toBe(true);
+    expect(deterministic.severity).toBe('P1');
+    expect(deterministic.checks.map((item) => item.verdict)).toEqual(['pass', 'pass', 'fail']);
+  });
+
+  it('passes only when the high-risk Daily Check has a saved-record outcome', () => {
+    const deterministic = runDeterministicJudge(dailyCase(), dailyPacket(savedHighRiskDailyText));
     expect(deterministic.hardFailure).toBe(false);
     expect(deterministic.severity).toBeNull();
-    expect(deterministic.checks.map((item) => item.verdict)).toEqual(['pass', 'pass']);
+    expect(deterministic.checks.map((item) => item.verdict)).toEqual(['pass', 'pass', 'pass']);
   });
 });
