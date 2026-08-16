@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { AiTestAgentRun, EvalCaseResult, UxIssueType } from '../types.js';
 import {
+  connectedModelProbeSuiteIdentity,
   summarizeConnectedModelCalibration,
   type ConnectedModelCalibrationResult,
   type ConnectedModelCalibrationRow,
@@ -8,10 +9,12 @@ import {
 import { summarizeConnectedModelCalibrationVariance } from '../src/ux-evaluation/connected-model-variance.js';
 
 const provider = { providerId: 'openai', model: 'fixture-model', remote: true };
+const executionConfig = { maxSteps: 6, allowScreenshotToProvider: false };
 
 function row(input: {
   probeId: 'clean-one-click' | 'no-feedback-retry' | 'objective-dead-end';
   expectedTypes: UxIssueType[];
+  expectedVerdict: EvalCaseResult['verdict'];
   predictedTypes: UxIssueType[];
   observedVerdict: EvalCaseResult['verdict'];
   actorActions?: string[];
@@ -21,6 +24,7 @@ function row(input: {
     probeId: input.probeId,
     purpose: input.probeId,
     expectedTypes: input.expectedTypes,
+    expectedVerdict: input.expectedVerdict,
     predictedTypes: input.predictedTypes,
     observedVerdict: input.observedVerdict,
     actorActions: input.actorActions ?? [],
@@ -30,11 +34,17 @@ function row(input: {
   };
 }
 
-function result(index: number, rows: ConnectedModelCalibrationRow[], model = 'fixture-model'): ConnectedModelCalibrationResult {
+function result(
+  index: number,
+  rows: ConnectedModelCalibrationRow[],
+  overrides: Partial<Pick<ConnectedModelCalibrationResult, 'provider' | 'probeSuite' | 'executionConfig'>> = {},
+): ConnectedModelCalibrationResult {
   return {
     schemaVersion: 1,
     analysisMode: 'connected_model_behavior_sensitivity',
-    provider: { ...provider, model },
+    provider: overrides.provider ?? { ...provider },
+    probeSuite: overrides.probeSuite ?? { ...connectedModelProbeSuiteIdentity, probeIds: [...connectedModelProbeSuiteIdentity.probeIds] },
+    executionConfig: overrides.executionConfig ?? { ...executionConfig },
     generatedAt: `2026-08-16T0${index}:00:00.000Z`,
     metrics: summarizeConnectedModelCalibration(rows),
     rows,
@@ -44,19 +54,19 @@ function result(index: number, rows: ConnectedModelCalibrationRow[], model = 'fi
 }
 
 function clean(predictedTypes: UxIssueType[] = [], observedVerdict: EvalCaseResult['verdict'] = 'pass', actions: string[] = ['click', 'finish']) {
-  return row({ probeId: 'clean-one-click', expectedTypes: [], predictedTypes, observedVerdict, actorActions: actions });
+  return row({ probeId: 'clean-one-click', expectedTypes: [], expectedVerdict: 'pass', predictedTypes, observedVerdict, actorActions: actions });
 }
 
 function feedback(predictedTypes: UxIssueType[] = ['interaction_feedback_issue'], observedVerdict: EvalCaseResult['verdict'] = 'pass') {
-  return row({ probeId: 'no-feedback-retry', expectedTypes: ['interaction_feedback_issue'], predictedTypes, observedVerdict, actorActions: ['click', 'click', 'finish'] });
+  return row({ probeId: 'no-feedback-retry', expectedTypes: ['interaction_feedback_issue'], expectedVerdict: 'pass', predictedTypes, observedVerdict, actorActions: ['click', 'click', 'finish'] });
 }
 
 function deadEnd(predictedTypes: UxIssueType[] = ['journey_breakpoint', 'abandonment_risk']) {
-  return row({ probeId: 'objective-dead-end', expectedTypes: ['journey_breakpoint', 'abandonment_risk'], predictedTypes, observedVerdict: 'inconclusive', actorActions: ['click', 'abandon'] });
+  return row({ probeId: 'objective-dead-end', expectedTypes: ['journey_breakpoint', 'abandonment_risk'], expectedVerdict: 'inconclusive', predictedTypes, observedVerdict: 'inconclusive', actorActions: ['click', 'abandon'] });
 }
 
 describe('connected-model calibration variance', () => {
-  it('summarizes metric ranges and per-probe signal/verdict stability without inventing thresholds', () => {
+  it('summarizes only runs with the same model, suite fingerprint, and execution config', () => {
     const first = result(1, [clean(), feedback(), deadEnd()]);
     const second = result(2, [
       clean(['path_efficiency_issue'], 'inconclusive', ['wait', 'click', 'finish']),
@@ -76,10 +86,12 @@ describe('connected-model calibration variance', () => {
       providerFailureCount: 0,
       probeExecutionCount: 9,
       providerFailureRate: 0,
+      probeSuite: connectedModelProbeSuiteIdentity,
+      executionConfig,
     }));
     expect(summary.metricDistributions.signalPreservationRecall.values).toHaveLength(3);
     expect(summary.metricDistributions.signalPreservationRecall.min).toBeLessThan(summary.metricDistributions.signalPreservationRecall.max);
-    expect(summary.varianceNote).toContain('No pass/fail threshold');
+    expect(summary.varianceNote).toContain('same provider/model, probe suite, and execution config');
 
     const byId = new Map(summary.probeStability.map((probe) => [probe.probeId, probe]));
     expect(byId.get('clean-one-click')).toEqual(expect.objectContaining({
@@ -109,6 +121,7 @@ describe('connected-model calibration variance', () => {
     const failedClean = row({
       probeId: 'clean-one-click',
       expectedTypes: [],
+      expectedVerdict: 'pass',
       predictedTypes: [],
       observedVerdict: 'inconclusive',
       failureSource: 'evaluator',
@@ -133,8 +146,37 @@ describe('connected-model calibration variance', () => {
   it('refuses to pool different models into one variance aggregate', () => {
     const rows = [clean(), feedback(), deadEnd()];
     expect(() => summarizeConnectedModelCalibrationVariance([
-      result(1, rows, 'model-a'),
-      result(2, rows, 'model-b'),
+      result(1, rows, { provider: { ...provider, model: 'model-a' } }),
+      result(2, rows, { provider: { ...provider, model: 'model-b' } }),
     ])).toThrow('same providerId and model');
+  });
+
+  it('refuses to pool different probe-suite fingerprints', () => {
+    const rows = [clean(), feedback(), deadEnd()];
+    expect(() => summarizeConnectedModelCalibrationVariance([
+      result(1, rows),
+      result(2, rows, { probeSuite: { ...connectedModelProbeSuiteIdentity, fingerprint: '0'.repeat(64), probeIds: [...connectedModelProbeSuiteIdentity.probeIds] } }),
+    ])).toThrow('same probe-suite fingerprint');
+  });
+
+  it('refuses to pool different execution configs', () => {
+    const rows = [clean(), feedback(), deadEnd()];
+    expect(() => summarizeConnectedModelCalibrationVariance([
+      result(1, rows),
+      result(2, rows, { executionConfig: { ...executionConfig, maxSteps: 8 } }),
+    ])).toThrow('same execution config');
+  });
+
+  it('rejects inconsistent embedded ground truth even when metadata claims the same suite', () => {
+    const firstRows = [clean(), feedback(), deadEnd()];
+    const secondRows = [
+      clean(),
+      row({ probeId: 'no-feedback-retry', expectedTypes: ['abandonment_risk'], expectedVerdict: 'pass', predictedTypes: ['abandonment_risk'], observedVerdict: 'pass' }),
+      deadEnd(),
+    ];
+    expect(() => summarizeConnectedModelCalibrationVariance([
+      result(1, firstRows),
+      result(2, secondRows),
+    ])).toThrow('inconsistent ground truth');
   });
 });

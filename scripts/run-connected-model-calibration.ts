@@ -39,6 +39,7 @@ process.stderr.write([
   `Connected-model calibration will run ${runCount} repetition(s) × ${connectedModelCalibrationProbes.length} controlled probes.`,
   'Each probe may make multiple remote provider requests through Actor and semantic verification; exact cost depends on the configured provider/model.',
   `Screenshots to the provider: ${allowScreenshotToProvider ? 'ENABLED by explicit flag' : 'disabled (default)'}.`,
+  `Max Actor steps per probe: ${maxSteps}.`,
   '',
 ].join('\n'));
 
@@ -78,6 +79,8 @@ if (process.argv.includes('--json')) {
   process.stdout.write([
     'Connected-model behavior variance calibration completed.',
     `Provider: ${variance.provider.providerId} / ${variance.provider.model}`,
+    `Probe suite: v${variance.probeSuite.version} / ${variance.probeSuite.fingerprint}`,
+    `Execution config: maxSteps=${variance.executionConfig.maxSteps}, screenshots=${variance.executionConfig.allowScreenshotToProvider ? 'enabled' : 'disabled'}`,
     `Runs: ${variance.runCount}`,
     metricLine('Signal preservation recall', variance.metricDistributions.signalPreservationRecall),
     metricLine('Precision vs probe ground truth', variance.metricDistributions.precisionAgainstProbeGroundTruth),

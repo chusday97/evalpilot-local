@@ -6,27 +6,30 @@ import type { AiProvider } from '../ai/provider.js';
 import type { AiTestAgentRun, EvalCase, EvalCaseResult, EvidencePacket, UxIssueType } from '../../types.js';
 import { runAiTestAgent } from '../test-agent/agent-runner.js';
 import { analyzeBlindExperience } from './blind-experience-analyzer.js';
+import {
+  connectedModelCalibratedTypes,
+  connectedModelCalibrationProbes,
+  connectedModelProbeActorContract,
+  connectedModelProbeSuiteIdentity,
+  connectedModelProbeWaitPolicy,
+  type ConnectedModelCalibrationProbe,
+  type ConnectedModelProbeSuiteIdentity,
+} from './connected-model-probe-suite.js';
 
-const calibratedTypes = new Set<UxIssueType>([
-  'repeated_input_issue',
-  'interaction_feedback_issue',
-  'path_efficiency_issue',
-  'journey_breakpoint',
-  'abandonment_risk',
-]);
+export {
+  buildConnectedModelProbeSuiteIdentity,
+  connectedModelCalibrationProbes,
+  connectedModelProbeSuiteIdentity,
+} from './connected-model-probe-suite.js';
+export type { ConnectedModelCalibrationProbe, ConnectedModelProbeSuiteIdentity } from './connected-model-probe-suite.js';
 
-export interface ConnectedModelCalibrationProbe {
-  probeId: string;
-  purpose: string;
-  html: string;
-  expectedTypes: UxIssueType[];
-  expectedVerdict: EvalCaseResult['verdict'];
-}
+const calibratedTypes = new Set<UxIssueType>(connectedModelCalibratedTypes);
 
 export interface ConnectedModelCalibrationRow {
   probeId: string;
   purpose: string;
   expectedTypes: UxIssueType[];
+  expectedVerdict: EvalCaseResult['verdict'];
   predictedTypes: UxIssueType[];
   observedVerdict: EvalCaseResult['verdict'];
   actorActions: string[];
@@ -48,40 +51,23 @@ export interface ConnectedModelCalibrationMetrics {
   fn: number;
 }
 
+export interface ConnectedModelCalibrationExecutionConfig {
+  maxSteps: number;
+  allowScreenshotToProvider: boolean;
+}
+
 export interface ConnectedModelCalibrationResult {
   schemaVersion: 1;
   analysisMode: 'connected_model_behavior_sensitivity';
   provider: { providerId: string; model: string; remote: boolean };
+  probeSuite: ConnectedModelProbeSuiteIdentity;
+  executionConfig: ConnectedModelCalibrationExecutionConfig;
   generatedAt: string;
   metrics: ConnectedModelCalibrationMetrics;
   rows: ConnectedModelCalibrationRow[];
   methodology: string[];
   claimBoundary: string[];
 }
-
-export const connectedModelCalibrationProbes: ConnectedModelCalibrationProbe[] = [
-  {
-    probeId: 'clean-one-click',
-    purpose: 'Measure whether the model invents hesitation/backtracking/retries on a trivial clean path.',
-    html: '<main><h1>Start</h1><p>Press Continue to finish.</p><button onclick="document.querySelector(\'main\').innerHTML=\'<h1>Done</h1><p>Saved.</p>\'">Continue</button></main>',
-    expectedTypes: [],
-    expectedVerdict: 'pass',
-  },
-  {
-    probeId: 'no-feedback-retry',
-    purpose: 'Measure whether the interaction-feedback signal survives natural model behavior.',
-    html: '<main><h1>Start</h1><p>Press Continue to finish.</p><button onclick="window.__n=(window.__n||0)+1;if(window.__n>1)document.querySelector(\'main\').innerHTML=\'<h1>Done</h1><p>Saved.</p>\'">Continue</button></main>',
-    expectedTypes: ['interaction_feedback_issue'],
-    expectedVerdict: 'pass',
-  },
-  {
-    probeId: 'objective-dead-end',
-    purpose: 'Measure whether an objective dead end remains detectable when the actor is a real connected model.',
-    html: '<main><h1>Home</h1><p>The requested item may be in Archive.</p><button onclick="document.querySelector(\'main\').innerHTML=\'<h1>Archive</h1><p>No actions available.</p>\'">Archive</button></main>',
-    expectedTypes: ['journey_breakpoint', 'abandonment_risk'],
-    expectedVerdict: 'inconclusive',
-  },
-];
 
 function evalCase(probe: ConnectedModelCalibrationProbe, now: string): EvalCase {
   return {
@@ -94,27 +80,19 @@ function evalCase(probe: ConnectedModelCalibrationProbe, now: string): EvalCase 
     taskId: `task-${probe.probeId}`,
     title: probe.probeId,
     hypothesis: probe.purpose,
-    persona: {
-      personaId: 'persona-connected-model-calibration',
-      name: 'New user',
-      knowledgeLevel: 'low',
-      patienceTurns: 6,
-      retryTolerance: 2,
-      privacySensitivity: 'medium',
-      behaviorPolicy: ['Only use the visible interface and the stated goal.'],
-      exitConditions: ['Stop when the goal is complete or no safe next action exists.'],
-    },
-    goal: 'Reach the Done state using the visible interface.',
+    persona: { ...connectedModelProbeActorContract.persona },
+    goal: connectedModelProbeActorContract.goal,
     knownInformation: {},
     preconditions: ['Fixture is open'],
     oracle: {
-      expectedOutcome: ['Done'],
-      mustObserve: ['Done'],
-      mustNotObserve: ['Fatal error'],
-      businessRules: [],
-      semanticRubric: ['Goal completion is visibly proven.'],
-      deterministicAssertions: [{ assertionId: 'done-visible', type: 'text_visible', target: 'Done', expected: true, negated: false }],
-      inconclusiveWhen: ['Visible evidence does not prove completion.'],
+      ...connectedModelProbeActorContract.oracle,
+      expectedOutcome: [...connectedModelProbeActorContract.oracle.expectedOutcome],
+      mustObserve: [...connectedModelProbeActorContract.oracle.mustObserve],
+      mustNotObserve: [...connectedModelProbeActorContract.oracle.mustNotObserve],
+      businessRules: [...connectedModelProbeActorContract.oracle.businessRules],
+      semanticRubric: [...connectedModelProbeActorContract.oracle.semanticRubric],
+      deterministicAssertions: connectedModelProbeActorContract.oracle.deterministicAssertions.map((assertion) => ({ ...assertion })),
+      inconclusiveWhen: [...connectedModelProbeActorContract.oracle.inconclusiveWhen],
     },
     coverageDimensions: [{ dimension: 'capability', value: `cap-${probe.probeId}` }],
     riskLevel: 'P2',
@@ -205,6 +183,10 @@ export async function runConnectedModelCalibration(input: {
   if (!input.provider.info.remote) throw new Error('Connected-model calibration requires a remote configured provider.');
   const generatedAt = new Date().toISOString();
   const outputDir = input.outputDir ?? await mkdtemp(join(tmpdir(), 'evalpilot-connected-model-calibration-'));
+  const executionConfig: ConnectedModelCalibrationExecutionConfig = {
+    maxSteps: input.maxSteps ?? 6,
+    allowScreenshotToProvider: input.allowScreenshotToProvider === true,
+  };
   const browser = await chromium.launch({ headless: true });
   const rows: ConnectedModelCalibrationRow[] = [];
   try {
@@ -217,10 +199,10 @@ export async function runConnectedModelCalibration(input: {
         const agentRun = await runAiTestAgent(page, item, input.provider, {
           outputDir: join(outputDir, probe.probeId),
           startingUrl: page.url(),
-          maxSteps: input.maxSteps ?? 6,
+          maxSteps: executionConfig.maxSteps,
           allowRemoteModel: true,
-          allowScreenshotToProvider: input.allowScreenshotToProvider === true,
-          waitPolicy: { initialObservationMs: 25, pollIntervalMs: 50, softTimeoutMs: 150, hardTimeoutMs: 350, progressExtensionMs: 100, maxProgressExtensions: 1 },
+          allowScreenshotToProvider: executionConfig.allowScreenshotToProvider,
+          waitPolicy: connectedModelProbeWaitPolicy,
         });
         const packet = JSON.parse(await readFile(agentRun.evidencePacketPath, 'utf8')) as EvidencePacket;
         const doneVisible = await page.getByText('Done', { exact: true }).isVisible().catch(() => false);
@@ -236,6 +218,7 @@ export async function runConnectedModelCalibration(input: {
           probeId: probe.probeId,
           purpose: probe.purpose,
           expectedTypes: calibrated(probe.expectedTypes),
+          expectedVerdict: probe.expectedVerdict,
           predictedTypes: calibrated(analysis.frictions.map((friction) => friction.type)),
           observedVerdict,
           actorActions: agentRun.decisions.map((decision) => decision.action),
@@ -259,19 +242,22 @@ export async function runConnectedModelCalibration(input: {
       model: input.provider.info.model,
       remote: input.provider.info.remote,
     },
+    probeSuite: { ...connectedModelProbeSuiteIdentity, probeIds: [...connectedModelProbeSuiteIdentity.probeIds] },
+    executionConfig,
     generatedAt,
     metrics: summarizeConnectedModelCalibration(rows),
     rows,
     methodology: [
-      'Runs a connected remote model through three controlled Chromium probes with screenshots withheld by default.',
+      'Runs a connected remote model through a fingerprinted controlled Chromium probe suite with screenshots withheld by default.',
       'Expected friction classes come from independent probe design; the model never receives those labels.',
       'The run verdict is independently derived from the actual final page state (Done visible or not), not from the fixture expectation.',
-      'Measures signal preservation and extra detector signals caused by the connected model plus the normal semantic-verification path.',
+      'Probe-suite fingerprint covers probe content, Actor contract, calibrated detector classes, and the fixed probe wait policy.',
+      'Execution config records maxSteps and screenshot policy separately so runs with different model inputs/budgets are not pooled as variance.',
     ],
     claimBoundary: [
       'This is a connected-model pipeline sensitivity probe, not a human usability study.',
       'Clean-probe findings are treated as possible actor-induced drift and must not be promoted directly to product UX defects.',
-      'Metrics from three probes must not be presented as general real-world UX accuracy.',
+      'Metrics from this small controlled suite must not be presented as general real-world UX accuracy.',
     ],
   };
 }

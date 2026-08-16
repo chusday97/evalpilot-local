@@ -1,10 +1,11 @@
 import type { EvalCaseResult, UxIssueType } from '../../types.js';
-import {
-  connectedModelCalibrationProbes,
-  type ConnectedModelCalibrationMetrics,
-  type ConnectedModelCalibrationResult,
-  type ConnectedModelCalibrationRow,
+import type {
+  ConnectedModelCalibrationExecutionConfig,
+  ConnectedModelCalibrationMetrics,
+  ConnectedModelCalibrationResult,
+  ConnectedModelCalibrationRow,
 } from './connected-model-calibration.js';
+import type { ConnectedModelProbeSuiteIdentity } from './connected-model-probe-suite.js';
 
 export interface ConnectedModelMetricDistribution {
   values: number[];
@@ -52,6 +53,8 @@ export interface ConnectedModelCalibrationVarianceResult {
   schemaVersion: 1;
   analysisMode: 'connected_model_behavior_variance';
   provider: ConnectedModelCalibrationResult['provider'];
+  probeSuite: ConnectedModelProbeSuiteIdentity;
+  executionConfig: ConnectedModelCalibrationExecutionConfig;
   generatedAt: string;
   runCount: number;
   runSummaries: ConnectedModelRunSummary[];
@@ -85,6 +88,10 @@ function sameSignals(expected: UxIssueType[], predicted: UxIssueType[]): boolean
   return expectedSet.size === predictedSet.size && [...expectedSet].every((value) => predictedSet.has(value));
 }
 
+function sameTypeList(left: UxIssueType[], right: UxIssueType[]): boolean {
+  return sameSignals(left, right);
+}
+
 function frequency(types: UxIssueType[], rows: ConnectedModelCalibrationRow[]): ConnectedModelSignalFrequency[] {
   return [...new Set(types)]
     .sort((left, right) => left.localeCompare(right))
@@ -106,24 +113,31 @@ function actionSequenceFrequencies(rows: ConnectedModelCalibrationRow[]): Connec
 }
 
 function probeStability(results: ConnectedModelCalibrationResult[]): ConnectedModelProbeStability[] {
-  return connectedModelCalibrationProbes.map((probe) => {
-    const rows = results.flatMap((result) => result.rows.filter((row) => row.probeId === probe.probeId));
+  const probeIds = results[0]!.probeSuite.probeIds;
+  return probeIds.map((probeId) => {
+    const rows = results.flatMap((result) => result.rows.filter((row) => row.probeId === probeId));
     if (rows.length !== results.length) {
-      throw new Error(`Connected-model variance is missing probe ${probe.probeId} in one or more runs.`);
+      throw new Error(`Connected-model variance is missing probe ${probeId} in one or more runs.`);
     }
-    const expectedSet = new Set(probe.expectedTypes);
+    const reference = rows[0]!;
+    for (const row of rows) {
+      if (!sameTypeList(row.expectedTypes, reference.expectedTypes) || row.expectedVerdict !== reference.expectedVerdict) {
+        throw new Error(`Connected-model variance found inconsistent ground truth for probe ${probeId}.`);
+      }
+    }
+    const expectedSet = new Set(reference.expectedTypes);
     const extraTypes = rows.flatMap((row) => row.predictedTypes.filter((type) => !expectedSet.has(type)));
-    const exactSignalMatchCount = rows.filter((row) => row.failureSource !== 'evaluator' && sameSignals(probe.expectedTypes, row.predictedTypes)).length;
+    const exactSignalMatchCount = rows.filter((row) => row.failureSource !== 'evaluator' && sameSignals(reference.expectedTypes, row.predictedTypes)).length;
     const verdictCounts: Record<EvalCaseResult['verdict'], number> = { pass: 0, fail: 0, inconclusive: 0 };
     for (const row of rows) verdictCounts[row.observedVerdict] += 1;
-    const verdictMatchCount = rows.filter((row) => row.failureSource !== 'evaluator' && row.observedVerdict === probe.expectedVerdict).length;
+    const verdictMatchCount = rows.filter((row) => row.failureSource !== 'evaluator' && row.observedVerdict === reference.expectedVerdict).length;
     const providerFailureCount = rows.filter((row) => row.failureSource === 'evaluator').length;
     return {
-      probeId: probe.probeId,
+      probeId,
       runCount: rows.length,
-      expectedTypes: [...probe.expectedTypes],
-      expectedVerdict: probe.expectedVerdict,
-      expectedSignalPresence: frequency(probe.expectedTypes, rows),
+      expectedTypes: [...reference.expectedTypes],
+      expectedVerdict: reference.expectedVerdict,
+      expectedSignalPresence: frequency(reference.expectedTypes, rows),
       extraSignalPresence: frequency(extraTypes, rows),
       exactSignalMatchCount,
       exactSignalMatchRate: exactSignalMatchCount / rows.length,
@@ -137,14 +151,26 @@ function probeStability(results: ConnectedModelCalibrationResult[]): ConnectedMo
   });
 }
 
+function sameExecutionConfig(left: ConnectedModelCalibrationExecutionConfig, right: ConnectedModelCalibrationExecutionConfig): boolean {
+  return left.maxSteps === right.maxSteps && left.allowScreenshotToProvider === right.allowScreenshotToProvider;
+}
+
 export function summarizeConnectedModelCalibrationVariance(
   results: ConnectedModelCalibrationResult[],
 ): ConnectedModelCalibrationVarianceResult {
   if (!results.length) throw new Error('Connected-model variance requires at least one completed calibration run.');
   const provider = results[0]!.provider;
+  const probeSuite = results[0]!.probeSuite;
+  const executionConfig = results[0]!.executionConfig;
   for (const result of results) {
     if (result.provider.providerId !== provider.providerId || result.provider.model !== provider.model) {
       throw new Error('Connected-model variance can only aggregate runs from the same providerId and model.');
+    }
+    if (result.probeSuite.version !== probeSuite.version || result.probeSuite.fingerprint !== probeSuite.fingerprint) {
+      throw new Error('Connected-model variance can only aggregate runs from the same probe-suite fingerprint.');
+    }
+    if (!sameExecutionConfig(result.executionConfig, executionConfig)) {
+      throw new Error('Connected-model variance can only aggregate runs with the same execution config.');
     }
   }
 
@@ -155,6 +181,8 @@ export function summarizeConnectedModelCalibrationVariance(
     schemaVersion: 1,
     analysisMode: 'connected_model_behavior_variance',
     provider: { ...provider },
+    probeSuite: { ...probeSuite, probeIds: [...probeSuite.probeIds] },
+    executionConfig: { ...executionConfig },
     generatedAt: new Date().toISOString(),
     runCount,
     runSummaries: results.map((result, index) => ({ runIndex: index + 1, generatedAt: result.generatedAt, metrics: result.metrics })),
@@ -170,10 +198,10 @@ export function summarizeConnectedModelCalibrationVariance(
     probeStability: probeStability(results),
     varianceNote: runCount === 1
       ? 'Only one run is present. This artifact records a baseline sample but cannot estimate model variance.'
-      : `Variance summary across ${runCount} independent runs of the same provider/model. No pass/fail threshold is inferred from this sample.`,
+      : `Variance summary across ${runCount} independent runs of the same provider/model, probe suite, and execution config. No pass/fail threshold is inferred from this sample.`,
     claimBoundary: [
       'Variance describes repeated connected-model behavior on controlled probes, not human usability variance.',
-      'Runs from different provider/model identities are intentionally not pooled into one aggregate.',
+      'Runs from different provider/model identities, probe-suite fingerprints, or execution configs are intentionally not pooled.',
       'Signal frequencies and ranges are descriptive; this layer does not define acceptance thresholds.',
       'Raw per-run artifacts remain the primary evidence and should be retained alongside this aggregate.',
     ],
