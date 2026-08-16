@@ -147,14 +147,23 @@ const cases: EvalCase[] = [
   }),
 ];
 
+const prerequisiteByCaseId = new Map<string, string>([
+  ['blind-record-existing-livestock', 'blind-create-usable-aquarium'],
+  ['blind-daily-check-risk', 'blind-record-existing-livestock'],
+]);
+
 interface ProviderAudit {
   schemaName: string;
   caseId: string;
   markerPresent: boolean;
+  status: 'ok' | 'provider_failure' | 'error';
+  errorCode: string | null;
+  errorMessage: string | null;
 }
 
 class AuditedProvider implements AiProvider {
   readonly info;
+  private activeCaseId = 'unknown';
 
   constructor(
     private readonly delegate: AiProvider,
@@ -163,14 +172,29 @@ class AuditedProvider implements AiProvider {
     this.info = delegate.info;
   }
 
+  setActiveCase(caseId: string): void {
+    this.activeCaseId = caseId;
+  }
+
   async generateStructured<T>(request: AiStructuredRequest, schema: ZodType<T>): Promise<T> {
     const combinedPrompt = `${request.systemPrompt}\n${request.userPrompt}`;
-    this.audits.push({
+    const audit: ProviderAudit = {
       schemaName: request.schemaName,
-      caseId: String(request.metadata.caseId ?? 'unknown'),
+      caseId: String(request.metadata.caseId ?? this.activeCaseId),
       markerPresent: combinedPrompt.includes(oracleOnlyMarker),
-    });
-    return this.delegate.generateStructured(request, schema);
+      status: 'ok',
+      errorCode: null,
+      errorMessage: null,
+    };
+    this.audits.push(audit);
+    try {
+      return await this.delegate.generateStructured(request, schema);
+    } catch (error) {
+      audit.status = error instanceof AiProviderError ? 'provider_failure' : 'error';
+      audit.errorCode = error instanceof AiProviderError ? error.code : null;
+      audit.errorMessage = error instanceof Error ? error.message : String(error);
+      throw error;
+    }
   }
 }
 
@@ -191,11 +215,13 @@ if (process.argv.includes('--preflight')) {
       maxAgentSteps,
       allowScreenshotToProvider: false,
       sequentialSharedBrowserContext: true,
+      prerequisiteCascadeGuard: true,
     },
     claimBoundary: [
       'Preflight is local planning only and makes zero remote provider calls.',
       'This smoke uses the pinned AquaGuide commit and the existing three Blind Experience journeys.',
       'A single connected run can expose protocol or behavior badcases but cannot estimate model variance.',
+      'Dependent journeys are blocked when their upstream journey does not pass, preventing cascade misattribution.',
       'Screenshots are not sent to the provider.',
     ],
   };
@@ -213,10 +239,45 @@ if (process.argv.includes('--preflight')) {
   const context = await browser.newContext();
   const page = await context.newPage();
   const taskResults: Array<Record<string, unknown>> = [];
+  const passedCaseIds = new Set<string>();
 
   try {
     for (const evalCase of cases) {
+      const prerequisiteCaseId = prerequisiteByCaseId.get(evalCase.caseId) ?? null;
+      if (prerequisiteCaseId && !passedCaseIds.has(prerequisiteCaseId)) {
+        process.stderr.write(`[connected-aquaguide] BLOCKED ${evalCase.caseId}: prerequisite ${prerequisiteCaseId} did not pass.\n`);
+        taskResults.push({
+          caseId: evalCase.caseId,
+          goal: evalCase.goal,
+          executionStatus: 'blocked_prerequisite',
+          blockedByCaseId: prerequisiteCaseId,
+          runtimeFailureSource: null,
+          runId: null,
+          agentStatus: null,
+          agentFailureSource: null,
+          verdict: null,
+          failureSource: null,
+          analysisMode: null,
+          analysisStatus: null,
+          actionSequence: [],
+          actionCount: 0,
+          backtrackCount: 0,
+          retryCount: 0,
+          repeatedInputCount: 0,
+          abandoned: false,
+          frictionTypes: [],
+          findingTypes: [],
+          fillValues: [],
+          experiencePath: null,
+          error: `Prerequisite ${prerequisiteCaseId} did not pass; dependent journey was not executed.`,
+        });
+        continue;
+      }
+
       const startingUrl = evalCase.caseId.includes('create') ? `${targetUrl}/welcome` : `${targetUrl}/aquarium`;
+      provider.setActiveCase(evalCase.caseId);
+      const auditStart = providerAudits.length;
+      process.stderr.write(`[connected-aquaguide] START ${evalCase.caseId}\n`);
       try {
         const outcome = await runBlindExperienceCase({
           page,
@@ -232,12 +293,25 @@ if (process.argv.includes('--preflight')) {
           maxAgentSteps,
           agentWaitTimeoutMs: 20_000,
         });
+        const caseAudits = providerAudits.slice(auditStart);
+        const providerFailed = caseAudits.some((item) => item.status === 'provider_failure');
+        const runtimeFailureSource = providerFailed
+          ? 'provider'
+          : outcome.runtimeFailureSource ?? (outcome.result.failureSource === 'evaluator' ? 'evaluator' : null);
         const fills = outcome.agentRun.decisions
           .filter((decision) => decision.action === 'fill')
           .map((decision) => decision.value);
+        const passed = outcome.result.verdict === 'pass'
+          && outcome.result.failureSource === null
+          && outcome.agentRun.status === 'completed'
+          && runtimeFailureSource === null;
+        if (passed) passedCaseIds.add(evalCase.caseId);
         taskResults.push({
           caseId: evalCase.caseId,
           goal: evalCase.goal,
+          executionStatus: 'executed',
+          blockedByCaseId: null,
+          runtimeFailureSource,
           runId: outcome.agentRun.runId,
           agentStatus: outcome.agentRun.status,
           agentFailureSource: outcome.agentRun.failureSource,
@@ -255,18 +329,24 @@ if (process.argv.includes('--preflight')) {
           findingTypes: outcome.experience.findings.map((item) => item.type),
           fillValues: fills,
           experiencePath: outcome.experiencePath,
-          error: null,
+          error: outcome.agentRun.error,
         });
+        process.stderr.write(`[connected-aquaguide] END ${evalCase.caseId}: verdict=${outcome.result.verdict}; resultSource=${outcome.result.failureSource ?? 'none'}; runtimeSource=${runtimeFailureSource ?? 'none'}; agent=${outcome.agentRun.status}.\n`);
       } catch (error) {
-        const providerFailure = error instanceof AiProviderError;
+        const caseAudits = providerAudits.slice(auditStart);
+        const providerFailure = error instanceof AiProviderError || caseAudits.some((item) => item.status === 'provider_failure');
+        const runtimeFailureSource = providerFailure ? 'provider' : 'evaluator';
         taskResults.push({
           caseId: evalCase.caseId,
           goal: evalCase.goal,
+          executionStatus: 'executed',
+          blockedByCaseId: null,
+          runtimeFailureSource,
           runId: null,
           agentStatus: 'inconclusive',
           agentFailureSource: providerFailure ? null : 'evaluator',
           verdict: 'inconclusive',
-          failureSource: providerFailure ? 'provider' : 'evaluator',
+          failureSource: 'evaluator',
           analysisMode: null,
           analysisStatus: 'missing',
           actionSequence: [],
@@ -281,7 +361,7 @@ if (process.argv.includes('--preflight')) {
           experiencePath: null,
           error: error instanceof Error ? error.message : String(error),
         });
-        break;
+        process.stderr.write(`[connected-aquaguide] END ${evalCase.caseId}: runtimeSource=${runtimeFailureSource}; uncaught=${error instanceof Error ? error.message : String(error)}\n`);
       }
     }
   } finally {
@@ -289,18 +369,29 @@ if (process.argv.includes('--preflight')) {
     await browser.close();
   }
 
+  const executedTaskResults = taskResults.filter((item) => item.executionStatus === 'executed');
+  const blockedTaskResults = taskResults.filter((item) => item.executionStatus === 'blocked_prerequisite');
   const actorRequests = providerAudits.filter((item) => item.schemaName === 'agent_decision');
   const judgeRequests = providerAudits.filter((item) => item.schemaName === 'semantic_judge_result');
   const actorOracleLeakCount = actorRequests.filter((item) => item.markerPresent).length;
-  const judgeOracleVisible = judgeRequests.length === cases.length && judgeRequests.every((item) => item.markerPresent);
+  const judgeEligibleCaseIds = executedTaskResults
+    .filter((item) => item.runtimeFailureSource === null)
+    .map((item) => String(item.caseId));
+  const judgeOracleVisible = judgeRequests.every((item) => item.markerPresent)
+    && judgeEligibleCaseIds.every((caseId) => judgeRequests.some((item) => item.caseId === caseId && item.markerPresent));
   const validBlindStatuses = new Set(['evaluated', 'suppressed_functional_failure', 'insufficient_evidence']);
-  const allBlind = taskResults.length === cases.length && taskResults.every((item) =>
+  const allBlind = executedTaskResults.length > 0 && executedTaskResults.every((item) =>
     item.analysisMode === 'blind_experience_run' && validBlindStatuses.has(String(item.analysisStatus)));
-  const providerFailureCount = taskResults.filter((item) => item.failureSource === 'provider').length;
-  const evaluatorFailureCount = taskResults.filter((item) => item.failureSource === 'evaluator' || item.agentFailureSource === 'evaluator').length;
-  const unknownFailureCount = taskResults.filter((item) => item.failureSource === 'unknown').length;
+  const providerFailureCount = executedTaskResults.filter((item) => item.runtimeFailureSource === 'provider').length;
+  const evaluatorFailureCount = executedTaskResults.filter((item) => item.runtimeFailureSource === 'evaluator').length;
+  const unknownFailureCount = executedTaskResults.filter((item) => item.failureSource === 'unknown').length;
+  const blockedPrerequisiteCount = blockedTaskResults.length;
   const allProductJourneysPassed = taskResults.length === cases.length
-    && taskResults.every((item) => item.verdict === 'pass' && item.failureSource === null && item.agentStatus === 'completed');
+    && taskResults.every((item) => item.executionStatus === 'executed'
+      && item.verdict === 'pass'
+      && item.failureSource === null
+      && item.runtimeFailureSource === null
+      && item.agentStatus === 'completed');
   const createResult = taskResults.find((item) => item.caseId === 'blind-create-usable-aquarium');
   const knownInformationFaithful = JSON.stringify(createResult?.fillValues ?? []) === JSON.stringify(['60', '30', '30']);
   const protocolHealthy = allBlind
@@ -311,7 +402,7 @@ if (process.argv.includes('--preflight')) {
     && unknownFailureCount === 0;
 
   const diagnostic = {
-    schemaVersion: 1,
+    schemaVersion: 2,
     analysisMode: 'connected_aquaguide_blind_smoke',
     generatedAt: new Date().toISOString(),
     targetAppGitSha: pinnedCommit,
@@ -321,6 +412,7 @@ if (process.argv.includes('--preflight')) {
       maxAgentSteps,
       allowScreenshotToProvider: false,
       sequentialSharedBrowserContext: true,
+      prerequisiteCascadeGuard: true,
     },
     caseIds: cases.map((item) => item.caseId),
     protocolHealthy,
@@ -330,18 +422,23 @@ if (process.argv.includes('--preflight')) {
     providerFailureCount,
     evaluatorFailureCount,
     unknownFailureCount,
+    blockedPrerequisiteCount,
     allProductJourneysPassed,
     knownInformationFaithful,
     requestCounts: {
       total: providerAudits.length,
       actor: actorRequests.length,
       judge: judgeRequests.length,
+      providerFailures: providerAudits.filter((item) => item.status === 'provider_failure').length,
     },
     taskResults,
     claimBoundary: [
       'This is one connected-model smoke on a pinned real product, not a model reliability estimate or human usability study.',
+      'runtimeFailureSource separates provider transport/model failures from evaluator runtime failures without changing the persisted EvalCaseResult schema in this narrow regression fix.',
+      'A runner/Judge runtime interruption is inconclusive and cannot be promoted to Product Failure merely because the interrupted final page lacks success signals.',
+      'Dependent journeys are marked blocked_prerequisite and are not executed when their upstream journey does not pass; a blocked downstream journey is not a second product failure.',
       'Product verdicts, normal Actor abandonment, friction findings, and known-information mistakes remain evidence; they do not by themselves make the protocol unhealthy.',
-      'Provider/evaluator/unknown-attribution failures, Oracle leakage, missing Judge Oracle visibility, or missing Blind Experience artifacts make the protocol unhealthy.',
+      'Provider/evaluator/unknown-attribution failures, Oracle leakage, missing required Judge Oracle visibility, or missing Blind Experience artifacts make the protocol unhealthy.',
       'No screenshot was sent to the provider.',
     ],
   };
@@ -354,9 +451,9 @@ if (process.argv.includes('--preflight')) {
   if (jsonOutput) {
     process.stdout.write(`${JSON.stringify({ diagnosticPath, auditPath, ...diagnostic }, null, 2)}\n`);
   } else {
-    process.stdout.write(`Connected AquaGuide Blind Smoke: protocol=${protocolHealthy ? 'HEALTHY' : 'UNHEALTHY'}; product journeys passed=${taskResults.filter((item) => item.verdict === 'pass').length}/${taskResults.length}\n`);
+    process.stdout.write(`Connected AquaGuide Blind Smoke: protocol=${protocolHealthy ? 'HEALTHY' : 'UNHEALTHY'}; product journeys passed=${taskResults.filter((item) => item.verdict === 'pass').length}/${taskResults.length}; blocked=${blockedPrerequisiteCount}\n`);
     for (const item of taskResults) {
-      process.stdout.write(`- ${item.caseId}: verdict=${item.verdict}; failureSource=${item.failureSource ?? 'none'}; actions=${JSON.stringify(item.actionSequence)}\n`);
+      process.stdout.write(`- ${item.caseId}: execution=${item.executionStatus}; verdict=${item.verdict ?? 'n/a'}; resultSource=${item.failureSource ?? 'none'}; runtimeSource=${item.runtimeFailureSource ?? 'none'}; actions=${JSON.stringify(item.actionSequence)}\n`);
     }
     process.stdout.write(`- Actor Oracle leaks: ${actorOracleLeakCount}; Judge Oracle visible: ${judgeOracleVisible}; provider failures: ${providerFailureCount}; evaluator failures: ${evaluatorFailureCount}; unknown failures: ${unknownFailureCount}\n`);
     process.stdout.write(`- Diagnostic: ${diagnosticPath}\n`);

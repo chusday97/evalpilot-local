@@ -2,14 +2,20 @@ import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import type { Page } from 'playwright';
 import type { AiProvider } from '../ai/provider.js';
-import type { EvalCase, EvalCaseResult } from '../../types.js';
+import type { EvalCase, EvalCaseResult, EvidencePacket } from '../../types.js';
 import type { SyntheticFileFixture } from '../scenario/file-fixture-resolver.js';
+import { runDeterministicJudge } from '../judge/deterministic-judge.js';
+import { saveEvalCaseResult } from '../judge/eval-result-store.js';
 import { judgeEvalCase } from '../judge/hybrid-judge.js';
-import { evalCaseResultSchema } from '../judge/schemas.js';
+import {
+  deterministicJudgeResultSchema,
+  evalCaseResultSchema,
+  semanticJudgeResultSchema,
+} from '../judge/schemas.js';
 import { runAiTestAgent } from '../test-agent/agent-runner.js';
 import { evidencePacketSchema } from '../test-agent/schemas.js';
-import { classifyEvaluatorFailure, evaluatorFailureResult } from '../evaluator-errors/classifier.js';
 import { writeJsonAtomic } from '../utils/file-system.js';
+import { writeSchemaJsonAtomic } from '../utils/schema-file.js';
 import { analyzeBlindExperience, type BlindExperienceAnalysis } from './blind-experience-analyzer.js';
 
 /**
@@ -40,6 +46,48 @@ export interface BlindExperienceRunResult {
   result: EvalCaseResult;
   experience: BlindExperienceAnalysis;
   experiencePath: string;
+  runtimeFailureSource: 'evaluator' | null;
+}
+
+async function runtimeFailureResult(input: {
+  outputDir: string;
+  evalCase: EvalCase;
+  packet: EvidencePacket;
+  createdAt: string;
+  technicalReason: string;
+}): Promise<EvalCaseResult> {
+  const deterministic = runDeterministicJudge(input.evalCase, input.packet);
+  const semantic = semanticJudgeResultSchema.parse({
+    verdict: 'inconclusive',
+    taskCompletion: 'unknown',
+    summary: 'EvalPilot 的运行时或独立 Judge 没有完整结束，本次不能据此判断产品通过或失败。',
+    whatWorked: [],
+    whatFailed: [],
+    whyItMatters: ['未完整执行的 Blind Experience 不能因为最终页面缺少成功信号而自动升级为 Product Failure。'],
+    confirmedFacts: ['已保留中断前的浏览器证据与确定性检查结果。'],
+    hypotheses: [],
+    unknowns: [input.technicalReason],
+    evidenceRefs: deterministic.evidenceRefs,
+    confidence: 0,
+  });
+  const result = evalCaseResultSchema.parse({
+    runId: input.packet.runId,
+    caseId: input.evalCase.caseId,
+    verdict: 'inconclusive',
+    failureSource: 'evaluator',
+    severity: null,
+    deterministic,
+    semantic,
+    evidencePacketPath: `runs/${input.packet.runId}/evidence-packet.json`,
+    createdAt: input.createdAt,
+  });
+  const runDirectory = resolve(input.outputDir, 'runs', input.packet.runId);
+  await Promise.all([
+    writeSchemaJsonAtomic(resolve(runDirectory, 'deterministic-judge.json'), deterministic, deterministicJudgeResultSchema),
+    writeSchemaJsonAtomic(resolve(runDirectory, 'semantic-judge.json'), semantic, semanticJudgeResultSchema),
+    saveEvalCaseResult(input.outputDir, result),
+  ]);
+  return result;
 }
 
 export async function runBlindExperienceCase(input: {
@@ -82,19 +130,45 @@ export async function runBlindExperienceCase(input: {
     now: input.now,
   });
   const packet = evidencePacketSchema.parse(JSON.parse(await readFile(agentRun.evidencePacketPath, 'utf8')));
+  let runtimeFailureSource: BlindExperienceRunResult['runtimeFailureSource'] = agentRun.failureSource;
 
-  // The Judge receives the original case with the real Oracle. This is the core knowledge
-  // separation: Actor chooses from visible UI; Judge evaluates against hidden success rules.
-  const rawJudgedResult = await judgeEvalCase({
-    outputDir: input.outputDir,
-    evalCase: input.evalCase,
-    packet,
-    provider: input.provider,
-    allowRemoteModel: input.allowRemoteModel,
-    createdAt: agentRun.completedAt,
-  });
+  // A runner-level evaluator interruption means the target journey did not finish under a
+  // trustworthy evaluator runtime. Preserve deterministic evidence, but do not let missing
+  // success strings on the interrupted final page become a Product Failure.
+  let rawJudgedResult: EvalCaseResult;
+  if (agentRun.failureSource === 'evaluator') {
+    rawJudgedResult = await runtimeFailureResult({
+      outputDir: input.outputDir,
+      evalCase: input.evalCase,
+      packet,
+      createdAt: agentRun.completedAt,
+      technicalReason: agentRun.error ?? 'Blind Actor runtime ended inconclusively before an independent product verdict could be formed.',
+    });
+  } else {
+    try {
+      // The Judge receives the original case with the real Oracle. This is the core knowledge
+      // separation: Actor chooses from visible UI; Judge evaluates against hidden success rules.
+      rawJudgedResult = await judgeEvalCase({
+        outputDir: input.outputDir,
+        evalCase: input.evalCase,
+        packet,
+        provider: input.provider,
+        allowRemoteModel: input.allowRemoteModel,
+        createdAt: agentRun.completedAt,
+      });
+    } catch (judgeError) {
+      runtimeFailureSource = 'evaluator';
+      rawJudgedResult = await runtimeFailureResult({
+        outputDir: input.outputDir,
+        evalCase: input.evalCase,
+        packet,
+        createdAt: agentRun.completedAt,
+        technicalReason: `Independent Judge failed before producing a trustworthy verdict: ${judgeError instanceof Error ? judgeError.message : String(judgeError)}`,
+      });
+    }
+  }
 
-  const safetyGatedResult = agentRun.status === 'blocked_by_safety'
+  const result = agentRun.status === 'blocked_by_safety'
     ? evalCaseResultSchema.parse({
       ...rawJudgedResult,
       verdict: 'inconclusive',
@@ -114,17 +188,12 @@ export async function runBlindExperienceCase(input: {
       },
     })
     : rawJudgedResult;
+  if (agentRun.status === 'blocked_by_safety') runtimeFailureSource = 'evaluator';
 
   // A normal Blind Actor abandonment is behavioral evidence, not automatically an evaluator
-  // failure. Only classify here when the runner itself reports an evaluator failure. This is
+  // failure. Only runner/Judge runtime interruptions are forced inconclusive above. This is
   // deliberately different from functional evaluation, where ambiguous abandonment can be
   // promoted to an evaluator badcase.
-  let result = safetyGatedResult;
-  if (agentRun.failureSource === 'evaluator') {
-    const classification = classifyEvaluatorFailure({ agentRun, packet, result: safetyGatedResult });
-    if (classification) result = evaluatorFailureResult(safetyGatedResult, classification);
-  }
-
   const experience = analyzeBlindExperience({
     evalCase: input.evalCase,
     result,
@@ -133,5 +202,5 @@ export async function runBlindExperienceCase(input: {
   });
   const experiencePath = resolve(input.outputDir, 'runs', agentRun.runId, 'blind-experience-analysis.json');
   await writeJsonAtomic(experiencePath, experience);
-  return { agentRun, result, experience, experiencePath };
+  return { agentRun, result, experience, experiencePath, runtimeFailureSource };
 }
