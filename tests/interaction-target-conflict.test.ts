@@ -240,7 +240,7 @@ function run(status: AiTestAgentRun['status']): Pick<AiTestAgentRun, 'status' | 
 }
 
 describe('interaction target conflict regression', () => {
-  it('emits a high-confidence P3 conflict when a later action recovers', () => {
+  it('emits a high-confidence P3 usability finding when a later action recovers', () => {
     const frictions = detectDeterministicExecutionFrictions({
       featureId: 'cap-record-livestock',
       personaId: 'persona-new-user',
@@ -250,10 +250,11 @@ describe('interaction target conflict regression', () => {
 
     expect(frictions).toHaveLength(1);
     expect(frictions[0]).toEqual(expect.objectContaining({
-      type: 'interaction_target_conflict',
+      type: 'usability_issue',
       severity: 'P3',
       confidence: 'high',
     }));
+    expect(frictions[0]?.observedBehavior).toContain('交互目标冲突');
     expect(frictions[0]?.observedBehavior).toContain('标准款');
     expect(frictions[0]?.observedBehavior).toContain('Corydoras aeneus');
     expect(frictions[0]?.evidence).toEqual(expect.arrayContaining([
@@ -295,8 +296,10 @@ describe('interaction target conflict regression', () => {
     expect(analysis.analysisStatus).toBe('insufficient_evidence');
     expect(analysis.functionalVerdict).toBe('inconclusive');
     expect(analysis.failureSource).toBe('evaluator');
-    expect(analysis.frictions.map((item) => item.type)).toEqual(['interaction_target_conflict']);
-    expect(analysis.findings.map((item) => item.type)).toEqual(['interaction_target_conflict']);
+    expect(analysis.frictions.map((item) => item.type)).toEqual(['usability_issue']);
+    expect(analysis.findings.map((item) => item.type)).toEqual(['usability_issue']);
+    expect(analysis.findings[0]?.confirmedFacts.join(' ')).toContain('交互目标冲突');
+    expect(analysis.findings[0]?.recommendation).toContain('点击热区');
     expect(analysis.findings[0]?.functionalTaskPassed).toBe(false);
     expect(analysis.authenticityNotice.join(' ')).toContain('终局证据仍不足');
   });
