@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 import type { ZodType } from 'zod';
@@ -6,7 +6,9 @@ import type { AiStructuredRequest, EvalCase } from '../types.js';
 import { AiProviderError, type AiProvider } from '../src/ai/provider.js';
 import { aiConnectionStatus } from '../src/ai/provider-connection.js';
 import { configuredEvaluationProvider } from '../src/evaluation/evaluation-orchestrator.js';
+import { evidencePacketSchema } from '../src/test-agent/schemas.js';
 import { runBlindExperienceCase } from '../src/ux-evaluation/blind-experience-service.js';
+import { collectObservedPreFailureSignals } from '../src/ux-evaluation/pre-failure-signals.js';
 
 function arg(name: string, fallback?: string): string {
   const index = process.argv.indexOf(name);
@@ -216,12 +218,14 @@ if (process.argv.includes('--preflight')) {
       allowScreenshotToProvider: false,
       sequentialSharedBrowserContext: true,
       prerequisiteCascadeGuard: true,
+      preFailureSignalSidecar: true,
     },
     claimBoundary: [
       'Preflight is local planning only and makes zero remote provider calls.',
       'This smoke uses the pinned AquaGuide commit and the existing three Blind Experience journeys.',
       'A single connected run can expose protocol or behavior badcases but cannot estimate model variance.',
       'Dependent journeys are blocked when their upstream journey does not pass, preventing cascade misattribution.',
+      'Recoverable action execution failures are preserved as sidecar evidence and do not change the terminal verdict by themselves.',
       'Screenshots are not sent to the provider.',
     ],
   };
@@ -252,6 +256,7 @@ if (process.argv.includes('--preflight')) {
           executionStatus: 'blocked_prerequisite',
           blockedByCaseId: prerequisiteCaseId,
           runtimeFailureSource: null,
+          observedPreFailureSignals: [],
           runId: null,
           agentStatus: null,
           agentFailureSource: null,
@@ -298,6 +303,11 @@ if (process.argv.includes('--preflight')) {
         const runtimeFailureSource = providerFailed
           ? 'provider'
           : outcome.runtimeFailureSource ?? (outcome.result.failureSource === 'evaluator' ? 'evaluator' : null);
+        const evidencePacket = evidencePacketSchema.parse(JSON.parse(await readFile(outcome.agentRun.evidencePacketPath, 'utf8')));
+        const observedPreFailureSignals = collectObservedPreFailureSignals({
+          agentRun: outcome.agentRun,
+          evidencePacket,
+        });
         const fills = outcome.agentRun.decisions
           .filter((decision) => decision.action === 'fill')
           .map((decision) => decision.value);
@@ -312,6 +322,7 @@ if (process.argv.includes('--preflight')) {
           executionStatus: 'executed',
           blockedByCaseId: null,
           runtimeFailureSource,
+          observedPreFailureSignals,
           runId: outcome.agentRun.runId,
           agentStatus: outcome.agentRun.status,
           agentFailureSource: outcome.agentRun.failureSource,
@@ -331,7 +342,7 @@ if (process.argv.includes('--preflight')) {
           experiencePath: outcome.experiencePath,
           error: outcome.agentRun.error,
         });
-        process.stderr.write(`[connected-aquaguide] END ${evalCase.caseId}: verdict=${outcome.result.verdict}; resultSource=${outcome.result.failureSource ?? 'none'}; runtimeSource=${runtimeFailureSource ?? 'none'}; agent=${outcome.agentRun.status}.\n`);
+        process.stderr.write(`[connected-aquaguide] END ${evalCase.caseId}: verdict=${outcome.result.verdict}; resultSource=${outcome.result.failureSource ?? 'none'}; runtimeSource=${runtimeFailureSource ?? 'none'}; preFailureSignals=${observedPreFailureSignals.length}; agent=${outcome.agentRun.status}.\n`);
       } catch (error) {
         const caseAudits = providerAudits.slice(auditStart);
         const providerFailure = error instanceof AiProviderError || caseAudits.some((item) => item.status === 'provider_failure');
@@ -342,6 +353,7 @@ if (process.argv.includes('--preflight')) {
           executionStatus: 'executed',
           blockedByCaseId: null,
           runtimeFailureSource,
+          observedPreFailureSignals: [],
           runId: null,
           agentStatus: 'inconclusive',
           agentFailureSource: providerFailure ? null : 'evaluator',
@@ -386,6 +398,9 @@ if (process.argv.includes('--preflight')) {
   const evaluatorFailureCount = executedTaskResults.filter((item) => item.runtimeFailureSource === 'evaluator').length;
   const unknownFailureCount = executedTaskResults.filter((item) => item.failureSource === 'unknown').length;
   const blockedPrerequisiteCount = blockedTaskResults.length;
+  const observedPreFailureSignalCount = executedTaskResults.reduce((total, item) => (
+    total + (Array.isArray(item.observedPreFailureSignals) ? item.observedPreFailureSignals.length : 0)
+  ), 0);
   const allProductJourneysPassed = taskResults.length === cases.length
     && taskResults.every((item) => item.executionStatus === 'executed'
       && item.verdict === 'pass'
@@ -402,7 +417,7 @@ if (process.argv.includes('--preflight')) {
     && unknownFailureCount === 0;
 
   const diagnostic = {
-    schemaVersion: 2,
+    schemaVersion: 3,
     analysisMode: 'connected_aquaguide_blind_smoke',
     generatedAt: new Date().toISOString(),
     targetAppGitSha: pinnedCommit,
@@ -413,6 +428,7 @@ if (process.argv.includes('--preflight')) {
       allowScreenshotToProvider: false,
       sequentialSharedBrowserContext: true,
       prerequisiteCascadeGuard: true,
+      preFailureSignalSidecar: true,
     },
     caseIds: cases.map((item) => item.caseId),
     protocolHealthy,
@@ -423,6 +439,7 @@ if (process.argv.includes('--preflight')) {
     evaluatorFailureCount,
     unknownFailureCount,
     blockedPrerequisiteCount,
+    observedPreFailureSignalCount,
     allProductJourneysPassed,
     knownInformationFaithful,
     requestCounts: {
@@ -435,9 +452,11 @@ if (process.argv.includes('--preflight')) {
     claimBoundary: [
       'This is one connected-model smoke on a pinned real product, not a model reliability estimate or human usability study.',
       'runtimeFailureSource separates provider transport/model failures from evaluator runtime failures without changing the persisted EvalCaseResult schema in this narrow regression fix.',
+      'observedPreFailureSignals preserves deterministic action execution failures that occurred before the final task outcome; these sidecar signals do not override the terminal runtime failure or automatically prove a Product Failure.',
+      'A pointer_interception signal records what Playwright deterministically observed at the product/evaluator interaction boundary; human-user impact still requires separate confirmation.',
       'A runner/Judge runtime interruption is inconclusive and cannot be promoted to Product Failure merely because the interrupted final page lacks success signals.',
       'Dependent journeys are marked blocked_prerequisite and are not executed when their upstream journey does not pass; a blocked downstream journey is not a second product failure.',
-      'Product verdicts, normal Actor abandonment, friction findings, and known-information mistakes remain evidence; they do not by themselves make the protocol unhealthy.',
+      'Product verdicts, normal Actor abandonment, friction findings, known-information mistakes, and recoverable action execution signals remain evidence; they do not by themselves make the protocol unhealthy.',
       'Provider/evaluator/unknown-attribution failures, Oracle leakage, missing required Judge Oracle visibility, or missing Blind Experience artifacts make the protocol unhealthy.',
       'No screenshot was sent to the provider.',
     ],
@@ -451,9 +470,9 @@ if (process.argv.includes('--preflight')) {
   if (jsonOutput) {
     process.stdout.write(`${JSON.stringify({ diagnosticPath, auditPath, ...diagnostic }, null, 2)}\n`);
   } else {
-    process.stdout.write(`Connected AquaGuide Blind Smoke: protocol=${protocolHealthy ? 'HEALTHY' : 'UNHEALTHY'}; product journeys passed=${taskResults.filter((item) => item.verdict === 'pass').length}/${taskResults.length}; blocked=${blockedPrerequisiteCount}\n`);
+    process.stdout.write(`Connected AquaGuide Blind Smoke: protocol=${protocolHealthy ? 'HEALTHY' : 'UNHEALTHY'}; product journeys passed=${taskResults.filter((item) => item.verdict === 'pass').length}/${taskResults.length}; blocked=${blockedPrerequisiteCount}; pre-failure signals=${observedPreFailureSignalCount}\n`);
     for (const item of taskResults) {
-      process.stdout.write(`- ${item.caseId}: execution=${item.executionStatus}; verdict=${item.verdict ?? 'n/a'}; resultSource=${item.failureSource ?? 'none'}; runtimeSource=${item.runtimeFailureSource ?? 'none'}; actions=${JSON.stringify(item.actionSequence)}\n`);
+      process.stdout.write(`- ${item.caseId}: execution=${item.executionStatus}; verdict=${item.verdict ?? 'n/a'}; resultSource=${item.failureSource ?? 'none'}; runtimeSource=${item.runtimeFailureSource ?? 'none'}; preFailureSignals=${Array.isArray(item.observedPreFailureSignals) ? item.observedPreFailureSignals.length : 0}; actions=${JSON.stringify(item.actionSequence)}\n`);
     }
     process.stdout.write(`- Actor Oracle leaks: ${actorOracleLeakCount}; Judge Oracle visible: ${judgeOracleVisible}; provider failures: ${providerFailureCount}; evaluator failures: ${evaluatorFailureCount}; unknown failures: ${unknownFailureCount}\n`);
     process.stdout.write(`- Diagnostic: ${diagnosticPath}\n`);

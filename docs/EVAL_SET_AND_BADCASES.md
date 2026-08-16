@@ -66,3 +66,25 @@ EvalPilot 会在评测运行期间持续收集两类不同的问题，并把评�
 10. 新进展会前移停滞时钟。
 
 运行 `npm run test:evaluator-regression` 可逐项复验。CI 为控制时间按固定比例加速页面夹具，但仍单独断言生产 AI 等待策略为 10 秒软上限、60 秒硬上限；设置 `EVALPILOT_REGRESSION_REAL_TIME=1` 可按原始时长运行。
+
+## Connected smoke mixed-cause Badcase
+
+2026-08-16 的第二次 AquaGuide connected smoke 暴露了一个必须保留、但**不能直接升级为 Product Badcase** 的 mixed-cause 现象：
+
+```text
+已发生的确定性动作执行失败
+  → grounded variant card click 被 wishlist 子控件拦截 pointer events
+  → Actor 后续继续执行
+  → 更晚发生 DeepSeek provider timeout
+  → 本次 journey 最终 inconclusive
+```
+
+这个 Badcase 的回归目标不是改变最终 verdict，而是防止较早发生的确定性证据被后续 terminal failure 覆盖。connected diagnostic 必须同时保留：
+
+- `runtimeFailureSource=provider` 作为终止本次 journey 的 primary runtime attribution；
+- `observedPreFailureSignals[].cause=pointer_interception` 作为中断前已观察到的独立执行证据；
+- dependent journey 仍使用 `blocked_prerequisite`，不能把上游未通过复制成第二个 Product Failure。
+
+当前 attribution 边界是 **Product ↔ Evaluator interaction boundary**。Playwright pointer interception 证明自动化点击在该 DOM/几何状态下失败，但尚不足以证明真人用户同样无法完成点击，因此不能据此创建 Product Badcase。
+
+公开 regression 使用脱敏错误片段，只断言 signal extraction 与 attribution 分层，不提交真实 smoke 的截图、Trace、绝对路径或运行时 artifact。
