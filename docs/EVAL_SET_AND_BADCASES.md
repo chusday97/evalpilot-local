@@ -88,3 +88,40 @@ EvalPilot 会在评测运行期间持续收集两类不同的问题，并把评�
 当前 attribution 边界是 **Product ↔ Evaluator interaction boundary**。Playwright pointer interception 证明自动化点击在该 DOM/几何状态下失败，但尚不足以证明真人用户同样无法完成点击，因此不能据此创建 Product Badcase。
 
 公开 regression 使用脱敏错误片段，只断言 signal extraction 与 attribution 分层，不提交真实 smoke 的截图、Trace、绝对路径或运行时 artifact。
+
+## Connected smoke Oracle locale mismatch Badcase
+
+2026-08-16 的第三次 AquaGuide connected smoke 暴露了一个独立的 **Evaluator / Benchmark Badcase**：Actor 完成了 Daily Check，页面显示了明确的英文高风险结论和增氧动作，semantic Judge 也返回 `pass`；但 deterministic Oracle 使用了混合语言的 exact-string assertions，因此把已经完成的任务误判为 P1 Product Failure。
+
+根因链：
+
+```text
+benchmark 没有显式固定 locale
+  → runner 实际呈现英文 Daily Check 结果
+  → deterministic Oracle 仍要求 `Act now` + 中文动作字符串
+  → exact-string hard failure
+  → Hybrid Judge 按既定规则输出 Product Failure
+```
+
+这个现象必须分类为：
+
+```text
+Evaluator Badcase
+  category = oracle_configuration
+  subtype = locale_mismatch
+  product_failure = false
+```
+
+修复边界：
+
+- 不修改 AquaGuide 产品代码；
+- 不修改 Actor / Judge prompt；
+- 不放松 Hybrid Judge 的 deterministic-hard-failure precedence；
+- connected AquaGuide benchmark 显式固定 Playwright locale 为 `en-US`；
+- 显式把 AquaGuide 的 `aquaguide_locale` 固定为 `en`；
+- 所有 locale-sensitive deterministic targets 统一到同一个英文 benchmark contract；
+- preflight 与 final diagnostic 必须输出 `benchmarkLocale` / `applicationLocale`，让结果可以追溯到明确语言配置。
+
+公开回归 `tests/connected-aquaguide-oracle-locale-regression.test.ts` 使用 Smoke #3 的脱敏可见结果，要求 `High Risk` 和 `Increase aeration or surface disturbance immediately` 在 deterministic Judge 中同时 PASS，并静态阻止 connected benchmark 再次混入中文 deterministic target。
+
+这个 Badcase 修复后仍不能直接视为产品回归 PASS。先通过零调用 CI / preflight，再用一次新的 connected smoke 验证同一 pinned product 在修复后的 Oracle contract 下不再产生相同 false Product Failure。

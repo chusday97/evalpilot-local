@@ -30,6 +30,8 @@ const outputDir = resolve(arg('--output', 'connected-aquaguide-blind-output'));
 const maxAgentSteps = boundedInteger('--max-steps', arg('--max-steps', '12'), 1, 20);
 const pinnedCommit = '8663b469c50605529367daf1b69ac0cd7cfb0cac';
 const oracleOnlyMarker = 'SECRET_ORACLE_ONLY_MARKER_DO_NOT_SEND_TO_ACTOR';
+const benchmarkBrowserLocale = 'en-US';
+const benchmarkAppLocale = 'en';
 const jsonOutput = process.argv.includes('--json');
 
 const persona: EvalCase['persona'] = {
@@ -112,7 +114,7 @@ const cases: EvalCase[] = [
     knownInformation: { lengthCm: 60, widthCm: 30, heightCm: 30, waterType: 'freshwater' },
     assertions: [
       { assertionId: 'blind-create-size', type: 'text_visible', target: '60x30x30cm', expected: true, negated: false },
-      { assertionId: 'blind-create-water', type: 'text_visible', target: '淡水', expected: true, negated: false },
+      { assertionId: 'blind-create-water', type: 'text_visible', target: 'Freshwater', expected: true, negated: false },
       { assertionId: 'blind-create-modal-closed', type: 'text_absent', target: 'Save Settings', expected: true, negated: false },
     ],
   }),
@@ -143,8 +145,8 @@ const cases: EvalCase[] = [
       recentOperation: '没有特别操作',
     },
     assertions: [
-      { assertionId: 'blind-daily-risk', type: 'text_visible', target: 'Act now', expected: true, negated: false },
-      { assertionId: 'blind-daily-action', type: 'text_visible', target: '增加打氧或水面扰动', expected: true, negated: false },
+      { assertionId: 'blind-daily-risk', type: 'text_visible', target: 'High Risk', expected: true, negated: false },
+      { assertionId: 'blind-daily-action', type: 'text_visible', target: 'Increase aeration or surface disturbance immediately', expected: true, negated: false },
     ],
   }),
 ];
@@ -200,6 +202,18 @@ class AuditedProvider implements AiProvider {
   }
 }
 
+function executionConfig() {
+  return {
+    maxAgentSteps,
+    allowScreenshotToProvider: false,
+    sequentialSharedBrowserContext: true,
+    prerequisiteCascadeGuard: true,
+    preFailureSignalSidecar: true,
+    benchmarkLocale: benchmarkBrowserLocale,
+    applicationLocale: benchmarkAppLocale,
+  };
+}
+
 if (process.argv.includes('--preflight')) {
   const connection = aiConnectionStatus();
   const canRun = connection.configured && connection.provider === 'deepseek';
@@ -213,16 +227,11 @@ if (process.argv.includes('--preflight')) {
     targetAppGitSha: pinnedCommit,
     targetUrl,
     caseIds: cases.map((item) => item.caseId),
-    executionConfig: {
-      maxAgentSteps,
-      allowScreenshotToProvider: false,
-      sequentialSharedBrowserContext: true,
-      prerequisiteCascadeGuard: true,
-      preFailureSignalSidecar: true,
-    },
+    executionConfig: executionConfig(),
     claimBoundary: [
       'Preflight is local planning only and makes zero remote provider calls.',
       'This smoke uses the pinned AquaGuide commit and the existing three Blind Experience journeys.',
+      'The benchmark browser locale is fixed to en-US and the AquaGuide application locale is fixed to en so deterministic Oracle text cannot drift with runner locale.',
       'A single connected run can expose protocol or behavior badcases but cannot estimate model variance.',
       'Dependent journeys are blocked when their upstream journey does not pass, preventing cascade misattribution.',
       'Recoverable action execution failures are preserved as sidecar evidence and do not change the terminal verdict by themselves.',
@@ -237,10 +246,18 @@ if (process.argv.includes('--preflight')) {
   if (baseProvider.info.providerId !== 'deepseek') {
     throw new Error(`Connected AquaGuide smoke requires DeepSeek; received ${baseProvider.info.providerId}.`);
   }
+
   const providerAudits: ProviderAudit[] = [];
   const provider = new AuditedProvider(baseProvider, providerAudits);
   const browser = await chromium.launch({ headless: true });
-  const context = await browser.newContext();
+  const context = await browser.newContext({ locale: benchmarkBrowserLocale });
+  await context.addInitScript((locale) => {
+    try {
+      window.localStorage.setItem('aquaguide_locale', locale);
+    } catch {
+      // Keep the benchmark runnable if storage is unavailable; browser locale still remains fixed.
+    }
+  }, benchmarkAppLocale);
   const page = await context.newPage();
   const taskResults: Array<Record<string, unknown>> = [];
   const passedCaseIds = new Set<string>();
@@ -283,6 +300,7 @@ if (process.argv.includes('--preflight')) {
       provider.setActiveCase(evalCase.caseId);
       const auditStart = providerAudits.length;
       process.stderr.write(`[connected-aquaguide] START ${evalCase.caseId}\n`);
+
       try {
         const outcome = await runBlindExperienceCase({
           page,
@@ -316,6 +334,7 @@ if (process.argv.includes('--preflight')) {
           && outcome.agentRun.status === 'completed'
           && runtimeFailureSource === null;
         if (passed) passedCaseIds.add(evalCase.caseId);
+
         taskResults.push({
           caseId: evalCase.caseId,
           goal: evalCase.goal,
@@ -423,13 +442,7 @@ if (process.argv.includes('--preflight')) {
     targetAppGitSha: pinnedCommit,
     targetUrl,
     provider: provider.info,
-    executionConfig: {
-      maxAgentSteps,
-      allowScreenshotToProvider: false,
-      sequentialSharedBrowserContext: true,
-      prerequisiteCascadeGuard: true,
-      preFailureSignalSidecar: true,
-    },
+    executionConfig: executionConfig(),
     caseIds: cases.map((item) => item.caseId),
     protocolHealthy,
     allBlind,
@@ -451,6 +464,7 @@ if (process.argv.includes('--preflight')) {
     taskResults,
     claimBoundary: [
       'This is one connected-model smoke on a pinned real product, not a model reliability estimate or human usability study.',
+      'The browser locale is fixed to en-US and AquaGuide application locale is fixed to en; all locale-sensitive deterministic Oracle targets in this benchmark use that English contract.',
       'runtimeFailureSource separates provider transport/model failures from evaluator runtime failures without changing the persisted EvalCaseResult schema in this narrow regression fix.',
       'observedPreFailureSignals preserves deterministic action execution failures that occurred before the final task outcome; these sidecar signals do not override the terminal runtime failure or automatically prove a Product Failure.',
       'A pointer_interception signal records what Playwright deterministically observed at the product/evaluator interaction boundary; human-user impact still requires separate confirmation.',
@@ -475,6 +489,7 @@ if (process.argv.includes('--preflight')) {
       process.stdout.write(`- ${item.caseId}: execution=${item.executionStatus}; verdict=${item.verdict ?? 'n/a'}; resultSource=${item.failureSource ?? 'none'}; runtimeSource=${item.runtimeFailureSource ?? 'none'}; preFailureSignals=${Array.isArray(item.observedPreFailureSignals) ? item.observedPreFailureSignals.length : 0}; actions=${JSON.stringify(item.actionSequence)}\n`);
     }
     process.stdout.write(`- Actor Oracle leaks: ${actorOracleLeakCount}; Judge Oracle visible: ${judgeOracleVisible}; provider failures: ${providerFailureCount}; evaluator failures: ${evaluatorFailureCount}; unknown failures: ${unknownFailureCount}\n`);
+    process.stdout.write(`- Benchmark locale: ${benchmarkBrowserLocale}; AquaGuide locale: ${benchmarkAppLocale}\n`);
     process.stdout.write(`- Diagnostic: ${diagnosticPath}\n`);
   }
 }
