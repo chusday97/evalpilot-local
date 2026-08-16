@@ -295,7 +295,9 @@ if (process.argv.includes('--preflight')) {
         });
         const caseAudits = providerAudits.slice(auditStart);
         const providerFailed = caseAudits.some((item) => item.status === 'provider_failure');
-        const runtimeFailureSource = providerFailed ? 'provider' : outcome.agentRun.failureSource;
+        const runtimeFailureSource = providerFailed
+          ? 'provider'
+          : outcome.runtimeFailureSource ?? (outcome.result.failureSource === 'evaluator' ? 'evaluator' : null);
         const fills = outcome.agentRun.decisions
           .filter((decision) => decision.action === 'fill')
           .map((decision) => decision.value);
