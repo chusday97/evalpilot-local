@@ -172,7 +172,7 @@ jobs:
             throw new Error('Connected smoke unexpectedly enabled screenshots to the provider.');
           }
           if (result.protocolHealthy !== true) {
-            throw new Error(`Connected smoke protocol is unhealthy: providerFailures=${result.providerFailureCount}, evaluatorFailures=${result.evaluatorFailureCount}, actorOracleLeaks=${result.actorOracleLeakCount}, judgeOracleVisible=${result.judgeOracleVisible}.`);
+            throw new Error(`Connected smoke protocol is unhealthy: providerFailures=${result.providerFailureCount}, evaluatorFailures=${result.evaluatorFailureCount}, unknownFailures=${result.unknownFailureCount}, actorOracleLeaks=${result.actorOracleLeakCount}, judgeOracleVisible=${result.judgeOracleVisible}.`);
           }
           NODE
 
