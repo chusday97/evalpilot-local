@@ -97,6 +97,7 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('Blind evaluator fai
 
       expect(outcome.agentRun.status).toBe('inconclusive');
       expect(outcome.agentRun.failureSource).toBe('evaluator');
+      expect(outcome.runtimeFailureSource).toBe('evaluator');
       expect(outcome.result.deterministic.hardFailure).toBe(true);
       expect(outcome.result.verdict).toBe('inconclusive');
       expect(outcome.result.failureSource).toBe('evaluator');
