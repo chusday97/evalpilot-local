@@ -10,7 +10,7 @@ export interface ConnectedModelCalibrationProbe {
 }
 
 export interface ConnectedModelProbeSuiteIdentity {
-  version: 1;
+  version: 2;
   fingerprint: string;
   probeIds: string[];
 }
@@ -30,6 +30,17 @@ export const connectedModelProbeWaitPolicy: WaitPolicy = {
   hardTimeoutMs: 350,
   progressExtensionMs: 100,
   maxProgressExtensions: 1,
+};
+
+/**
+ * Runtime semantics are part of the controlled experiment, not an implementation detail.
+ * Changing task/exploration mode or the Actor knowledge boundary can alter behavior even when
+ * the HTML fixtures are identical, so these values must participate in the suite fingerprint.
+ */
+export const connectedModelProbeRuntimeContract = {
+  actorMode: 'exploration' as const,
+  actorKnowledgeBoundary: 'blind_actor_case_v1' as const,
+  oracleAutoFinish: 'disabled' as const,
 };
 
 export const connectedModelProbeActorContract = {
@@ -99,14 +110,15 @@ export function buildConnectedModelProbeSuiteIdentity(
   probes: ConnectedModelCalibrationProbe[] = connectedModelCalibrationProbes,
 ): ConnectedModelProbeSuiteIdentity {
   const contract = {
-    version: 1,
+    version: 2,
     calibratedTypes: [...connectedModelCalibratedTypes].sort((left, right) => left.localeCompare(right)),
+    runtimeContract: connectedModelProbeRuntimeContract,
     actorContract: connectedModelProbeActorContract,
     waitPolicy: connectedModelProbeWaitPolicy,
     probes,
   };
   return {
-    version: 1,
+    version: 2,
     fingerprint: createHash('sha256').update(stableJson(contract)).digest('hex'),
     probeIds: probes.map((probe) => probe.probeId),
   };
@@ -114,7 +126,7 @@ export function buildConnectedModelProbeSuiteIdentity(
 
 /**
  * Artifact compatibility is tied to the complete controlled probe contract rather than a label.
- * Changing probe HTML, ground truth, Actor contract, calibrated detector classes, or the fixed
- * wait policy changes this fingerprint and therefore prevents accidental variance pooling.
+ * Changing probe HTML, ground truth, Actor contract, Blind runtime semantics, calibrated detector
+ * classes, or the fixed wait policy changes this fingerprint and prevents accidental pooling.
  */
 export const connectedModelProbeSuiteIdentity = buildConnectedModelProbeSuiteIdentity();
