@@ -24,6 +24,7 @@
     "test:coverage": "vitest run --coverage",
     "test:benchmark": "tsx src/cli/index.ts benchmark --json",
     "calibrate:connected-model": "tsx scripts/run-connected-model-calibration.ts",
+    "smoke:connected-aquaguide": "tsx scripts/run-connected-aquaguide-blind-smoke.ts",
     "test:real-benchmark": "EVALPILOT_BROWSER_TEST=1 vitest run tests/real-evaluator-benchmark.test.ts tests/experience-detector-browser-calibration.test.ts tests/dead-end-recovery-boundary-browser.test.ts tests/dead-end-disabled-controls-browser.test.ts tests/blind-product-failure-suppression-browser.test.ts tests/blind-evaluator-failure-suppression-browser.test.ts",
     "test:evaluator-regression": "EVALPILOT_BROWSER_TEST=1 vitest run tests/evaluator-regression",
     "acceptance:gate": "tsx scripts/evaluate-real-product-acceptance.ts",
