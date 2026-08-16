@@ -20,6 +20,8 @@ interface ChatCompletionResponse {
   choices?: Array<{ message?: { content?: string | null } }>;
 }
 
+type ProviderAttemptOutcome = 'timeout' | 'transport_error' | 'recovered_after_retry';
+
 export class OpenAiCompatibleProvider implements AiProvider {
   readonly info: AiProviderInfo;
   private readonly baseUrl: string;
@@ -36,6 +38,28 @@ export class OpenAiCompatibleProvider implements AiProvider {
     this.info = { providerId: options.providerId, model: options.model, remote: true, structuredOutput: true, screenshotInput: options.screenshotInput ?? false };
   }
 
+  private emitAttemptTelemetry(input: {
+    requestId: string;
+    schemaName: string;
+    attempt: number;
+    startedAtMs: number;
+    outcome: ProviderAttemptOutcome;
+    willRetry: boolean;
+  }): void {
+    const durationMs = Math.max(0, Date.now() - input.startedAtMs);
+    console.warn([
+      '[evalpilot-provider]',
+      `provider=${this.options.providerId}`,
+      `model=${this.options.model}`,
+      `request=${input.requestId}`,
+      `schema=${input.schemaName}`,
+      `attempt=${input.attempt + 1}/${this.maxRetries + 1}`,
+      `outcome=${input.outcome}`,
+      `durationMs=${durationMs}`,
+      `willRetry=${input.willRetry}`,
+    ].join(' '));
+  }
+
   async generateStructured<T>(request: AiStructuredRequest, schema: ZodType<T>): Promise<T> {
     const validated = aiStructuredRequestSchema.parse(request);
     if (!validated.privacy.allowRemoteModel) throw new AiProviderError('当前隐私设置不允许调用远程模型。', 'PRIVACY_BLOCKED');
@@ -45,6 +69,7 @@ export class OpenAiCompatibleProvider implements AiProvider {
     const jsonSchema = JSON.stringify(z.toJSONSchema(schema));
     let invalidOutput = false;
     for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      const attemptStartedAt = Date.now();
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), this.timeoutMs);
       try {
@@ -73,18 +98,47 @@ export class OpenAiCompatibleProvider implements AiProvider {
         if (!content?.trim()) { invalidOutput = true; continue; }
         try {
           const parsed = schema.safeParse(JSON.parse(content));
-          if (parsed.success) return parsed.data;
+          if (parsed.success) {
+            if (attempt > 0) {
+              this.emitAttemptTelemetry({
+                requestId: validated.requestId,
+                schemaName: validated.schemaName,
+                attempt,
+                startedAtMs: attemptStartedAt,
+                outcome: 'recovered_after_retry',
+                willRetry: false,
+              });
+            }
+            return parsed.data;
+          }
         } catch {
           // The local schema gate below owns invalid model output classification.
         }
         invalidOutput = true;
       } catch (error) {
         if (error instanceof AiProviderError) throw error;
+        const willRetry = attempt < this.maxRetries;
         if (error instanceof Error && error.name === 'AbortError') {
-          if (attempt >= this.maxRetries) throw new AiProviderError(`${this.options.displayName} 请求超时，请稍后重试。`, 'REQUEST_FAILED');
+          this.emitAttemptTelemetry({
+            requestId: validated.requestId,
+            schemaName: validated.schemaName,
+            attempt,
+            startedAtMs: attemptStartedAt,
+            outcome: 'timeout',
+            willRetry,
+          });
+          if (!willRetry) throw new AiProviderError(`${this.options.displayName} 请求超时，请稍后重试。`, 'REQUEST_FAILED');
           continue;
         }
-        if (attempt >= this.maxRetries) throw new AiProviderError(`${this.options.displayName} 暂时无法完成请求，请检查网络和模型设置。`, 'REQUEST_FAILED');
+        this.emitAttemptTelemetry({
+          requestId: validated.requestId,
+          schemaName: validated.schemaName,
+          attempt,
+          startedAtMs: attemptStartedAt,
+          outcome: 'transport_error',
+          willRetry,
+        });
+        if (!willRetry) throw new AiProviderError(`${this.options.displayName} 暂时无法完成请求，请检查网络和模型设置。`, 'REQUEST_FAILED');
       } finally {
         clearTimeout(timeout);
       }
