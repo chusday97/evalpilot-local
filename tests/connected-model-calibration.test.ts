@@ -47,7 +47,9 @@ describe('connected-model behavior calibration', () => {
   it('changes the suite fingerprint when the Blind runtime semantics change', () => {
     const changedRuntime = {
       ...connectedModelProbeRuntimeContract,
-      actorMode: 'task' as never,
+      actorMode: 'task' as const,
+      actorKnowledgeBoundary: 'full_eval_case' as const,
+      oracleAutoFinish: 'enabled' as const,
     };
     expect(buildConnectedModelProbeSuiteIdentity(connectedModelCalibrationProbes, changedRuntime).fingerprint)
       .not.toBe(connectedModelProbeSuiteIdentity.fingerprint);
