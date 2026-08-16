@@ -95,12 +95,12 @@ export function detectDeterministicExecutionFrictions(input: DeterministicExecut
 
     events.push(frictionEventSchema.parse({
       frictionId: `friction-${input.featureId}-target-conflict-${step.stepIndex}`,
-      type: 'interaction_target_conflict',
+      type: 'usability_issue',
       featureId: input.featureId,
       page: before?.pageUrl ?? '/',
       step: input.packet.actions[step.stepIndex - 1]?.actionId ?? step.decisionId,
       persona: input.personaId,
-      observedBehavior: `可点击目标「${targetLabel}」的操作被「${interceptorLabel}」拦截，默认点击无法稳定命中预期目标。`,
+      observedBehavior: `交互目标冲突：可点击目标「${targetLabel}」的操作被「${interceptorLabel}」拦截，默认点击无法稳定命中预期目标。`,
       possibleUserReason: '推测：主要目标与次级控件的点击热区发生覆盖或竞争，导致同一区域存在互相抢占的交互目标。',
       evidence,
       severity: recoveredLater ? 'P3' : 'P2',
