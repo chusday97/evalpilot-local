@@ -32,18 +32,22 @@ export const connectedModelProbeWaitPolicy: WaitPolicy = {
   maxProgressExtensions: 1,
 };
 
+export interface ConnectedModelProbeRuntimeContract {
+  actorMode: 'task' | 'exploration';
+  actorKnowledgeBoundary: 'full_eval_case' | 'blind_actor_case_v1';
+  oracleAutoFinish: 'enabled' | 'disabled';
+}
+
 /**
  * Runtime semantics are part of the controlled experiment, not an implementation detail.
  * Changing task/exploration mode or the Actor knowledge boundary can alter behavior even when
  * the HTML fixtures are identical, so these values must participate in the suite fingerprint.
  */
-export const connectedModelProbeRuntimeContract = {
-  actorMode: 'exploration' as const,
-  actorKnowledgeBoundary: 'blind_actor_case_v1' as const,
-  oracleAutoFinish: 'disabled' as const,
+export const connectedModelProbeRuntimeContract: ConnectedModelProbeRuntimeContract = {
+  actorMode: 'exploration',
+  actorKnowledgeBoundary: 'blind_actor_case_v1',
+  oracleAutoFinish: 'disabled',
 };
-
-export type ConnectedModelProbeRuntimeContract = typeof connectedModelProbeRuntimeContract;
 
 export const connectedModelProbeActorContract = {
   persona: {
