@@ -28,6 +28,7 @@ export interface ConnectedModelCalibrationRow {
   purpose: string;
   expectedTypes: UxIssueType[];
   predictedTypes: UxIssueType[];
+  observedVerdict: EvalCaseResult['verdict'];
   actorActions: string[];
   agentStatus: AiTestAgentRun['status'];
   failureSource: AiTestAgentRun['failureSource'];
@@ -136,21 +137,21 @@ function independentProbeResult(item: EvalCase, runId: string, verdict: EvalCase
     verdict,
     failureSource: null,
     severity: null,
-    deterministic: { checks: [], hardFailure: false, severity: null, evidenceRefs: ['probe-ground-truth'] },
+    deterministic: { checks: [], hardFailure: false, severity: null, evidenceRefs: ['probe-observed-state'] },
     semantic: {
       verdict,
       taskCompletion: complete ? 'complete' : 'unknown',
-      summary: complete ? 'The controlled probe reaches Done.' : 'The controlled probe intentionally does not prove Done.',
+      summary: complete ? 'Done is visibly present after the connected-model run.' : 'Done is not visibly proven after the connected-model run.',
       whatWorked: [],
       whatFailed: [],
       whyItMatters: [],
-      confirmedFacts: complete ? ['Done is the probe completion state.'] : ['Done is not proven in the dead-end probe.'],
+      confirmedFacts: complete ? ['Done is visibly present.'] : ['Done is not visibly present.'],
       hypotheses: [],
-      unknowns: complete ? [] : ['Whether a user would abandon.'],
-      evidenceRefs: ['probe-ground-truth'],
+      unknowns: complete ? [] : ['Whether the actor could recover with a different action sequence.'],
+      evidenceRefs: ['probe-observed-state'],
       confidence: 1,
     },
-    evidencePacketPath: 'probe-ground-truth',
+    evidencePacketPath: 'probe-observed-state',
     createdAt: now,
   };
 }
@@ -222,7 +223,9 @@ export async function runConnectedModelCalibration(input: {
           waitPolicy: { initialObservationMs: 25, pollIntervalMs: 50, softTimeoutMs: 150, hardTimeoutMs: 350, progressExtensionMs: 100, maxProgressExtensions: 1 },
         });
         const packet = JSON.parse(await readFile(agentRun.evidencePacketPath, 'utf8')) as EvidencePacket;
-        const result = independentProbeResult(item, agentRun.runId, probe.expectedVerdict, generatedAt);
+        const doneVisible = await page.getByText('Done', { exact: true }).isVisible().catch(() => false);
+        const observedVerdict: EvalCaseResult['verdict'] = doneVisible ? 'pass' : 'inconclusive';
+        const result = independentProbeResult(item, agentRun.runId, observedVerdict, generatedAt);
         const analysis = analyzeBlindExperience({
           evalCase: item,
           result,
@@ -234,6 +237,7 @@ export async function runConnectedModelCalibration(input: {
           purpose: probe.purpose,
           expectedTypes: calibrated(probe.expectedTypes),
           predictedTypes: calibrated(analysis.frictions.map((friction) => friction.type)),
+          observedVerdict,
           actorActions: agentRun.decisions.map((decision) => decision.action),
           agentStatus: agentRun.status,
           failureSource: agentRun.failureSource,
@@ -260,11 +264,12 @@ export async function runConnectedModelCalibration(input: {
     rows,
     methodology: [
       'Runs a connected remote model through three controlled Chromium probes with screenshots withheld by default.',
-      'Uses independent fixture ground truth for expected friction classes; the model never receives that ground truth.',
-      'Measures signal preservation and extra detector signals caused by natural model behavior.',
+      'Expected friction classes come from independent probe design; the model never receives those labels.',
+      'The run verdict is independently derived from the actual final page state (Done visible or not), not from the fixture expectation.',
+      'Measures signal preservation and extra detector signals caused by the connected model plus the normal semantic-verification path.',
     ],
     claimBoundary: [
-      'This is a model-behavior sensitivity probe, not a human usability study.',
+      'This is a connected-model pipeline sensitivity probe, not a human usability study.',
       'Clean-probe findings are treated as possible actor-induced drift and must not be promoted directly to product UX defects.',
       'Metrics from three probes must not be presented as general real-world UX accuracy.',
     ],
