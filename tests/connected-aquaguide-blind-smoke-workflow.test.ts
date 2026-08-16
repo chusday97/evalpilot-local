@@ -22,6 +22,7 @@ interface WorkflowDocument {
       if?: string;
       uses?: string;
       run?: string;
+      env?: Record<string, string>;
       with?: Record<string, unknown>;
     }>;
   }>;
@@ -47,24 +48,37 @@ describe('connected AquaGuide Blind Smoke workflow safety', () => {
     expect(inputs.allow_screenshot).toBeUndefined();
   });
 
-  it('reuses the protected connected-model environment and environment-only DeepSeek secret', async () => {
+  it('reuses the protected environment but does not expose the DeepSeek key job-wide', async () => {
     const document = await workflow();
     const job = document.jobs?.['connected-aquaguide-blind-smoke'];
     expect(job?.environment).toEqual({ name: 'connected-model-calibration', deployment: false });
     expect(job?.env?.EVALPILOT_AI_PROVIDER).toBe('deepseek');
-    expect(job?.env?.EVALPILOT_DEEPSEEK_API_KEY).toContain('secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY');
-    expect(job?.env?.EVALPILOT_DEEPSEEK_API_KEY).not.toContain('secrets.EVALPILOT_DEEPSEEK_API_KEY');
+    expect(job?.env?.EVALPILOT_DEEPSEEK_API_KEY).toBeUndefined();
     expect(job?.env?.EVALPILOT_OPENAI_API_KEY).toBeUndefined();
     expect(job?.env?.TARGET_APP_COMMIT).toBe('8663b469c50605529367daf1b69ac0cd7cfb0cac');
+
+    const steps = job?.steps ?? [];
+    const secretSteps = steps.filter((step) => step.env?.EVALPILOT_DEEPSEEK_API_KEY);
+    expect(secretSteps.map((step) => step.name)).toEqual([
+      'Confirm remote-call authorization',
+      'Record no-call preflight',
+      'Run connected AquaGuide Blind Smoke',
+    ]);
+    for (const step of secretSteps) {
+      expect(step.env?.EVALPILOT_DEEPSEEK_API_KEY).toContain('secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY');
+      expect(step.env?.EVALPILOT_DEEPSEEK_API_KEY).not.toContain('secrets.EVALPILOT_DEEPSEEK_API_KEY');
+    }
   });
 
-  it('checks main, exact paid authorization, and the secret before any provider call', async () => {
+  it('checks main, exact paid authorization, and the secret before checkout or any provider call', async () => {
     const document = await workflow();
     const steps = document.jobs?.['connected-aquaguide-blind-smoke']?.steps ?? [];
     const authorizationIndex = steps.findIndex((step) => step.name === 'Confirm remote-call authorization');
+    const checkoutIndex = steps.findIndex((step) => step.name === 'Checkout EvalPilot');
     const preflightIndex = steps.findIndex((step) => step.name === 'Record no-call preflight');
     const remoteIndex = steps.findIndex((step) => step.name === 'Run connected AquaGuide Blind Smoke');
-    expect(authorizationIndex).toBeGreaterThanOrEqual(0);
+    expect(authorizationIndex).toBe(0);
+    expect(authorizationIndex).toBeLessThan(checkoutIndex);
     expect(authorizationIndex).toBeLessThan(preflightIndex);
     expect(preflightIndex).toBeLessThan(remoteIndex);
     expect(steps[authorizationIndex]?.run).toContain('refs/heads/main');
