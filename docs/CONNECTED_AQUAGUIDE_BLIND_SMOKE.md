@@ -109,3 +109,36 @@ request timeout / AbortError
 ```
 
 The repair does not change HTTP-error handling, prompts, model selection, AquaGuide, Judge policy, or benchmark step limits. A dedicated zero-call provider regression must prove both recovery-on-second-attempt and final timeout-after-budget-exhaustion before another paid smoke is justified.
+
+## Smoke #5: complete post-fix baseline
+
+Smoke #5 ran as workflow run `31954516559` on EvalPilot `f045c92e2bcc0dc4f199b764e4ea7f4d753550a9` against the same pinned AquaGuide commit and completed with a healthy protocol and all three product journeys passing:
+
+- create aquarium: `pass`
+- record livestock: `pass`
+- Daily Check: `pass`
+- provider failures: `0`
+- evaluator failures: `0`
+- unknown failures: `0`
+- prerequisite blockers: `0`
+- Actor Oracle leaks: `0`
+- Judge Oracle visibility: `true`
+- observed pre-failure signals: `0`
+- `benchmarkLocale=en-US`
+- `applicationLocale=en`
+
+Daily Check now passes both deterministic assertions (`High Risk` and `Increase aeration or surface disturbance immediately`) and the semantic Judge, closing the Smoke #3 Oracle-locale false positive under the real connected path.
+
+The post-timeout-retry system also completed Record Livestock instead of ending with a provider failure. This proves the repaired build can complete the full connected benchmark after the transport fix, but the current knowledge-boundary audit records only one final status per logical provider request. It does **not** record internal retry attempts. Therefore Smoke #5 must not be cited as proof that a timeout actually occurred and was recovered during this specific run; retry-on-timeout itself is established by the zero-call provider regression, while Smoke #5 establishes the post-fix end-to-end baseline.
+
+Phase decision:
+
+```text
+Connected Real-Product Smoke
+  protocol = PASS
+  full three-journey baseline = PASS
+  locale-stable Oracle validation = PASS
+  terminal attribution / prerequisite guard = previously validated
+```
+
+Do not continue with Smoke #6 solely to obtain another green single run. The next paid phase, if authorized, should be a deliberately defined multi-run real-product variance cohort that measures task-completion stability, verdict stability, action-path variance, UX-finding recurrence, and provider/evaluator failure incidence under one frozen configuration.

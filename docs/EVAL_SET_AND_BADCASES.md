@@ -125,3 +125,40 @@ Evaluator Badcase
 公开回归 `tests/connected-aquaguide-oracle-locale-regression.test.ts` 使用 Smoke #3 的脱敏可见结果，要求 `High Risk` 和 `Increase aeration or surface disturbance immediately` 在 deterministic Judge 中同时 PASS，并静态阻止 connected benchmark 再次混入中文 deterministic target。
 
 这个 Badcase 修复后仍不能直接视为产品回归 PASS。先通过零调用 CI / preflight，再用一次新的 connected smoke 验证同一 pinned product 在修复后的 Oracle contract 下不再产生相同 false Product Failure。
+
+### Validation closure: Smoke #5
+
+Smoke #5 (`31954516559`) on EvalPilot `f045c92e2bcc0dc4f199b764e4ea7f4d753550a9` supplied the required real connected validation after the locale and provider-transport repairs:
+
+- Create Aquarium: `pass`
+- Record Livestock: `pass`
+- Daily Check: `pass`
+- Daily deterministic assertions: both `pass`
+- Daily semantic Judge: `pass`
+- provider/evaluator/unknown failures: `0 / 0 / 0`
+- prerequisite blockers: `0`
+- Actor Oracle leaks: `0`
+
+Therefore the `oracle_configuration / locale_mismatch` false Product Failure is considered **validated closed for the pinned connected benchmark configuration**. It remains in the evaluator badcase history and regression set; it must not be reclassified as a historical AquaGuide Product Badcase.
+
+The earlier `pointer_interception` mixed-cause signal did not recur in Smoke #5 (`observedPreFailureSignalCount=0`). One clean run is not enough to erase that historical signal, so its status remains retained / non-product / recurrence-unproven rather than resolved as impossible.
+
+## Provider timeout retry infrastructure Badcase
+
+Smoke #4 exposed a separate EvalPilot provider-transport implementation defect: `OpenAiCompatibleProvider` configured `maxRetries=1`, but an `AbortError` from the request timeout bypassed the retry budget and immediately terminated the logical request. The repair now retries timeout aborts while budget remains and preserves the same `REQUEST_FAILED` timeout error after exhaustion.
+
+Classification:
+
+```text
+Evaluator infrastructure badcase
+  category = provider_transport
+  subtype = timeout_retry_budget_bypassed
+  product_failure = false
+```
+
+Validation is intentionally split into two evidence layers:
+
+1. zero-call provider regression proves timeout-on-first-attempt → success-on-second-attempt, timeout exhaustion, and `maxRetries=0` behavior;
+2. Smoke #5 proves the repaired build can complete the full real connected three-journey benchmark with `providerFailureCount=0`.
+
+Current observability limitation: `knowledge-boundary-audit.json` records the final status of each logical provider request, not internal attempt-level events. Smoke #5 therefore cannot prove that a timeout actually happened and was recovered during that specific run. If retry incidence becomes an operational metric, add attempt-level transport telemetry before estimating timeout/recovery rates from connected cohorts.
