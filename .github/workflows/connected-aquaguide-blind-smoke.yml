@@ -138,6 +138,9 @@ jobs:
           if (preflight.executionConfig?.allowScreenshotToProvider !== false) {
             throw new Error('Screenshots must remain disabled for the connected AquaGuide smoke.');
           }
+          if (preflight.executionConfig?.benchmarkLocale !== 'en-US' || preflight.executionConfig?.applicationLocale !== 'en') {
+            throw new Error(`Unexpected benchmark locale contract: ${preflight.executionConfig?.benchmarkLocale ?? 'none'} / ${preflight.executionConfig?.applicationLocale ?? 'none'}.`);
+          }
           NODE
 
       - name: Run connected AquaGuide Blind Smoke
@@ -170,6 +173,9 @@ jobs:
           }
           if (result.executionConfig?.allowScreenshotToProvider !== false) {
             throw new Error('Connected smoke unexpectedly enabled screenshots to the provider.');
+          }
+          if (result.executionConfig?.benchmarkLocale !== 'en-US' || result.executionConfig?.applicationLocale !== 'en') {
+            throw new Error(`Connected smoke changed the benchmark locale contract: ${result.executionConfig?.benchmarkLocale ?? 'none'} / ${result.executionConfig?.applicationLocale ?? 'none'}.`);
           }
           if (result.protocolHealthy !== true) {
             throw new Error(`Connected smoke protocol is unhealthy: providerFailures=${result.providerFailureCount}, evaluatorFailures=${result.evaluatorFailureCount}, unknownFailures=${result.unknownFailureCount}, actorOracleLeaks=${result.actorOracleLeakCount}, judgeOracleVisible=${result.judgeOracleVisible}.`);
