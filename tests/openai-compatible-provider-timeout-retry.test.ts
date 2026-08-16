@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import type { AiStructuredRequest } from '../types.js';
 import { OpenAiCompatibleProvider } from '../src/ai/openai-compatible-provider.js';
@@ -50,44 +50,74 @@ function provider(fetchImplementation: typeof fetch, maxRetries = 1): OpenAiComp
 }
 
 describe('OpenAiCompatibleProvider timeout retry budget', () => {
-  it('retries an AbortError while retry budget remains and can recover on the next attempt', async () => {
+  it('retries an AbortError while retry budget remains, logs the retry, and can recover on the next attempt', async () => {
     let calls = 0;
     const fetchImplementation = (async () => {
       calls += 1;
       if (calls === 1) throw abortError();
       return successfulResponse();
     }) as typeof fetch;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    await expect(provider(fetchImplementation).generateStructured(request, resultSchema)).resolves.toEqual({ ok: true });
-    expect(calls).toBe(2);
+    try {
+      await expect(provider(fetchImplementation).generateStructured(request, resultSchema)).resolves.toEqual({ ok: true });
+      expect(calls).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls[0]?.[0]).toContain('attempt=1/2 outcome=timeout');
+      expect(warn.mock.calls[0]?.[0]).toContain('willRetry=true');
+      expect(warn.mock.calls[1]?.[0]).toContain('attempt=2/2 outcome=recovered_after_retry');
+      expect(warn.mock.calls[1]?.[0]).toContain('willRetry=false');
+      expect(warn.mock.calls[0]?.[0]).toContain('request=timeout-retry-fixture');
+      expect(warn.mock.calls[0]?.[0]).toContain('schema=timeout_retry_fixture');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it('reports the timeout only after the configured retry budget is exhausted', async () => {
+  it('reports the timeout only after the configured retry budget is exhausted and logs both attempts', async () => {
     let calls = 0;
     const fetchImplementation = (async () => {
       calls += 1;
       throw abortError();
     }) as typeof fetch;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    const promise = provider(fetchImplementation).generateStructured(request, resultSchema);
-    await expect(promise).rejects.toMatchObject({
-      name: 'AiProviderError',
-      code: 'REQUEST_FAILED',
-      message: 'DeepSeek 请求超时，请稍后重试。',
-    });
-    expect(calls).toBe(2);
+    try {
+      const promise = provider(fetchImplementation).generateStructured(request, resultSchema);
+      await expect(promise).rejects.toMatchObject({
+        name: 'AiProviderError',
+        code: 'REQUEST_FAILED',
+        message: 'DeepSeek 请求超时，请稍后重试。',
+      });
+      expect(calls).toBe(2);
+      expect(warn).toHaveBeenCalledTimes(2);
+      expect(warn.mock.calls[0]?.[0]).toContain('attempt=1/2 outcome=timeout');
+      expect(warn.mock.calls[0]?.[0]).toContain('willRetry=true');
+      expect(warn.mock.calls[1]?.[0]).toContain('attempt=2/2 outcome=timeout');
+      expect(warn.mock.calls[1]?.[0]).toContain('willRetry=false');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
-  it('does not retry a timeout when maxRetries is zero', async () => {
+  it('does not retry a timeout when maxRetries is zero and logs the terminal attempt', async () => {
     let calls = 0;
     const fetchImplementation = (async () => {
       calls += 1;
       throw abortError();
     }) as typeof fetch;
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
 
-    await expect(provider(fetchImplementation, 0).generateStructured(request, resultSchema)).rejects.toMatchObject({
-      code: 'REQUEST_FAILED',
-    });
-    expect(calls).toBe(1);
+    try {
+      await expect(provider(fetchImplementation, 0).generateStructured(request, resultSchema)).rejects.toMatchObject({
+        code: 'REQUEST_FAILED',
+      });
+      expect(calls).toBe(1);
+      expect(warn).toHaveBeenCalledTimes(1);
+      expect(warn.mock.calls[0]?.[0]).toContain('attempt=1/1 outcome=timeout');
+      expect(warn.mock.calls[0]?.[0]).toContain('willRetry=false');
+    } finally {
+      warn.mockRestore();
+    }
   });
 });
