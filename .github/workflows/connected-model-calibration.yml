@@ -91,7 +91,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          npm run calibrate:connected-model -- \
+          npm run --silent calibrate:connected-model -- \
             --preflight \
             --output "$OUTPUT_ROOT" \
             --runs "$RUNS" \
@@ -111,7 +111,7 @@ jobs:
           if [[ "$ALLOW_SCREENSHOT" == "true" ]]; then
             args+=(--allow-screenshot)
           fi
-          npm run calibrate:connected-model -- "${args[@]}" | tee connected-model-result.json
+          npm run --silent calibrate:connected-model -- "${args[@]}" | tee connected-model-result.json
 
       - name: Upload calibration evidence
         if: always()
