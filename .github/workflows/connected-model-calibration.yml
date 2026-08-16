@@ -98,6 +98,18 @@ jobs:
             --max-steps "$MAX_STEPS" \
             --json | tee connected-model-preflight.json
 
+      - name: Validate no-call preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const preflight = JSON.parse(await readFile('connected-model-preflight.json', 'utf8'));
+          if (preflight.status !== 'ready' || preflight.canRun !== true || preflight.remoteCallsMade !== false) {
+            throw new Error('Connected-model preflight artifact is not a ready, zero-call plan.');
+          }
+          NODE
+
       - name: Run connected-model calibration
         shell: bash
         run: |
@@ -112,6 +124,18 @@ jobs:
             args+=(--allow-screenshot)
           fi
           npm run --silent calibrate:connected-model -- "${args[@]}" | tee connected-model-result.json
+
+      - name: Validate calibration result
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const result = JSON.parse(await readFile('connected-model-result.json', 'utf8'));
+          if (result.analysisMode !== 'connected_model_behavior_variance' || !Array.isArray(result.rawRunArtifacts)) {
+            throw new Error('Connected-model result artifact is missing the expected variance contract.');
+          }
+          NODE
 
       - name: Upload calibration evidence
         if: always()
