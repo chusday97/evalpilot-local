@@ -127,7 +127,7 @@ describe('connected AquaGuide Blind Smoke workflow safety', () => {
     expect(source).toContain('new AuditedProvider(baseProvider, providerAudits)');
     expect(source).not.toContain('MockAiProvider');
     expect(source).toContain("error instanceof AiProviderError ? 'provider_failure' : 'error'");
-    expect(source).toContain("runtimeFailureSource = providerFailed ? 'provider' : outcome.agentRun.failureSource");
+    expect(source).toContain('outcome.runtimeFailureSource');
     expect(source).toContain("runtimeFailureSource === 'provider'");
     expect(source).toContain("schemaName === 'agent_decision'");
     expect(source).toContain("schemaName === 'semantic_judge_result'");
