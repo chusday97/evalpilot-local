@@ -45,3 +45,39 @@ observed pre-failure evidence
 A `pointer_interception` signal is currently classified at the **product/evaluator interaction boundary**. It records what Playwright observed; it does not claim that a human user is necessarily blocked by the same geometry. Product attribution requires separate confirmation.
 
 Do not run another paid smoke solely to reconfirm this extraction. First keep the mixed-cause regression green locally/CI; only then use another real smoke when it can answer a new question.
+
+## Smoke #3: Oracle locale mismatch
+
+The third paid smoke ran on EvalPilot `e11d3755c4292b659ed197c9cdffc0a10253a8fd` against the same pinned AquaGuide commit and completed with a healthy protocol:
+
+- create aquarium: `pass`
+- record livestock: `pass`
+- Daily Check: Actor completed the journey and the semantic Judge returned `pass`, but the deterministic Judge returned a P1 Product Failure
+- provider failures: `0`
+- evaluator failures: `0`
+- prerequisite blockers: `0`
+- Actor Oracle leaks: `0`
+
+The Daily Check page visibly contained the English risk/action result, including `High Risk` and `Increase aeration or surface disturbance immediately`. The connected benchmark Oracle instead required the exact strings `Act now` and `增加打氧或水面扰动`. That mixed-language Oracle was not the pinned product contract and produced a false Product Failure.
+
+Root cause classification:
+
+```text
+Evaluator / Benchmark Defect
+  → Oracle configuration
+  → locale mismatch
+```
+
+This is not an AquaGuide Product Badcase and does not justify relaxing Hybrid Judge precedence. Deterministic hard failures remain authoritative when the deterministic contract itself is valid; the smallest responsible-layer fix is to make the benchmark locale explicit and align the locale-sensitive deterministic assertions to that contract.
+
+The connected benchmark now fixes:
+
+- Playwright browser locale: `en-US`
+- AquaGuide application locale: `en`
+- create-water assertion: `Freshwater`
+- Daily Check risk assertion: `High Risk`
+- Daily Check action assertion: `Increase aeration or surface disturbance immediately`
+
+Both preflight and final diagnostic expose `benchmarkLocale` and `applicationLocale`. The benchmark also seeds AquaGuide's `aquaguide_locale` preference before application code runs, so the Oracle does not silently depend on the GitHub runner's host locale.
+
+A zero-call regression must pass before another paid run. Smoke #4 is only justified after that gate and should answer one question: whether the corrected locale-stable Oracle removes the Smoke #3 false Product Failure under the same pinned product/provider conditions.
