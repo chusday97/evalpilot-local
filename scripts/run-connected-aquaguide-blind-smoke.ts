@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { chromium } from 'playwright';
 import type { ZodType } from 'zod';
 import type { AiStructuredRequest, EvalCase } from '../types.js';
-import type { AiProvider } from '../src/ai/provider.js';
+import { AiProviderError, type AiProvider } from '../src/ai/provider.js';
 import { aiConnectionStatus } from '../src/ai/provider-connection.js';
 import { configuredEvaluationProvider } from '../src/evaluation/evaluation-orchestrator.js';
 import { runBlindExperienceCase } from '../src/ux-evaluation/blind-experience-service.js';
@@ -217,44 +217,72 @@ if (process.argv.includes('--preflight')) {
   try {
     for (const evalCase of cases) {
       const startingUrl = evalCase.caseId.includes('create') ? `${targetUrl}/welcome` : `${targetUrl}/aquarium`;
-      const outcome = await runBlindExperienceCase({
-        page,
-        provider,
-        outputDir,
-        evalCase,
-        startingUrl,
-        evalSetVersion: 1,
-        productModelVersion: 1,
-        targetAppGitSha: pinnedCommit,
-        allowRemoteModel: true,
-        allowScreenshotToProvider: false,
-        maxAgentSteps,
-        agentWaitTimeoutMs: 20_000,
-      });
-      const fills = outcome.agentRun.decisions
-        .filter((decision) => decision.action === 'fill')
-        .map((decision) => decision.value);
-      taskResults.push({
-        caseId: evalCase.caseId,
-        goal: evalCase.goal,
-        runId: outcome.agentRun.runId,
-        agentStatus: outcome.agentRun.status,
-        agentFailureSource: outcome.agentRun.failureSource,
-        verdict: outcome.result.verdict,
-        failureSource: outcome.result.failureSource,
-        analysisMode: outcome.experience.analysisMode,
-        analysisStatus: outcome.experience.analysisStatus,
-        actionSequence: outcome.agentRun.decisions.map((decision) => decision.action),
-        actionCount: outcome.experience.actions.length,
-        backtrackCount: outcome.experience.metrics.backtrackCount,
-        retryCount: outcome.experience.metrics.retryCount,
-        repeatedInputCount: outcome.experience.metrics.repeatedInputCount,
-        abandoned: outcome.experience.metrics.abandoned,
-        frictionTypes: outcome.experience.frictions.map((item) => item.type),
-        findingTypes: outcome.experience.findings.map((item) => item.type),
-        fillValues: fills,
-        experiencePath: outcome.experiencePath,
-      });
+      try {
+        const outcome = await runBlindExperienceCase({
+          page,
+          provider,
+          outputDir,
+          evalCase,
+          startingUrl,
+          evalSetVersion: 1,
+          productModelVersion: 1,
+          targetAppGitSha: pinnedCommit,
+          allowRemoteModel: true,
+          allowScreenshotToProvider: false,
+          maxAgentSteps,
+          agentWaitTimeoutMs: 20_000,
+        });
+        const fills = outcome.agentRun.decisions
+          .filter((decision) => decision.action === 'fill')
+          .map((decision) => decision.value);
+        taskResults.push({
+          caseId: evalCase.caseId,
+          goal: evalCase.goal,
+          runId: outcome.agentRun.runId,
+          agentStatus: outcome.agentRun.status,
+          agentFailureSource: outcome.agentRun.failureSource,
+          verdict: outcome.result.verdict,
+          failureSource: outcome.result.failureSource,
+          analysisMode: outcome.experience.analysisMode,
+          analysisStatus: outcome.experience.analysisStatus,
+          actionSequence: outcome.agentRun.decisions.map((decision) => decision.action),
+          actionCount: outcome.experience.actions.length,
+          backtrackCount: outcome.experience.metrics.backtrackCount,
+          retryCount: outcome.experience.metrics.retryCount,
+          repeatedInputCount: outcome.experience.metrics.repeatedInputCount,
+          abandoned: outcome.experience.metrics.abandoned,
+          frictionTypes: outcome.experience.frictions.map((item) => item.type),
+          findingTypes: outcome.experience.findings.map((item) => item.type),
+          fillValues: fills,
+          experiencePath: outcome.experiencePath,
+          error: null,
+        });
+      } catch (error) {
+        const providerFailure = error instanceof AiProviderError;
+        taskResults.push({
+          caseId: evalCase.caseId,
+          goal: evalCase.goal,
+          runId: null,
+          agentStatus: 'inconclusive',
+          agentFailureSource: providerFailure ? null : 'evaluator',
+          verdict: 'inconclusive',
+          failureSource: providerFailure ? 'provider' : 'evaluator',
+          analysisMode: null,
+          analysisStatus: 'missing',
+          actionSequence: [],
+          actionCount: 0,
+          backtrackCount: 0,
+          retryCount: 0,
+          repeatedInputCount: 0,
+          abandoned: false,
+          frictionTypes: [],
+          findingTypes: [],
+          fillValues: [],
+          experiencePath: null,
+          error: error instanceof Error ? error.message : String(error),
+        });
+        break;
+      }
     }
   } finally {
     await context.close();
@@ -265,17 +293,22 @@ if (process.argv.includes('--preflight')) {
   const judgeRequests = providerAudits.filter((item) => item.schemaName === 'semantic_judge_result');
   const actorOracleLeakCount = actorRequests.filter((item) => item.markerPresent).length;
   const judgeOracleVisible = judgeRequests.length === cases.length && judgeRequests.every((item) => item.markerPresent);
-  const allBlind = taskResults.every((item) => item.analysisMode === 'blind_experience_run' && item.analysisStatus === 'evaluated');
-  const providerFailureCount = taskResults.filter((item) => item.failureSource === 'provider' || item.agentFailureSource === 'provider').length;
+  const validBlindStatuses = new Set(['evaluated', 'suppressed_functional_failure', 'insufficient_evidence']);
+  const allBlind = taskResults.length === cases.length && taskResults.every((item) =>
+    item.analysisMode === 'blind_experience_run' && validBlindStatuses.has(String(item.analysisStatus)));
+  const providerFailureCount = taskResults.filter((item) => item.failureSource === 'provider').length;
   const evaluatorFailureCount = taskResults.filter((item) => item.failureSource === 'evaluator' || item.agentFailureSource === 'evaluator').length;
-  const allProductJourneysPassed = taskResults.every((item) => item.verdict === 'pass' && item.failureSource === null && item.agentStatus === 'completed');
+  const unknownFailureCount = taskResults.filter((item) => item.failureSource === 'unknown').length;
+  const allProductJourneysPassed = taskResults.length === cases.length
+    && taskResults.every((item) => item.verdict === 'pass' && item.failureSource === null && item.agentStatus === 'completed');
   const createResult = taskResults.find((item) => item.caseId === 'blind-create-usable-aquarium');
   const knownInformationFaithful = JSON.stringify(createResult?.fillValues ?? []) === JSON.stringify(['60', '30', '30']);
   const protocolHealthy = allBlind
     && actorOracleLeakCount === 0
     && judgeOracleVisible
     && providerFailureCount === 0
-    && evaluatorFailureCount === 0;
+    && evaluatorFailureCount === 0
+    && unknownFailureCount === 0;
 
   const diagnostic = {
     schemaVersion: 1,
@@ -296,6 +329,7 @@ if (process.argv.includes('--preflight')) {
     judgeOracleVisible,
     providerFailureCount,
     evaluatorFailureCount,
+    unknownFailureCount,
     allProductJourneysPassed,
     knownInformationFaithful,
     requestCounts: {
@@ -307,7 +341,7 @@ if (process.argv.includes('--preflight')) {
     claimBoundary: [
       'This is one connected-model smoke on a pinned real product, not a model reliability estimate or human usability study.',
       'Product verdicts, normal Actor abandonment, friction findings, and known-information mistakes remain evidence; they do not by themselves make the protocol unhealthy.',
-      'Provider/evaluator failures, Oracle leakage, missing Judge Oracle visibility, or missing Blind Experience artifacts make the protocol unhealthy.',
+      'Provider/evaluator/unknown-attribution failures, Oracle leakage, missing Judge Oracle visibility, or missing Blind Experience artifacts make the protocol unhealthy.',
       'No screenshot was sent to the provider.',
     ],
   };
@@ -324,7 +358,7 @@ if (process.argv.includes('--preflight')) {
     for (const item of taskResults) {
       process.stdout.write(`- ${item.caseId}: verdict=${item.verdict}; failureSource=${item.failureSource ?? 'none'}; actions=${JSON.stringify(item.actionSequence)}\n`);
     }
-    process.stdout.write(`- Actor Oracle leaks: ${actorOracleLeakCount}; Judge Oracle visible: ${judgeOracleVisible}; provider failures: ${providerFailureCount}; evaluator failures: ${evaluatorFailureCount}\n`);
+    process.stdout.write(`- Actor Oracle leaks: ${actorOracleLeakCount}; Judge Oracle visible: ${judgeOracleVisible}; provider failures: ${providerFailureCount}; evaluator failures: ${evaluatorFailureCount}; unknown failures: ${unknownFailureCount}\n`);
     process.stdout.write(`- Diagnostic: ${diagnosticPath}\n`);
   }
 }
