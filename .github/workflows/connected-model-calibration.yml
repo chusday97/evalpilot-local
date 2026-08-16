@@ -47,9 +47,12 @@ jobs:
   calibrate:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
+    environment:
+      name: connected-model-calibration
+      deployment: false
     env:
       EVALPILOT_AI_PROVIDER: deepseek
-      EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_DEEPSEEK_API_KEY }}
+      EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
       EVALPILOT_DEEPSEEK_MODEL: ${{ inputs.model }}
       OUTPUT_ROOT: connected-model-artifacts
       RUNS: ${{ inputs.runs }}
@@ -71,13 +74,18 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo 'Connected-model calibration is restricted to the main branch.' >&2
+            echo "Current ref: $GITHUB_REF" >&2
+            exit 2
+          fi
           if [[ "$CONFIRM_PAID_CALLS" != "RUN_CONNECTED_MODEL_CALIBRATION" ]]; then
             echo 'Remote model calls were not explicitly authorized.' >&2
             echo 'Re-run the workflow and type RUN_CONNECTED_MODEL_CALIBRATION exactly.' >&2
             exit 2
           fi
           if [[ -z "$EVALPILOT_DEEPSEEK_API_KEY" ]]; then
-            echo 'Repository secret EVALPILOT_DEEPSEEK_API_KEY is not configured.' >&2
+            echo 'Environment secret EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY is not configured.' >&2
             echo 'No remote model calls were made.' >&2
             exit 2
           fi

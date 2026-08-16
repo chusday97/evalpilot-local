@@ -22,27 +22,72 @@ The workflow preserves:
 
 The maintainer workflow is currently pinned to **DeepSeek** because that is the provider used for the first real cohort.
 
-The environment credential path is:
+The runtime credential path is:
 
 - `EVALPILOT_AI_PROVIDER=deepseek`
-- `EVALPILOT_DEEPSEEK_API_KEY`
+- `EVALPILOT_DEEPSEEK_API_KEY` (injected from the dedicated environment secret)
 - `EVALPILOT_DEEPSEEK_MODEL`
 
 The default workflow model is `deepseek-v4-flash`. The operator may intentionally select another currently supported DeepSeek model, but a different model is a different calibration cohort.
 
 The general EvalPilot provider connection code still supports session-based OpenAI, DeepSeek, Kimi, and OpenAI-compatible services. The connected-model GitHub Actions workflow is deliberately narrower: it should collect one trustworthy provider/model cohort before the experiment matrix is broadened.
 
-## Required repository secret
+## Protected GitHub environment
 
-Configure this GitHub Actions repository secret before the first real run:
+The paid calibration job references this dedicated GitHub Environment:
 
-- `EVALPILOT_DEEPSEEK_API_KEY`
+```text
+connected-model-calibration
+```
 
-The workflow passes the key only as an environment variable to the calibration process. The key is not written to calibration artifacts by the workflow.
+The job uses `deployment: false`: this keeps environment protection rules and environment secrets without creating deployment-history noise for a calibration/test job.
+
+Configure the environment in repository **Settings → Environments → connected-model-calibration** before the first real run.
+
+Recommended protection:
+
+1. Add a **Required reviewer** for the environment.
+2. If this repository currently has only one maintainer, allow that maintainer to approve their own run. Enable “prevent self-review” only after there is a second trusted reviewer.
+3. Restrict environment deployment branches/tags to `main` if the repository UI offers that rule.
+
+The workflow also contains an independent runtime guard that rejects any calibration run whose ref is not `refs/heads/main`.
+
+## Required environment secret
+
+Store the DeepSeek key as an **Environment secret**, not as the repository-wide calibration credential.
+
+Inside **Settings → Environments → connected-model-calibration → Environment secrets**, add:
+
+```text
+EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY
+```
+
+Use the DeepSeek API key value as the secret value.
+
+The workflow maps that environment-only name to the runtime variable `EVALPILOT_DEEPSEEK_API_KEY`. The calibration code therefore does not need to know how the secret is scoped in GitHub.
+
+### Migration from the old repository secret
+
+If the repository currently contains this older Repository Secret:
+
+```text
+EVALPILOT_DEEPSEEK_API_KEY
+```
+
+migrate before the first paid run:
+
+1. Create/configure the `connected-model-calibration` Environment.
+2. Add the environment secret `EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY` using the DeepSeek key from its original source.
+3. Confirm the environment secret appears in the environment settings.
+4. Delete the old repository-level `EVALPILOT_DEEPSEEK_API_KEY` secret.
+
+GitHub does not reveal a stored secret value after it has been saved. If the original key value is no longer available, create/rotate a DeepSeek key rather than trying to recover it from GitHub.
+
+The workflow does not reference the old repository-secret name after this migration.
 
 ## Environment provider selection
 
-Environment credentials now support both OpenAI and DeepSeek for developer/maintainer execution.
+Environment credentials support both OpenAI and DeepSeek for developer/maintainer execution.
 
 If exactly one environment credential exists, EvalPilot uses that provider. If multiple provider credentials exist at the same time, EvalPilot does **not** guess: set `EVALPILOT_AI_PROVIDER=openai` or `EVALPILOT_AI_PROVIDER=deepseek` explicitly.
 
@@ -52,20 +97,24 @@ The calibration workflow always sets `EVALPILOT_AI_PROVIDER=deepseek`, so an unr
 
 The workflow is `workflow_dispatch` only. It does not run on push, pull request, schedule, or normal CI.
 
-Before remote calls can start, the operator must type this exact acknowledgement:
+Before remote calls can start, all of these must hold:
+
+1. the selected ref is `main`;
+2. the `connected-model-calibration` environment protection rules have passed;
+3. the operator typed this exact acknowledgement:
 
 ```text
 RUN_CONNECTED_MODEL_CALIBRATION
 ```
 
-The workflow then checks that `EVALPILOT_DEEPSEEK_API_KEY` exists. If either check fails, it exits before calibration and reports that no remote model calls were made.
+4. the environment secret `EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY` is available;
+5. the zero-call preflight parses successfully and reports:
+   - `status = ready`
+   - `canRun = true`
+   - `remoteCallsMade = false`
+   - `provider.providerId = deepseek`
 
-The no-call preflight is parsed as JSON and must report all of the following before the paid step can start:
-
-- `status = ready`
-- `canRun = true`
-- `remoteCallsMade = false`
-- `provider.providerId = deepseek`
+If any workflow-side check fails, calibration stops before the paid calibration command.
 
 Screenshots are **disabled by default**. Enable them only when the experiment explicitly requires visual input and the controlled probe screenshots are authorized for remote transmission.
 
@@ -87,14 +136,16 @@ Do not change the model, max-step budget, screenshot policy, or probe suite midw
 
 ## How to run it
 
-1. Open GitHub Actions.
-2. Select **Connected Model Calibration**.
-3. Choose **Run workflow** on `main`.
-4. Enter `RUN_CONNECTED_MODEL_CALIBRATION` in the authorization field.
-5. Keep `deepseek-v4-flash` or intentionally enter the DeepSeek model ID for this cohort.
-6. Select repetitions, max steps, and screenshot policy.
-7. Run the workflow.
-8. Download the `connected-model-calibration-<run-id>-<attempt>` artifact after completion.
+1. Confirm the protected Environment and Environment Secret are configured.
+2. Open GitHub Actions.
+3. Select **Connected Model Calibration**.
+4. Choose **Run workflow** on `main`.
+5. Enter `RUN_CONNECTED_MODEL_CALIBRATION` in the authorization field.
+6. Keep `deepseek-v4-flash` or intentionally enter the DeepSeek model ID for this cohort.
+7. Select repetitions, max steps, and screenshot policy.
+8. Start the workflow.
+9. If the environment uses Required reviewers, approve the waiting job from the workflow run page.
+10. Download the `connected-model-calibration-<run-id>-<attempt>` artifact after completion.
 
 ## Artifact structure
 

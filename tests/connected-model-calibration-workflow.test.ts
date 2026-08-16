@@ -15,6 +15,10 @@ interface WorkflowDocument {
   name?: string;
   on?: Record<string, unknown>;
   jobs?: Record<string, {
+    environment?: string | {
+      name?: string;
+      deployment?: boolean;
+    };
     env?: Record<string, string>;
     steps?: Array<{
       name?: string;
@@ -50,17 +54,28 @@ describe('connected-model calibration workflow safety', () => {
     }));
   });
 
-  it('pins the maintainer calibration workflow to DeepSeek environment credentials', async () => {
+  it('gates the paid job behind the dedicated calibration environment', async () => {
+    const document = await workflow();
+    const calibrationEnvironment = document.jobs?.calibrate?.environment;
+
+    expect(calibrationEnvironment).toEqual({
+      name: 'connected-model-calibration',
+      deployment: false,
+    });
+  });
+
+  it('pins the maintainer calibration workflow to DeepSeek and the environment-only secret name', async () => {
     const document = await workflow();
     const environment = document.jobs?.calibrate?.env ?? {};
 
     expect(environment.EVALPILOT_AI_PROVIDER).toBe('deepseek');
-    expect(environment.EVALPILOT_DEEPSEEK_API_KEY).toContain('secrets.EVALPILOT_DEEPSEEK_API_KEY');
+    expect(environment.EVALPILOT_DEEPSEEK_API_KEY).toContain('secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY');
+    expect(environment.EVALPILOT_DEEPSEEK_API_KEY).not.toContain('secrets.EVALPILOT_DEEPSEEK_API_KEY');
     expect(environment.EVALPILOT_DEEPSEEK_MODEL).toContain('inputs.model');
     expect(environment.EVALPILOT_OPENAI_API_KEY).toBeUndefined();
   });
 
-  it('checks authorization and DeepSeek secret presence before installing or calling the provider', async () => {
+  it('restricts paid calibration to main and checks authorization before installing or calling the provider', async () => {
     const document = await workflow();
     const steps = document.jobs?.calibrate?.steps ?? [];
     const confirmationIndex = steps.findIndex((step) => step.name === 'Confirm remote-call authorization');
@@ -69,8 +84,10 @@ describe('connected-model calibration workflow safety', () => {
     expect(confirmationIndex).toBeGreaterThanOrEqual(0);
     expect(confirmationIndex).toBeLessThan(installIndex);
     expect(confirmationIndex).toBeLessThan(calibrationIndex);
+    expect(steps[confirmationIndex]?.run).toContain('refs/heads/main');
     expect(steps[confirmationIndex]?.run).toContain('RUN_CONNECTED_MODEL_CALIBRATION');
     expect(steps[confirmationIndex]?.run).toContain('EVALPILOT_DEEPSEEK_API_KEY');
+    expect(steps[confirmationIndex]?.run).toContain('EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY');
     expect(steps[confirmationIndex]?.run).not.toContain('EVALPILOT_OPENAI_API_KEY');
   });
 
