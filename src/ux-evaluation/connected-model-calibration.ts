@@ -46,6 +46,7 @@ export interface ConnectedModelCalibrationMetrics {
   extraSignalCount: number;
   missingSignalCount: number;
   providerFailureCount: number;
+  eligibleProbeExecutionCount: number;
   tp: number;
   fp: number;
   fn: number;
@@ -145,9 +146,13 @@ export function summarizeConnectedModelCalibration(rows: ConnectedModelCalibrati
   let exact = 0;
   let clean = 0;
   let cleanWithSignal = 0;
-  let providerFailureCount = 0;
+  const eligibleRows = rows.filter((row) => row.failureSource !== 'evaluator');
+  const providerFailureCount = rows.length - eligibleRows.length;
 
-  for (const row of rows) {
+  // Provider/evaluator failures describe runtime availability, not UX-detector behavior.
+  // Excluding them from the signal denominators prevents a timeout or invalid model response
+  // from masquerading as a detector false negative or clean-probe success.
+  for (const row of eligibleRows) {
     const expected = new Set(calibrated(row.expectedTypes));
     const predicted = new Set(calibrated(row.predictedTypes));
     if (expected.size === 0) {
@@ -157,17 +162,17 @@ export function summarizeConnectedModelCalibration(rows: ConnectedModelCalibrati
     if (expected.size === predicted.size && [...expected].every((value) => predicted.has(value))) exact += 1;
     for (const value of predicted) expected.has(value) ? tp += 1 : fp += 1;
     for (const value of expected) if (!predicted.has(value)) fn += 1;
-    if (row.failureSource === 'evaluator') providerFailureCount += 1;
   }
 
   return {
     precisionAgainstProbeGroundTruth: tp + fp === 0 ? 1 : tp / (tp + fp),
     signalPreservationRecall: tp + fn === 0 ? 1 : tp / (tp + fn),
-    exactSignalMatchRate: rows.length === 0 ? 1 : exact / rows.length,
+    exactSignalMatchRate: eligibleRows.length === 0 ? 1 : exact / eligibleRows.length,
     cleanActorDriftRate: clean === 0 ? 0 : cleanWithSignal / clean,
     extraSignalCount: fp,
     missingSignalCount: fn,
     providerFailureCount,
+    eligibleProbeExecutionCount: eligibleRows.length,
     tp,
     fp,
     fn,
@@ -251,6 +256,7 @@ export async function runConnectedModelCalibration(input: {
       'Runs a connected remote model through a fingerprinted controlled Chromium probe suite with screenshots withheld by default.',
       'Expected friction classes come from independent probe design; the model never receives those labels.',
       'The run verdict is independently derived from the actual final page state (Done visible or not), not from the fixture expectation.',
+      'Provider/evaluator failures are reported separately and excluded from UX signal denominators.',
       'Probe-suite fingerprint covers probe content, Actor contract, calibrated detector classes, and the fixed probe wait policy.',
       'Execution config records maxSteps and screenshot policy separately so runs with different model inputs/budgets are not pooled as variance.',
     ],
