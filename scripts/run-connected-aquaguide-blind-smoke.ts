@@ -147,6 +147,7 @@ const cases: EvalCase[] = [
     assertions: [
       { assertionId: 'blind-daily-risk', type: 'text_visible', target: 'High Risk', expected: true, negated: false },
       { assertionId: 'blind-daily-action', type: 'text_visible', target: 'Increase aeration or surface disturbance immediately', expected: true, negated: false },
+      { assertionId: 'blind-daily-recorded-high-risk', type: 'text_visible', target: 'Re-check Recommended', expected: true, negated: false },
     ],
   }),
 ];
