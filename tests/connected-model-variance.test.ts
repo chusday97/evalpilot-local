@@ -53,8 +53,8 @@ function result(
   };
 }
 
-function clean(predictedTypes: UxIssueType[] = [], observedVerdict: EvalCaseResult['verdict'] = 'pass', actions: string[] = ['click', 'finish']) {
-  return row({ probeId: 'clean-one-click', expectedTypes: [], expectedVerdict: 'pass', predictedTypes, observedVerdict, actorActions: actions });
+function clean(predictedTypes: UxIssueType[] = [], observedVerdict: EvalCaseResult['verdict'] = 'pass', actions: string[] = ['click', 'finish'], failureSource?: AiTestAgentRun['failureSource']) {
+  return row({ probeId: 'clean-one-click', expectedTypes: [], expectedVerdict: 'pass', predictedTypes, observedVerdict, actorActions: actions, failureSource });
 }
 
 function feedback(predictedTypes: UxIssueType[] = ['interaction_feedback_issue'], observedVerdict: EvalCaseResult['verdict'] = 'pass') {
@@ -85,6 +85,7 @@ describe('connected-model calibration variance', () => {
       runCount: 3,
       providerFailureCount: 0,
       probeExecutionCount: 9,
+      eligibleProbeExecutionCount: 9,
       providerFailureRate: 0,
       probeSuite: connectedModelProbeSuiteIdentity,
       executionConfig,
@@ -96,6 +97,7 @@ describe('connected-model calibration variance', () => {
     const byId = new Map(summary.probeStability.map((probe) => [probe.probeId, probe]));
     expect(byId.get('clean-one-click')).toEqual(expect.objectContaining({
       expectedVerdict: 'pass',
+      eligibleRunCount: 3,
       verdictMatchCount: 2,
       verdictMatchRate: 2 / 3,
       exactSignalMatchCount: 2,
@@ -117,30 +119,55 @@ describe('connected-model calibration variance', () => {
     expect(byId.get('clean-one-click')?.actionSequences[0]).toEqual(expect.objectContaining({ sequence: 'click → finish', count: 2, rate: 2 / 3 }));
   });
 
-  it('keeps provider failures visible instead of treating them as ordinary model variance', () => {
-    const failedClean = row({
-      probeId: 'clean-one-click',
-      expectedTypes: [],
-      expectedVerdict: 'pass',
-      predictedTypes: [],
-      observedVerdict: 'inconclusive',
-      failureSource: 'evaluator',
-    });
+  it('keeps provider failures visible while removing them from behavior denominators', () => {
+    const failedClean = clean([], 'inconclusive', [], 'evaluator');
     const summary = summarizeConnectedModelCalibrationVariance([
       result(1, [failedClean, feedback(), deadEnd()]),
     ]);
 
     expect(summary.runCount).toBe(1);
     expect(summary.providerFailureCount).toBe(1);
+    expect(summary.probeExecutionCount).toBe(3);
+    expect(summary.eligibleProbeExecutionCount).toBe(2);
     expect(summary.providerFailureRate).toBeCloseTo(1 / 3);
     expect(summary.varianceNote).toContain('cannot estimate model variance');
     const cleanProbe = summary.probeStability.find((probe) => probe.probeId === 'clean-one-click');
     expect(cleanProbe).toEqual(expect.objectContaining({
+      runCount: 1,
+      eligibleRunCount: 0,
       providerFailureCount: 1,
       providerFailureRate: 1,
       exactSignalMatchCount: 0,
+      exactSignalMatchRate: 0,
       verdictMatchCount: 0,
+      verdictMatchRate: 0,
+      expectedSignalPresence: [],
+      extraSignalPresence: [],
+      actionSequences: [],
     }));
+  });
+
+  it('uses only successful model-behavior samples for per-probe rates across repeated runs', () => {
+    const failedClean = clean([], 'inconclusive', [], 'evaluator');
+    const summary = summarizeConnectedModelCalibrationVariance([
+      result(1, [failedClean, feedback(), deadEnd()]),
+      result(2, [clean(), feedback(), deadEnd()]),
+    ]);
+
+    const cleanProbe = summary.probeStability.find((probe) => probe.probeId === 'clean-one-click');
+    expect(cleanProbe).toEqual(expect.objectContaining({
+      runCount: 2,
+      eligibleRunCount: 1,
+      providerFailureCount: 1,
+      providerFailureRate: 0.5,
+      exactSignalMatchCount: 1,
+      exactSignalMatchRate: 1,
+      verdictMatchCount: 1,
+      verdictMatchRate: 1,
+    }));
+    expect(cleanProbe?.actionSequences).toEqual([
+      expect.objectContaining({ sequence: 'click → finish', count: 1, rate: 1 }),
+    ]);
   });
 
   it('refuses to pool different models into one variance aggregate', () => {
