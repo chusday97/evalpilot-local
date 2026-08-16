@@ -152,6 +152,14 @@ jobs:
             --max-steps "$MAX_STEPS" \
             --json | tee connected-aquaguide-result.json
 
+      - name: Preserve pre-failure action evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsx scripts/enrich-connected-aquaguide-pre-failure-signals.ts \
+            --result connected-aquaguide-result.json \
+            --output "$OUTPUT_DIR"
+
       - name: Validate connected smoke protocol
         shell: bash
         run: |
@@ -161,6 +169,9 @@ jobs:
           const result = JSON.parse(await readFile('connected-aquaguide-result.json', 'utf8'));
           if (result.analysisMode !== 'connected_aquaguide_blind_smoke') {
             throw new Error('Connected AquaGuide result is missing the expected smoke contract.');
+          }
+          if (result.schemaVersion < 3 || !Array.isArray(result.taskResults) || result.taskResults.some((task) => !Array.isArray(task.observedPreFailureSignals))) {
+            throw new Error('Connected AquaGuide result is missing the pre-failure action evidence sidecar.');
           }
           if (result.provider?.providerId !== 'deepseek' || result.provider?.model !== process.env.EVALPILOT_DEEPSEEK_MODEL) {
             throw new Error(`Unexpected provider/model: ${result.provider?.providerId ?? 'none'} / ${result.provider?.model ?? 'none'}.`);
