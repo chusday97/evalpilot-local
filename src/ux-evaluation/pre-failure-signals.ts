@@ -75,7 +75,7 @@ function boundedDetail(value: string, maxLength = 1_600): string {
   return normalized.length <= maxLength ? normalized : `${normalized.slice(0, maxLength)}…`;
 }
 
-function pointerInterceptionDetails(value: string): { id: string | null; label: string | null } | null {
+export function parsePointerInterceptionDetails(value: string): { id: string | null; label: string | null } | null {
   if (!/intercepts pointer events/i.test(value)) return null;
   const relevantLine = value.split('\n').find((line) => /intercepts pointer events/i.test(line)) ?? value;
   const id = relevantLine.match(/\bid=["']([^"']+)["']/i)?.[1] ?? null;
@@ -111,7 +111,7 @@ export function collectObservedPreFailureSignals(input: PreFailureSignalSource):
         ...(step.taskState?.failureSignals ?? []),
         verification?.observed,
       ]);
-      const pointerDetail = details.map(pointerInterceptionDetails).find((item) => item !== null) ?? null;
+      const pointerDetail = details.map(parsePointerInterceptionDetails).find((item) => item !== null) ?? null;
       const detail = details.find((item) => /intercepts pointer events/i.test(item)) ?? details[0] ?? 'Action execution failed before the final task outcome.';
       const evidenceRefs = uniqueStrings([
         ...(actionResult?.evidenceRefs ?? []),
