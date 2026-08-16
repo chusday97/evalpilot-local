@@ -28,8 +28,6 @@ export interface DeterministicExecutionFrictionInput {
 
 function severityFor(input: FrictionInput, type: UxIssueType): FrictionEvent['severity'] {
   if (type === 'journey_breakpoint') return 'P1';
-  // A task that eventually succeeds can still contain a real feedback problem, but it is
-  // non-blocking by definition. Keep it visible without inflating it to a product failure.
   if (type === 'interaction_feedback_issue' && input.completion.userGoal.complete === true) return 'P3';
   return 'P2';
 }
@@ -81,8 +79,7 @@ export function detectDeterministicExecutionFrictions(input: DeterministicExecut
     const before = observations.get(step.beforeObservationId);
     const targetElementId = decision?.targetElementId ?? null;
     const targetElement = targetElementId
-      ? [...(before?.interactableElements ?? []), ...(before?.formFields ?? [])]
-        .find((element) => element.elementId === targetElementId)
+      ? (before?.interactableElements ?? []).find((element) => element.elementId === targetElementId)
       : undefined;
     const targetLabel = targetElement?.label || targetElement?.text || targetElementId || 'unknown';
     const interceptorLabel = pointerDetail.label || pointerDetail.id || '另一个可交互控件';
@@ -101,7 +98,7 @@ export function detectDeterministicExecutionFrictions(input: DeterministicExecut
       type: 'interaction_target_conflict',
       featureId: input.featureId,
       page: before?.pageUrl ?? '/',
-      step: input.packet.actions[step.stepIndex - 1]?.actionId ?? step.decisionId ?? `step-${step.stepIndex}`,
+      step: input.packet.actions[step.stepIndex - 1]?.actionId ?? step.decisionId,
       persona: input.personaId,
       observedBehavior: `可点击目标「${targetLabel}」的操作被「${interceptorLabel}」拦截，默认点击无法稳定命中预期目标。`,
       possibleUserReason: '推测：主要目标与次级控件的点击热区发生覆盖或竞争，导致同一区域存在互相抢占的交互目标。',
@@ -143,16 +140,9 @@ export function detectFrictions(input: FrictionInput): FrictionEvent[] {
   if (input.metrics.backtrackCount > 0 && !events.some((item) => item.type === 'path_efficiency_issue')) {
     events.push(event(input, events.length, 'path_efficiency_issue', `出现 ${input.metrics.backtrackCount} 次回退`, '入口命名或页面层级可能与用户目标不一致'));
   }
-  // null means “not evaluated”, not “missing”. Only emit a closure problem when evidence
-  // positively establishes that the follow-up loop is incomplete.
   if (input.completion.userGoal.complete === true && input.completion.followUp.complete === false) {
     events.push(event(input, events.length, 'journey_breakpoint', '用户目标结果已出现，但没有证据证明可保存、修改、继续或结束', '结果页可能缺少清晰的后续行动'));
   }
-  // A terminal abandon emitted after the deterministic Judge has already proven the user
-  // goal is not evidence of pre-completion abandonment. In task-mode/scripted baselines it
-  // can simply mean the Actor did not recognize the evaluator's hidden completion signal.
-  // A future blind UX run may model completion-recognition friction separately, but it must
-  // not be conflated with abandonment risk here.
   if (input.metrics.abandoned && input.completion.userGoal.complete !== true) {
     events.push(event(input, events.length, 'abandonment_risk', `模拟用户放弃：${input.metrics.abandonmentReason ?? '原因未记录'}`, '操作成本或失败次数超过 Persona 的行为限制'));
   }
