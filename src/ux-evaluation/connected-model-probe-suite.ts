@@ -43,6 +43,8 @@ export const connectedModelProbeRuntimeContract = {
   oracleAutoFinish: 'disabled' as const,
 };
 
+export type ConnectedModelProbeRuntimeContract = typeof connectedModelProbeRuntimeContract;
+
 export const connectedModelProbeActorContract = {
   persona: {
     personaId: 'persona-connected-model-calibration',
@@ -108,11 +110,12 @@ function stableJson(value: unknown): string {
 
 export function buildConnectedModelProbeSuiteIdentity(
   probes: ConnectedModelCalibrationProbe[] = connectedModelCalibrationProbes,
+  runtimeContract: ConnectedModelProbeRuntimeContract = connectedModelProbeRuntimeContract,
 ): ConnectedModelProbeSuiteIdentity {
   const contract = {
     version: 2,
     calibratedTypes: [...connectedModelCalibratedTypes].sort((left, right) => left.localeCompare(right)),
-    runtimeContract: connectedModelProbeRuntimeContract,
+    runtimeContract,
     actorContract: connectedModelProbeActorContract,
     waitPolicy: connectedModelProbeWaitPolicy,
     probes,
