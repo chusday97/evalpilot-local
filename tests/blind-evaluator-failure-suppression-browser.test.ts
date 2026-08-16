@@ -7,6 +7,7 @@ import type { AiStructuredRequest, EvalCase, EvalCaseResult, EvidencePacket } fr
 import { MockAiProvider } from '../src/ai/mock-provider.js';
 import { runAiTestAgent } from '../src/test-agent/agent-runner.js';
 import { analyzeBlindExperience } from '../src/ux-evaluation/blind-experience-analyzer.js';
+import { runBlindExperienceCase } from '../src/ux-evaluation/blind-experience-service.js';
 
 const now = '2026-08-16T02:05:00.000Z';
 
@@ -62,6 +63,48 @@ describe.skipIf(process.env.EVALPILOT_BROWSER_TEST !== '1')('Blind evaluator fai
       expect(analysis.analysisStatus).toBe('insufficient_evidence');
       expect(analysis.frictions).toEqual([]);
       expect(analysis.findings).toEqual([]);
+    } finally {
+      await browser.close();
+    }
+  }, 60_000);
+
+  it('does not promote an interrupted Blind runtime into Product Failure just because success text is absent', async () => {
+    const browser = await chromium.launch({ headless: true });
+    const page = await browser.newPage();
+    try {
+      await page.setContent('<!doctype html><html><body><main><h1>Submit form</h1><button>Continue</button></main></body></html>');
+      const provider = new MockAiProvider(() => {
+        throw new Error('simulated provider timeout');
+      }, 0, 'runtime-interruption-provider');
+      const item = evalCase();
+      item.oracle.deterministicAssertions = [
+        { assertionId: 'must-see-done', type: 'text_visible', target: 'Done', expected: true, negated: false },
+      ];
+      const outputDir = await mkdtemp(join(tmpdir(), 'evalpilot-blind-runtime-interruption-'));
+      const outcome = await runBlindExperienceCase({
+        page,
+        provider,
+        outputDir,
+        evalCase: item,
+        startingUrl: page.url(),
+        evalSetVersion: 1,
+        productModelVersion: 1,
+        allowRemoteModel: true,
+        allowScreenshotToProvider: false,
+        maxAgentSteps: 2,
+        now: () => new Date(now),
+      });
+
+      expect(outcome.agentRun.status).toBe('inconclusive');
+      expect(outcome.agentRun.failureSource).toBe('evaluator');
+      expect(outcome.result.deterministic.hardFailure).toBe(true);
+      expect(outcome.result.verdict).toBe('inconclusive');
+      expect(outcome.result.failureSource).toBe('evaluator');
+      expect(outcome.result.severity).toBeNull();
+      expect(outcome.experience.analysisStatus).toBe('insufficient_evidence');
+      expect(outcome.experience.frictions).toEqual([]);
+      expect(outcome.experience.findings).toEqual([]);
+      expect(provider.requests.map((request) => request.schemaName)).toEqual(['agent_decision']);
     } finally {
       await browser.close();
     }
