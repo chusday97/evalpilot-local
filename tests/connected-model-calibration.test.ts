@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { ConnectedModelCalibrationRow } from '../src/ux-evaluation/connected-model-calibration.js';
 import {
+  buildConnectedModelProbeCases,
   buildConnectedModelProbeSuiteIdentity,
   connectedModelCalibrationProbes,
   connectedModelProbeSuiteIdentity,
@@ -40,6 +41,26 @@ describe('connected-model behavior calibration', () => {
       ? { ...probe, html: `${probe.html}<p>changed fixture</p>` }
       : { ...probe });
     expect(buildConnectedModelProbeSuiteIdentity(changed).fingerprint).not.toBe(connectedModelProbeSuiteIdentity.fingerprint);
+  });
+
+  it('keeps the real probe Oracle for independent evaluation but removes it from the connected-model Actor case', () => {
+    const { judgeCase, actorCase } = buildConnectedModelProbeCases(
+      connectedModelCalibrationProbes[0]!,
+      '2026-08-16T06:00:00.000Z',
+    );
+
+    expect(judgeCase.oracle.expectedOutcome).toEqual(['Done']);
+    expect(judgeCase.oracle.mustObserve).toEqual(['Done']);
+    expect(judgeCase.oracle.deterministicAssertions).toEqual([
+      expect.objectContaining({ assertionId: 'done-visible', target: 'Done' }),
+    ]);
+
+    expect(actorCase.oracle.expectedOutcome).toEqual(['仅依据当前可见界面自行判断是否已经完成用户目标']);
+    expect(actorCase.oracle.mustObserve).toEqual([]);
+    expect(actorCase.oracle.mustNotObserve).toEqual([]);
+    expect(actorCase.oracle.businessRules).toEqual([]);
+    expect(actorCase.oracle.deterministicAssertions).toEqual([]);
+    expect(actorCase.oracle.semanticRubric.join(' ')).toContain('Blind Actor');
   });
 
   it('separates preserved signals from clean actor-induced drift', () => {
