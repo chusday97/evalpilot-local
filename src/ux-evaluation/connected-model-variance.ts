@@ -35,6 +35,7 @@ export interface ConnectedModelActionSequenceFrequency {
 export interface ConnectedModelProbeStability {
   probeId: string;
   runCount: number;
+  eligibleRunCount: number;
   expectedTypes: UxIssueType[];
   expectedVerdict: EvalCaseResult['verdict'];
   expectedSignalPresence: ConnectedModelSignalFrequency[];
@@ -66,6 +67,7 @@ export interface ConnectedModelCalibrationVarianceResult {
   };
   providerFailureCount: number;
   probeExecutionCount: number;
+  eligibleProbeExecutionCount: number;
   providerFailureRate: number;
   probeStability: ConnectedModelProbeStability[];
   varianceNote: string;
@@ -125,28 +127,30 @@ function probeStability(results: ConnectedModelCalibrationResult[]): ConnectedMo
         throw new Error(`Connected-model variance found inconsistent ground truth for probe ${probeId}.`);
       }
     }
+    const eligibleRows = rows.filter((row) => row.failureSource !== 'evaluator');
     const expectedSet = new Set(reference.expectedTypes);
-    const extraTypes = rows.flatMap((row) => row.predictedTypes.filter((type) => !expectedSet.has(type)));
-    const exactSignalMatchCount = rows.filter((row) => row.failureSource !== 'evaluator' && sameSignals(reference.expectedTypes, row.predictedTypes)).length;
+    const extraTypes = eligibleRows.flatMap((row) => row.predictedTypes.filter((type) => !expectedSet.has(type)));
+    const exactSignalMatchCount = eligibleRows.filter((row) => sameSignals(reference.expectedTypes, row.predictedTypes)).length;
     const verdictCounts: Record<EvalCaseResult['verdict'], number> = { pass: 0, fail: 0, inconclusive: 0 };
-    for (const row of rows) verdictCounts[row.observedVerdict] += 1;
-    const verdictMatchCount = rows.filter((row) => row.failureSource !== 'evaluator' && row.observedVerdict === reference.expectedVerdict).length;
-    const providerFailureCount = rows.filter((row) => row.failureSource === 'evaluator').length;
+    for (const row of eligibleRows) verdictCounts[row.observedVerdict] += 1;
+    const verdictMatchCount = eligibleRows.filter((row) => row.observedVerdict === reference.expectedVerdict).length;
+    const providerFailureCount = rows.length - eligibleRows.length;
     return {
       probeId,
       runCount: rows.length,
+      eligibleRunCount: eligibleRows.length,
       expectedTypes: [...reference.expectedTypes],
       expectedVerdict: reference.expectedVerdict,
-      expectedSignalPresence: frequency(reference.expectedTypes, rows),
-      extraSignalPresence: frequency(extraTypes, rows),
+      expectedSignalPresence: frequency(reference.expectedTypes, eligibleRows),
+      extraSignalPresence: frequency(extraTypes, eligibleRows),
       exactSignalMatchCount,
-      exactSignalMatchRate: exactSignalMatchCount / rows.length,
+      exactSignalMatchRate: eligibleRows.length ? exactSignalMatchCount / eligibleRows.length : 0,
       verdictCounts,
       verdictMatchCount,
-      verdictMatchRate: verdictMatchCount / rows.length,
+      verdictMatchRate: eligibleRows.length ? verdictMatchCount / eligibleRows.length : 0,
       providerFailureCount,
       providerFailureRate: providerFailureCount / rows.length,
-      actionSequences: actionSequenceFrequencies(rows),
+      actionSequences: actionSequenceFrequencies(eligibleRows),
     };
   });
 }
@@ -176,6 +180,7 @@ export function summarizeConnectedModelCalibrationVariance(
 
   const providerFailureCount = results.reduce((sum, result) => sum + result.metrics.providerFailureCount, 0);
   const probeExecutionCount = results.reduce((sum, result) => sum + result.rows.length, 0);
+  const eligibleProbeExecutionCount = results.reduce((sum, result) => sum + result.metrics.eligibleProbeExecutionCount, 0);
   const runCount = results.length;
   return {
     schemaVersion: 1,
@@ -194,14 +199,16 @@ export function summarizeConnectedModelCalibrationVariance(
     },
     providerFailureCount,
     probeExecutionCount,
+    eligibleProbeExecutionCount,
     providerFailureRate: probeExecutionCount ? providerFailureCount / probeExecutionCount : 0,
     probeStability: probeStability(results),
     varianceNote: runCount === 1
       ? 'Only one run is present. This artifact records a baseline sample but cannot estimate model variance.'
-      : `Variance summary across ${runCount} independent runs of the same provider/model, probe suite, and execution config. No pass/fail threshold is inferred from this sample.`,
+      : `Variance summary across ${runCount} independent runs of the same provider/model, probe suite, and execution config. Provider/evaluator failures are reported separately from behavior metrics. No pass/fail threshold is inferred from this sample.`,
     claimBoundary: [
       'Variance describes repeated connected-model behavior on controlled probes, not human usability variance.',
       'Runs from different provider/model identities, probe-suite fingerprints, or execution configs are intentionally not pooled.',
+      'Provider/evaluator failures are availability evidence and are excluded from signal, verdict, and action-sequence behavior denominators.',
       'Signal frequencies and ranges are descriptive; this layer does not define acceptance thresholds.',
       'Raw per-run artifacts remain the primary evidence and should be retained alongside this aggregate.',
     ],
