@@ -5,6 +5,7 @@ import {
   summarizeConnectedModelCalibration,
   type ConnectedModelCalibrationResult,
   type ConnectedModelCalibrationRow,
+  type ConnectedModelProviderFailureCode,
 } from '../src/ux-evaluation/connected-model-calibration.js';
 import { summarizeConnectedModelCalibrationVariance } from '../src/ux-evaluation/connected-model-variance.js';
 
@@ -19,7 +20,9 @@ function row(input: {
   observedVerdict: EvalCaseResult['verdict'];
   actorActions?: string[];
   failureSource?: AiTestAgentRun['failureSource'];
+  providerFailure?: ConnectedModelProviderFailureCode | null;
 }): ConnectedModelCalibrationRow {
+  const providerFailure = input.providerFailure ?? null;
   return {
     probeId: input.probeId,
     purpose: input.probeId,
@@ -28,8 +31,9 @@ function row(input: {
     predictedTypes: input.predictedTypes,
     observedVerdict: input.observedVerdict,
     actorActions: input.actorActions ?? [],
-    agentStatus: input.failureSource === 'evaluator' ? 'inconclusive' : 'completed',
+    agentStatus: input.failureSource === 'evaluator' || providerFailure ? 'inconclusive' : 'completed',
     failureSource: input.failureSource ?? null,
+    providerFailure,
     runId: `run-${input.probeId}`,
   };
 }
@@ -53,8 +57,14 @@ function result(
   };
 }
 
-function clean(predictedTypes: UxIssueType[] = [], observedVerdict: EvalCaseResult['verdict'] = 'pass', actions: string[] = ['click', 'finish'], failureSource?: AiTestAgentRun['failureSource']) {
-  return row({ probeId: 'clean-one-click', expectedTypes: [], expectedVerdict: 'pass', predictedTypes, observedVerdict, actorActions: actions, failureSource });
+function clean(
+  predictedTypes: UxIssueType[] = [],
+  observedVerdict: EvalCaseResult['verdict'] = 'pass',
+  actions: string[] = ['click', 'finish'],
+  failureSource?: AiTestAgentRun['failureSource'],
+  providerFailure?: ConnectedModelProviderFailureCode | null,
+) {
+  return row({ probeId: 'clean-one-click', expectedTypes: [], expectedVerdict: 'pass', predictedTypes, observedVerdict, actorActions: actions, failureSource, providerFailure });
 }
 
 function feedback(predictedTypes: UxIssueType[] = ['interaction_feedback_issue'], observedVerdict: EvalCaseResult['verdict'] = 'pass') {
@@ -84,9 +94,11 @@ describe('connected-model calibration variance', () => {
       analysisMode: 'connected_model_behavior_variance',
       runCount: 3,
       providerFailureCount: 0,
+      evaluatorFailureCount: 0,
       probeExecutionCount: 9,
       eligibleProbeExecutionCount: 9,
       providerFailureRate: 0,
+      evaluatorFailureRate: 0,
       probeSuite: connectedModelProbeSuiteIdentity,
       executionConfig,
     }));
@@ -102,6 +114,8 @@ describe('connected-model calibration variance', () => {
       verdictMatchRate: 2 / 3,
       exactSignalMatchCount: 2,
       exactSignalMatchRate: 2 / 3,
+      providerFailureCount: 0,
+      evaluatorFailureCount: 0,
     }));
     expect(byId.get('clean-one-click')?.extraSignalPresence).toEqual([
       expect.objectContaining({ type: 'path_efficiency_issue', presentCount: 1, rate: 1 / 3 }),
@@ -120,16 +134,18 @@ describe('connected-model calibration variance', () => {
   });
 
   it('keeps provider failures visible while removing them from behavior denominators', () => {
-    const failedClean = clean([], 'inconclusive', [], 'evaluator');
+    const failedClean = clean([], 'inconclusive', [], 'evaluator', 'REQUEST_FAILED');
     const summary = summarizeConnectedModelCalibrationVariance([
       result(1, [failedClean, feedback(), deadEnd()]),
     ]);
 
     expect(summary.runCount).toBe(1);
     expect(summary.providerFailureCount).toBe(1);
+    expect(summary.evaluatorFailureCount).toBe(0);
     expect(summary.probeExecutionCount).toBe(3);
     expect(summary.eligibleProbeExecutionCount).toBe(2);
     expect(summary.providerFailureRate).toBeCloseTo(1 / 3);
+    expect(summary.evaluatorFailureRate).toBe(0);
     expect(summary.varianceNote).toContain('cannot estimate model variance');
     const cleanProbe = summary.probeStability.find((probe) => probe.probeId === 'clean-one-click');
     expect(cleanProbe).toEqual(expect.objectContaining({
@@ -137,6 +153,8 @@ describe('connected-model calibration variance', () => {
       eligibleRunCount: 0,
       providerFailureCount: 1,
       providerFailureRate: 1,
+      evaluatorFailureCount: 0,
+      evaluatorFailureRate: 0,
       exactSignalMatchCount: 0,
       exactSignalMatchRate: 0,
       verdictMatchCount: 0,
@@ -147,8 +165,29 @@ describe('connected-model calibration variance', () => {
     }));
   });
 
+  it('keeps non-provider evaluator failures separate from provider availability', () => {
+    const failedClean = clean([], 'inconclusive', [], 'evaluator', null);
+    const summary = summarizeConnectedModelCalibrationVariance([
+      result(1, [failedClean, feedback(), deadEnd()]),
+    ]);
+
+    expect(summary.providerFailureCount).toBe(0);
+    expect(summary.evaluatorFailureCount).toBe(1);
+    expect(summary.providerFailureRate).toBe(0);
+    expect(summary.evaluatorFailureRate).toBeCloseTo(1 / 3);
+    expect(summary.eligibleProbeExecutionCount).toBe(2);
+    const cleanProbe = summary.probeStability.find((probe) => probe.probeId === 'clean-one-click');
+    expect(cleanProbe).toEqual(expect.objectContaining({
+      providerFailureCount: 0,
+      providerFailureRate: 0,
+      evaluatorFailureCount: 1,
+      evaluatorFailureRate: 1,
+      eligibleRunCount: 0,
+    }));
+  });
+
   it('uses only successful model-behavior samples for per-probe rates across repeated runs', () => {
-    const failedClean = clean([], 'inconclusive', [], 'evaluator');
+    const failedClean = clean([], 'inconclusive', [], 'evaluator', 'REQUEST_FAILED');
     const summary = summarizeConnectedModelCalibrationVariance([
       result(1, [failedClean, feedback(), deadEnd()]),
       result(2, [clean(), feedback(), deadEnd()]),
@@ -160,6 +199,8 @@ describe('connected-model calibration variance', () => {
       eligibleRunCount: 1,
       providerFailureCount: 1,
       providerFailureRate: 0.5,
+      evaluatorFailureCount: 0,
+      evaluatorFailureRate: 0,
       exactSignalMatchCount: 1,
       exactSignalMatchRate: 1,
       verdictMatchCount: 1,
