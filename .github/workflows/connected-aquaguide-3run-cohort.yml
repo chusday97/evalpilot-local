@@ -1,0 +1,222 @@
+name: Connected AquaGuide 3-Run Variance Cohort
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_paid_calls:
+        description: 'Type RUN_CONNECTED_AQUAGUIDE_3_RUN_COHORT to authorize three paid DeepSeek connected runs'
+        required: true
+        type: string
+      model:
+        description: 'DeepSeek model ID'
+        required: true
+        default: deepseek-v4-flash
+        type: string
+      max_steps:
+        description: 'Maximum Blind Actor steps per AquaGuide journey'
+        required: true
+        default: '12'
+        type: choice
+        options:
+          - '10'
+          - '12'
+          - '15'
+
+permissions:
+  contents: read
+
+jobs:
+  connected-aquaguide-3run-cohort:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 85
+    environment:
+      name: connected-model-calibration
+      deployment: false
+    env:
+      EVALPILOT_AI_PROVIDER: deepseek
+      EVALPILOT_DEEPSEEK_MODEL: ${{ inputs.model }}
+      TARGET_APP_COMMIT: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+      MAX_STEPS: ${{ inputs.max_steps }}
+      CONFIRM_PAID_CALLS: ${{ inputs.confirm_paid_calls }}
+      COHORT_RUN_COUNT: '3'
+
+    steps:
+      - name: Confirm three-run remote-call authorization
+        shell: bash
+        env:
+          EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo 'Connected AquaGuide 3-run cohort is restricted to the main branch.' >&2
+            echo "Current ref: $GITHUB_REF" >&2
+            exit 2
+          fi
+          if [[ "$CONFIRM_PAID_CALLS" != "RUN_CONNECTED_AQUAGUIDE_3_RUN_COHORT" ]]; then
+            echo 'Three paid connected runs were not explicitly authorized.' >&2
+            echo 'Re-run the workflow and type RUN_CONNECTED_AQUAGUIDE_3_RUN_COHORT exactly.' >&2
+            exit 2
+          fi
+          if [[ -z "$EVALPILOT_DEEPSEEK_API_KEY" ]]; then
+            echo 'Environment secret EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY is not configured.' >&2
+            echo 'No remote model calls were made.' >&2
+            exit 2
+          fi
+
+      - name: Checkout EvalPilot
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned AquaGuide
+        uses: actions/checkout@v4
+        with:
+          repository: chusday97/aquaguide-tank-guide
+          ref: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+          path: real-products/aquaguide
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install EvalPilot
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Install AquaGuide
+        working-directory: real-products/aquaguide
+        run: npm ci
+
+      - name: Start AquaGuide web
+        working-directory: real-products/aquaguide
+        run: |
+          npm run dev:web > ../../connected-aquaguide-cohort-vite.log 2>&1 &
+          echo $! > ../../connected-aquaguide-cohort-vite.pid
+
+      - name: Wait for AquaGuide
+        run: |
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent http://127.0.0.1:3000/ >/dev/null; then
+              exit 0
+            fi
+            sleep 0.25
+          done
+          cat connected-aquaguide-cohort-vite.log || true
+          exit 1
+
+      - name: Record zero-call cohort preflight
+        shell: bash
+        env:
+          EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+          npm run --silent smoke:connected-aquaguide -- \
+            --preflight \
+            --url http://127.0.0.1:3000 \
+            --output connected-aquaguide-cohort-output/preflight \
+            --max-steps "$MAX_STEPS" \
+            --json | tee connected-aquaguide-cohort-preflight.json
+
+      - name: Validate zero-call cohort preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const preflight = JSON.parse(await readFile('connected-aquaguide-cohort-preflight.json', 'utf8'));
+          if (preflight.status !== 'ready' || preflight.canRun !== true || preflight.remoteCallsMade !== false) {
+            throw new Error('Connected AquaGuide cohort preflight is not a ready, zero-call plan.');
+          }
+          if (preflight.provider?.provider !== 'deepseek' || preflight.provider?.model !== process.env.EVALPILOT_DEEPSEEK_MODEL) {
+            throw new Error(`Unexpected provider/model: ${preflight.provider?.provider ?? 'none'} / ${preflight.provider?.model ?? 'none'}.`);
+          }
+          if (preflight.targetAppGitSha !== process.env.TARGET_APP_COMMIT) {
+            throw new Error('Pinned AquaGuide commit changed during cohort preflight.');
+          }
+          if (preflight.executionConfig?.maxAgentSteps !== Number(process.env.MAX_STEPS)) {
+            throw new Error('Cohort max steps drifted during preflight.');
+          }
+          if (preflight.executionConfig?.allowScreenshotToProvider !== false) {
+            throw new Error('Screenshots must remain disabled for the connected AquaGuide cohort.');
+          }
+          if (preflight.executionConfig?.benchmarkLocale !== 'en-US' || preflight.executionConfig?.applicationLocale !== 'en') {
+            throw new Error(`Unexpected benchmark locale contract: ${preflight.executionConfig?.benchmarkLocale ?? 'none'} / ${preflight.executionConfig?.applicationLocale ?? 'none'}.`);
+          }
+          NODE
+
+      - name: Run three connected AquaGuide smokes sequentially
+        shell: bash
+        env:
+          EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+          mkdir -p connected-aquaguide-cohort-output
+          for run_index in $(seq 1 "$COHORT_RUN_COUNT"); do
+            echo "[connected-aquaguide-cohort] START run ${run_index}/${COHORT_RUN_COUNT}" >&2
+            npm run --silent smoke:connected-aquaguide -- \
+              --url http://127.0.0.1:3000 \
+              --output "connected-aquaguide-cohort-output/run-${run_index}" \
+              --max-steps "$MAX_STEPS" \
+              --json | tee "connected-aquaguide-cohort-run-${run_index}.json"
+            echo "[connected-aquaguide-cohort] END run ${run_index}/${COHORT_RUN_COUNT}" >&2
+          done
+
+      - name: Aggregate three-run variance report
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run --silent aggregate:connected-aquaguide-cohort -- \
+            --input connected-aquaguide-cohort-run-1.json \
+            --input connected-aquaguide-cohort-run-2.json \
+            --input connected-aquaguide-cohort-run-3.json \
+            --output connected-aquaguide-cohort-summary.json \
+            --markdown connected-aquaguide-cohort-summary.md \
+            --json | tee connected-aquaguide-cohort-summary.stdout.json
+
+      - name: Validate cohort contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const summary = JSON.parse(await readFile('connected-aquaguide-cohort-summary.json', 'utf8'));
+          if (summary.analysisMode !== 'connected_aquaguide_3_run_variance_cohort' || summary.runCount !== 3 || summary.cohortComplete !== true) {
+            throw new Error('Connected AquaGuide cohort did not produce exactly three complete run artifacts.');
+          }
+          if (summary.configuration?.targetAppGitSha !== process.env.TARGET_APP_COMMIT) {
+            throw new Error('Connected AquaGuide cohort target commit drifted.');
+          }
+          if (summary.configuration?.providerId !== 'deepseek' || summary.configuration?.model !== process.env.EVALPILOT_DEEPSEEK_MODEL) {
+            throw new Error('Connected AquaGuide cohort provider/model drifted.');
+          }
+          if (summary.configuration?.maxAgentSteps !== Number(process.env.MAX_STEPS)) {
+            throw new Error('Connected AquaGuide cohort max steps drifted.');
+          }
+          if (summary.configuration?.allowScreenshotToProvider !== false) {
+            throw new Error('Connected AquaGuide cohort unexpectedly enabled screenshots to the provider.');
+          }
+          if (summary.configuration?.benchmarkLocale !== 'en-US' || summary.configuration?.applicationLocale !== 'en') {
+            throw new Error('Connected AquaGuide cohort locale contract drifted.');
+          }
+          if (summary.boundaryHealthy !== true || summary.actorOracleLeakTotal !== 0 || summary.judgeOracleVisibleAll !== true) {
+            throw new Error('Connected AquaGuide cohort violated the Blind Actor / Judge Oracle boundary.');
+          }
+          NODE
+
+      - name: Upload connected AquaGuide cohort evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: connected-aquaguide-3run-cohort-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            connected-aquaguide-cohort-preflight.json
+            connected-aquaguide-cohort-run-*.json
+            connected-aquaguide-cohort-summary.json
+            connected-aquaguide-cohort-summary.md
+            connected-aquaguide-cohort-summary.stdout.json
+            connected-aquaguide-cohort-output/
+            connected-aquaguide-cohort-vite.log
+          if-no-files-found: warn
+          retention-days: 30
