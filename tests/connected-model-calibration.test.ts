@@ -55,17 +55,35 @@ describe('connected-model behavior calibration', () => {
     expect(metrics.cleanActorDriftRate).toBe(1);
     expect(metrics.extraSignalCount).toBe(1);
     expect(metrics.missingSignalCount).toBe(1);
+    expect(metrics.eligibleProbeExecutionCount).toBe(3);
   });
 
-  it('counts evaluator/provider failures independently from UX detector metrics', () => {
+  it('excludes evaluator/provider failures from UX detector denominators while keeping availability visible', () => {
     const metrics = summarizeConnectedModelCalibration([
-      row({ probeId: 'clean', expectedTypes: [], predictedTypes: [], expectedVerdict: 'pass', observedVerdict: 'inconclusive', agentStatus: 'inconclusive', failureSource: 'evaluator' }),
-      row({ probeId: 'dead-end', expectedTypes: ['journey_breakpoint'], predictedTypes: ['journey_breakpoint'], expectedVerdict: 'inconclusive', observedVerdict: 'inconclusive' }),
+      row({
+        probeId: 'failed-dead-end',
+        expectedTypes: ['journey_breakpoint'],
+        predictedTypes: [],
+        expectedVerdict: 'inconclusive',
+        observedVerdict: 'inconclusive',
+        agentStatus: 'inconclusive',
+        failureSource: 'evaluator',
+      }),
+      row({
+        probeId: 'feedback',
+        expectedTypes: ['interaction_feedback_issue'],
+        predictedTypes: ['interaction_feedback_issue'],
+        expectedVerdict: 'pass',
+        observedVerdict: 'pass',
+      }),
     ]);
 
     expect(metrics.providerFailureCount).toBe(1);
+    expect(metrics.eligibleProbeExecutionCount).toBe(1);
     expect(metrics.precisionAgainstProbeGroundTruth).toBe(1);
     expect(metrics.signalPreservationRecall).toBe(1);
+    expect(metrics.exactSignalMatchRate).toBe(1);
     expect(metrics.cleanActorDriftRate).toBe(0);
+    expect(metrics.fn).toBe(0);
   });
 });
