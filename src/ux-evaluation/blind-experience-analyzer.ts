@@ -92,8 +92,11 @@ function completionFor(input: {
   };
 }
 
-function recommendationFor(type: UxIssueType): string {
-  switch (type) {
+function recommendationFor(friction: FrictionEvent): string {
+  if (friction.type === 'usability_issue' && friction.observedBehavior.startsWith('交互目标冲突：')) {
+    return '检查主要可点击目标与次级控件的点击热区，避免覆盖或竞争，并保证主要目标的默认点击区域能够稳定命中。';
+  }
+  switch (friction.type) {
     case 'repeated_input_issue':
       return '检查字段默认值、输入保留和校验说明，减少同一信息的重复录入。';
     case 'path_efficiency_issue':
@@ -101,8 +104,6 @@ function recommendationFor(type: UxIssueType): string {
       return '检查核心入口的命名、层级和主次视觉关系，让首次用户更容易识别与当前目标最相关的操作。';
     case 'interaction_feedback_issue':
       return '为操作增加立即可见且与结果一致的状态反馈，避免用户通过重复点击确认是否生效。';
-    case 'interaction_target_conflict':
-      return '检查主要可点击目标与次级控件的点击热区，避免覆盖或竞争，并保证主要目标的默认点击区域能够稳定命中。';
     case 'journey_breakpoint':
     case 'recovery_issue':
       return '为当前状态提供清晰、安全的继续、修改、重试或返回路径，并验证用户可以恢复任务。';
@@ -125,7 +126,7 @@ function findingsFrom(input: {
     affectedStep: friction.step,
     confirmedFacts: [friction.observedBehavior],
     hypothesis: friction.possibleUserReason,
-    recommendation: recommendationFor(friction.type),
+    recommendation: recommendationFor(friction),
     evidence: friction.evidence,
     confidence: friction.confidence,
     functionalVerdict: input.result.verdict,
@@ -139,9 +140,6 @@ export function analyzeBlindExperience(input: {
   packet: EvidencePacket;
   agentRun: Pick<AiTestAgentRun, 'status' | 'decisions'>;
 }): BlindExperienceAnalysis {
-  // Reuse the normalized evidence reconstruction that is already calibrated against the
-  // functional sidecar. Blind semantics are applied below; the base sidecar verdict policy
-  // is intentionally not reused.
   const normalized = analyzeAdaptiveExperience({
     evalCase: input.evalCase,
     result: input.result,
@@ -184,10 +182,6 @@ export function analyzeBlindExperience(input: {
     decisions: input.agentRun.decisions,
   });
 
-  // Unlike inference-based friction, a deterministic pointer interception happened before
-  // the terminal evaluator/provider interruption and is independently preserved in the
-  // browser evidence. Keep only that narrow evidence class when the terminal run is
-  // insufficient; do not reopen backtrack/no-feedback/abandonment inference.
   const frictions = confirmedProductFailure
     ? []
     : analysisStatus === 'evaluated'
