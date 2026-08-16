@@ -7,7 +7,7 @@ export function reflectOnStep(input: { evalCase: EvalCase; decision: AgentDecisi
   const retryAttempts = input.retryAttempts ?? 0;
   if (input.taskState?.state === 'pending' || input.taskState?.state === 'progressing') return reflectionDecisionSchema.parse({ nextStep: 'continue', summary: '任务仍在处理，等待过程不消耗 Persona 的失败尝试。', confidence: 1 });
   if (input.result.status === 'blocked_by_safety') return reflectionDecisionSchema.parse({ nextStep: 'abandon', summary: '安全边界阻止继续自动操作。', confidence: 1 });
-  if (input.decision.action === 'finish' && input.verification.status === 'confirmed') return reflectionDecisionSchema.parse({ nextStep: 'finish', summary: 'Actor 已基于可见证据完成任务。', confidence: input.verification.confidence });
+  if (input.decision.action === 'finish') return reflectionDecisionSchema.parse({ nextStep: 'finish', summary: 'Actor 已选择结束交互；最终任务完成与否仍由独立 Judge/Oracle 判定。', confidence: input.decision.confidence });
   if (input.decision.action === 'abandon') return reflectionDecisionSchema.parse({ nextStep: 'abandon', summary: 'Persona 选择放弃当前路径。', confidence: input.decision.confidence });
   if (input.verification.status !== 'confirmed' && input.failedAttempts >= policy.patienceTurns) return reflectionDecisionSchema.parse({ nextStep: 'abandon', summary: `连续尝试没有得到确认，已达到当前 Persona 的 ${policy.patienceTurns} 步耐心边界。`, confidence: 0.9 });
   if (input.verification.status === 'not_confirmed' && retryAttempts <= policy.retryTolerance) return reflectionDecisionSchema.parse({ nextStep: 'retry', summary: `当前动作未产生预期结果，Persona 仍允许重试（上限 ${policy.retryTolerance} 次）。`, confidence: 0.85 });
