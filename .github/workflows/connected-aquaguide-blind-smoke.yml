@@ -34,7 +34,6 @@ jobs:
       deployment: false
     env:
       EVALPILOT_AI_PROVIDER: deepseek
-      EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
       EVALPILOT_DEEPSEEK_MODEL: ${{ inputs.model }}
       TARGET_APP_COMMIT: 8663b469c50605529367daf1b69ac0cd7cfb0cac
       OUTPUT_DIR: connected-aquaguide-blind-output
@@ -42,24 +41,10 @@ jobs:
       CONFIRM_PAID_CALLS: ${{ inputs.confirm_paid_calls }}
 
     steps:
-      - name: Checkout EvalPilot
-        uses: actions/checkout@v4
-
-      - name: Checkout pinned AquaGuide
-        uses: actions/checkout@v4
-        with:
-          repository: chusday97/aquaguide-tank-guide
-          ref: 8663b469c50605529367daf1b69ac0cd7cfb0cac
-          path: real-products/aquaguide
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: 24
-          cache: npm
-
       - name: Confirm remote-call authorization
         shell: bash
+        env:
+          EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
           if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
@@ -77,6 +62,22 @@ jobs:
             echo 'No remote model calls were made.' >&2
             exit 2
           fi
+
+      - name: Checkout EvalPilot
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned AquaGuide
+        uses: actions/checkout@v4
+        with:
+          repository: chusday97/aquaguide-tank-guide
+          ref: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+          path: real-products/aquaguide
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
 
       - name: Install EvalPilot
         run: npm ci
@@ -107,6 +108,8 @@ jobs:
 
       - name: Record no-call preflight
         shell: bash
+        env:
+          EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
           npm run --silent smoke:connected-aquaguide -- \
@@ -139,6 +142,8 @@ jobs:
 
       - name: Run connected AquaGuide Blind Smoke
         shell: bash
+        env:
+          EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
           npm run --silent smoke:connected-aquaguide -- \
