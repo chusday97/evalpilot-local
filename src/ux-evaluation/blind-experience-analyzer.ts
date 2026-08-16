@@ -10,7 +10,7 @@ import type {
 } from '../../types.js';
 import { simulatedUserMetricsSchema } from '../schemas/ux-evaluation.js';
 import { analyzeAdaptiveExperience, type AdaptiveExperienceStep } from './adaptive-experience-analyzer.js';
-import { detectFrictions } from './friction-detector.js';
+import { detectDeterministicExecutionFrictions, detectFrictions } from './friction-detector.js';
 import { calculateInteractionMetrics } from './interaction-recorder.js';
 
 export interface BlindExperienceFinding {
@@ -92,8 +92,11 @@ function completionFor(input: {
   };
 }
 
-function recommendationFor(type: UxIssueType): string {
-  switch (type) {
+function recommendationFor(friction: FrictionEvent): string {
+  if (friction.type === 'usability_issue' && friction.observedBehavior.startsWith('交互目标冲突：')) {
+    return '检查主要可点击目标与次级控件的点击热区，避免覆盖或竞争，并保证主要目标的默认点击区域能够稳定命中。';
+  }
+  switch (friction.type) {
     case 'repeated_input_issue':
       return '检查字段默认值、输入保留和校验说明，减少同一信息的重复录入。';
     case 'path_efficiency_issue':
@@ -123,7 +126,7 @@ function findingsFrom(input: {
     affectedStep: friction.step,
     confirmedFacts: [friction.observedBehavior],
     hypothesis: friction.possibleUserReason,
-    recommendation: recommendationFor(friction.type),
+    recommendation: recommendationFor(friction),
     evidence: friction.evidence,
     confidence: friction.confidence,
     functionalVerdict: input.result.verdict,
@@ -137,9 +140,6 @@ export function analyzeBlindExperience(input: {
   packet: EvidencePacket;
   agentRun: Pick<AiTestAgentRun, 'status' | 'decisions'>;
 }): BlindExperienceAnalysis {
-  // Reuse the normalized evidence reconstruction that is already calibrated against the
-  // functional sidecar. Blind semantics are applied below; the base sidecar verdict policy
-  // is intentionally not reused.
   const normalized = analyzeAdaptiveExperience({
     evalCase: input.evalCase,
     result: input.result,
@@ -175,18 +175,27 @@ export function analyzeBlindExperience(input: {
       ? 'insufficient_evidence'
       : 'evaluated';
 
-  // Unlike the functional sidecar, a Blind run may legitimately emit UX friction when the
-  // independent Judge is inconclusive: getting lost, explicitly going back, retrying, or
-  // abandoning before success is exactly the behavior this mode is meant to observe.
-  const frictions = analysisStatus === 'evaluated'
-    ? detectFrictions({
-      featureId: input.evalCase.capabilityId,
-      personaId: input.evalCase.persona.personaId,
-      actions: normalized.actions,
-      metrics,
-      completion,
-    })
-    : [];
+  const deterministicExecutionFrictions = detectDeterministicExecutionFrictions({
+    featureId: input.evalCase.capabilityId,
+    personaId: input.evalCase.persona.personaId,
+    packet: input.packet,
+    decisions: input.agentRun.decisions,
+  });
+
+  const frictions = confirmedProductFailure
+    ? []
+    : analysisStatus === 'evaluated'
+      ? [
+        ...deterministicExecutionFrictions,
+        ...detectFrictions({
+          featureId: input.evalCase.capabilityId,
+          personaId: input.evalCase.persona.personaId,
+          actions: normalized.actions,
+          metrics,
+          completion,
+        }),
+      ]
+      : deterministicExecutionFrictions;
 
   return {
     schemaVersion: 1,
@@ -215,7 +224,9 @@ export function analyzeBlindExperience(input: {
       'wall-clock 模型/API 延迟被记录但不用于推断用户犹豫。',
       confirmedProductFailure
         ? '独立 Judge 已确认 Product Failure，因此本轮 UX Finding 被抑制，避免把 Bug 包装成体验建议。'
-        : '即使功能 Judge 未能确认 PASS，只要不存在确认的 Product/Evaluator Failure，Blind Actor 的回退、重试、无反馈和放弃仍可形成体验证据。',
+        : evaluatorFailure || unknownFailure
+          ? '终局证据仍不足；仅保留中断前由浏览器确定性证明的交互目标冲突，不据此把 provider/evaluator interruption 改判为 Product Failure。'
+          : '即使功能 Judge 未能确认 PASS，只要不存在确认的 Product/Evaluator Failure，Blind Actor 的回退、重试、无反馈和放弃仍可形成体验证据。',
     ],
   };
 }
