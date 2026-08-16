@@ -1,6 +1,11 @@
 import { resolve } from 'node:path';
 import { configuredEvaluationProvider } from '../src/evaluation/evaluation-orchestrator.js';
-import { runConnectedModelCalibration } from '../src/ux-evaluation/connected-model-calibration.js';
+import {
+  connectedModelCalibrationProbes,
+  runConnectedModelCalibration,
+  type ConnectedModelCalibrationResult,
+} from '../src/ux-evaluation/connected-model-calibration.js';
+import { summarizeConnectedModelCalibrationVariance } from '../src/ux-evaluation/connected-model-variance.js';
 import { ensureDirectory, writeJsonAtomic } from '../src/utils/file-system.js';
 
 function argValue(name: string): string | null {
@@ -8,40 +13,82 @@ function argValue(name: string): string | null {
   return index >= 0 ? process.argv[index + 1] ?? null : null;
 }
 
-const outputRoot = resolve(argValue('--output') ?? '.evalpilot-calibration');
-const allowScreenshotToProvider = process.argv.includes('--allow-screenshot');
-const maxStepsValue = argValue('--max-steps');
-const maxSteps = maxStepsValue ? Number.parseInt(maxStepsValue, 10) : undefined;
-
-if (maxSteps !== undefined && (!Number.isInteger(maxSteps) || maxSteps < 1 || maxSteps > 12)) {
-  throw new Error('--max-steps must be an integer between 1 and 12.');
+function boundedInteger(name: string, raw: string | null, fallback: number, min: number, max: number): number {
+  if (raw === null) return fallback;
+  if (!/^\d+$/.test(raw)) throw new Error(`${name} must be an integer between ${min} and ${max}.`);
+  const value = Number.parseInt(raw, 10);
+  if (!Number.isInteger(value) || value < min || value > max) throw new Error(`${name} must be an integer between ${min} and ${max}.`);
+  return value;
 }
 
+function metricLine(label: string, distribution: { mean: number; min: number; max: number }): string {
+  return `${label}: mean=${distribution.mean.toFixed(3)} range=${distribution.min.toFixed(3)}..${distribution.max.toFixed(3)}`;
+}
+
+const outputRoot = resolve(argValue('--output') ?? '.evalpilot-calibration');
+const allowScreenshotToProvider = process.argv.includes('--allow-screenshot');
+const maxSteps = boundedInteger('--max-steps', argValue('--max-steps'), 6, 1, 12);
+const runCount = boundedInteger('--runs', argValue('--runs'), 1, 1, 10);
+const sessionId = new Date().toISOString().replace(/[:.]/g, '-');
+const sessionRoot = resolve(outputRoot, `connected-model-${sessionId}`);
+
 const provider = configuredEvaluationProvider();
-await ensureDirectory(outputRoot);
-const result = await runConnectedModelCalibration({
-  provider,
-  outputDir: outputRoot,
-  allowScreenshotToProvider,
-  maxSteps,
-});
-const artifactPath = resolve(outputRoot, 'connected-model-calibration.json');
-await writeJsonAtomic(artifactPath, result);
+await ensureDirectory(sessionRoot);
+
+process.stderr.write([
+  `Connected-model calibration will run ${runCount} repetition(s) × ${connectedModelCalibrationProbes.length} controlled probes.`,
+  'Each probe may make multiple remote provider requests through Actor and semantic verification; exact cost depends on the configured provider/model.',
+  `Screenshots to the provider: ${allowScreenshotToProvider ? 'ENABLED by explicit flag' : 'disabled (default)'}.`,
+  '',
+].join('\n'));
+
+const results: ConnectedModelCalibrationResult[] = [];
+const rawRunArtifacts: Array<{ runIndex: number; path: string }> = [];
+for (let index = 0; index < runCount; index += 1) {
+  const runIndex = index + 1;
+  const runDirectory = resolve(sessionRoot, 'runs', `run-${String(runIndex).padStart(3, '0')}`);
+  await ensureDirectory(runDirectory);
+  const result = await runConnectedModelCalibration({
+    provider,
+    outputDir: runDirectory,
+    allowScreenshotToProvider,
+    maxSteps,
+  });
+  const rawArtifactPath = resolve(runDirectory, 'connected-model-calibration.json');
+  await writeJsonAtomic(rawArtifactPath, result);
+  results.push(result);
+  rawRunArtifacts.push({ runIndex, path: rawArtifactPath });
+}
+
+const variance = summarizeConnectedModelCalibrationVariance(results);
+const artifactPath = resolve(sessionRoot, 'connected-model-variance.json');
+const aggregateArtifact = { ...variance, rawRunArtifacts };
+await writeJsonAtomic(artifactPath, aggregateArtifact);
+
+// Preserve the original single-run artifact name for callers that already consume it.
+let singleRunArtifactPath: string | null = null;
+if (results.length === 1) {
+  singleRunArtifactPath = resolve(sessionRoot, 'connected-model-calibration.json');
+  await writeJsonAtomic(singleRunArtifactPath, results[0]);
+}
 
 if (process.argv.includes('--json')) {
-  process.stdout.write(`${JSON.stringify({ artifactPath, ...result }, null, 2)}\n`);
+  process.stdout.write(`${JSON.stringify({ artifactPath, singleRunArtifactPath, ...aggregateArtifact }, null, 2)}\n`);
 } else {
-  const { metrics } = result;
   process.stdout.write([
-    'Connected-model behavior sensitivity completed.',
-    `Provider: ${result.provider.providerId} / ${result.provider.model}`,
-    `Signal preservation recall: ${metrics.signalPreservationRecall.toFixed(3)}`,
-    `Precision vs probe ground truth: ${metrics.precisionAgainstProbeGroundTruth.toFixed(3)}`,
-    `Exact signal match rate: ${metrics.exactSignalMatchRate.toFixed(3)}`,
-    `Clean actor drift rate: ${metrics.cleanActorDriftRate.toFixed(3)}`,
-    `Provider/evaluator failures: ${metrics.providerFailureCount}`,
-    `Artifact: ${artifactPath}`,
+    'Connected-model behavior variance calibration completed.',
+    `Provider: ${variance.provider.providerId} / ${variance.provider.model}`,
+    `Runs: ${variance.runCount}`,
+    metricLine('Signal preservation recall', variance.metricDistributions.signalPreservationRecall),
+    metricLine('Precision vs probe ground truth', variance.metricDistributions.precisionAgainstProbeGroundTruth),
+    metricLine('Exact signal match rate', variance.metricDistributions.exactSignalMatchRate),
+    metricLine('Clean actor drift rate', variance.metricDistributions.cleanActorDriftRate),
+    `Provider/evaluator failure rate: ${variance.providerFailureRate.toFixed(3)} (${variance.providerFailureCount}/${variance.probeExecutionCount})`,
+    ...variance.probeStability.map((probe) => `${probe.probeId}: signal-exact=${probe.exactSignalMatchRate.toFixed(3)} verdict-match=${probe.verdictMatchRate.toFixed(3)} provider-failure=${probe.providerFailureRate.toFixed(3)}`),
+    `Aggregate artifact: ${artifactPath}`,
+    `Raw run artifacts: ${rawRunArtifacts.map((item) => item.path).join(', ')}`,
     '',
-    'Boundary: this is a connected-model sensitivity probe, not general UX accuracy or a human usability study.',
+    variance.varianceNote,
+    'Boundary: repeated model behavior on controlled probes is not general UX accuracy or a human usability study.',
   ].join('\n'));
 }
