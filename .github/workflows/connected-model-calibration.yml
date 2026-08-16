@@ -1,0 +1,150 @@
+name: Connected Model Calibration
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_paid_calls:
+        description: 'Type RUN_CONNECTED_MODEL_CALIBRATION to authorize remote model calls for this run.'
+        required: true
+        type: string
+      model:
+        description: 'OpenAI model ID used by the calibration run.'
+        required: true
+        default: 'gpt-5-mini'
+        type: string
+      runs:
+        description: 'Independent repetitions of the same controlled probe suite.'
+        required: true
+        default: '1'
+        type: choice
+        options:
+          - '1'
+          - '3'
+          - '5'
+      max_steps:
+        description: 'Maximum Actor steps per probe.'
+        required: true
+        default: '6'
+        type: choice
+        options:
+          - '4'
+          - '6'
+          - '8'
+      allow_screenshot:
+        description: 'Explicitly allow controlled probe screenshots to be sent to the provider.'
+        required: true
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+concurrency:
+  group: connected-model-calibration-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  calibrate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    env:
+      EVALPILOT_OPENAI_API_KEY: ${{ secrets.EVALPILOT_OPENAI_API_KEY }}
+      EVALPILOT_OPENAI_MODEL: ${{ inputs.model }}
+      OUTPUT_ROOT: connected-model-artifacts
+      RUNS: ${{ inputs.runs }}
+      MAX_STEPS: ${{ inputs.max_steps }}
+      ALLOW_SCREENSHOT: ${{ inputs.allow_screenshot }}
+      CONFIRM_PAID_CALLS: ${{ inputs.confirm_paid_calls }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Confirm remote-call authorization
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM_PAID_CALLS" != "RUN_CONNECTED_MODEL_CALIBRATION" ]]; then
+            echo 'Remote model calls were not explicitly authorized.' >&2
+            echo 'Re-run the workflow and type RUN_CONNECTED_MODEL_CALIBRATION exactly.' >&2
+            exit 2
+          fi
+          if [[ -z "$EVALPILOT_OPENAI_API_KEY" ]]; then
+            echo 'Repository secret EVALPILOT_OPENAI_API_KEY is not configured.' >&2
+            echo 'No remote model calls were made.' >&2
+            exit 2
+          fi
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Record no-call preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm run --silent calibrate:connected-model -- \
+            --preflight \
+            --output "$OUTPUT_ROOT" \
+            --runs "$RUNS" \
+            --max-steps "$MAX_STEPS" \
+            --json | tee connected-model-preflight.json
+
+      - name: Validate no-call preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const preflight = JSON.parse(await readFile('connected-model-preflight.json', 'utf8'));
+          if (preflight.status !== 'ready' || preflight.canRun !== true || preflight.remoteCallsMade !== false) {
+            throw new Error('Connected-model preflight artifact is not a ready, zero-call plan.');
+          }
+          NODE
+
+      - name: Run connected-model calibration
+        shell: bash
+        run: |
+          set -euo pipefail
+          args=(
+            --output "$OUTPUT_ROOT"
+            --runs "$RUNS"
+            --max-steps "$MAX_STEPS"
+            --json
+          )
+          if [[ "$ALLOW_SCREENSHOT" == "true" ]]; then
+            args+=(--allow-screenshot)
+          fi
+          npm run --silent calibrate:connected-model -- "${args[@]}" | tee connected-model-result.json
+
+      - name: Validate calibration result
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const result = JSON.parse(await readFile('connected-model-result.json', 'utf8'));
+          if (result.analysisMode !== 'connected_model_behavior_variance' || !Array.isArray(result.rawRunArtifacts)) {
+            throw new Error('Connected-model result artifact is missing the expected variance contract.');
+          }
+          NODE
+
+      - name: Upload calibration evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: connected-model-calibration-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            connected-model-preflight.json
+            connected-model-result.json
+            connected-model-artifacts/
+          if-no-files-found: warn
+          retention-days: 30
