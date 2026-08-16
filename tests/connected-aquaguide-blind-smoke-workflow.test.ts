@@ -121,15 +121,30 @@ describe('connected AquaGuide Blind Smoke workflow safety', () => {
     expect(upload?.with?.path).toContain('connected-aquaguide-blind-output/');
   });
 
-  it('uses the real configured provider while preserving the Actor/Judge Oracle audit boundary', async () => {
+  it('uses the real provider and records provider errors without confusing them with product verdicts', async () => {
     const source = await readFile(resolve('scripts/run-connected-aquaguide-blind-smoke.ts'), 'utf8');
     expect(source).toContain('configuredEvaluationProvider()');
     expect(source).toContain('new AuditedProvider(baseProvider, providerAudits)');
     expect(source).not.toContain('MockAiProvider');
+    expect(source).toContain("error instanceof AiProviderError ? 'provider_failure' : 'error'");
+    expect(source).toContain("runtimeFailureSource = providerFailed ? 'provider' : outcome.agentRun.failureSource");
+    expect(source).toContain("runtimeFailureSource === 'provider'");
     expect(source).toContain("schemaName === 'agent_decision'");
     expect(source).toContain("schemaName === 'semantic_judge_result'");
     expect(source).toContain('actorOracleLeakCount === 0');
     expect(source).toContain('allowScreenshotToProvider: false');
     expect(source).toContain("arg('--max-steps', '12')");
+  });
+
+  it('blocks dependent journeys after an upstream non-pass and exposes per-journey progress on stderr', async () => {
+    const source = await readFile(resolve('scripts/run-connected-aquaguide-blind-smoke.ts'), 'utf8');
+    expect(source).toContain("['blind-record-existing-livestock', 'blind-create-usable-aquarium']");
+    expect(source).toContain("['blind-daily-check-risk', 'blind-record-existing-livestock']");
+    expect(source).toContain("executionStatus: 'blocked_prerequisite'");
+    expect(source).toContain('if (prerequisiteCaseId && !passedCaseIds.has(prerequisiteCaseId))');
+    expect(source).toContain('prerequisiteCascadeGuard: true');
+    expect(source).toContain('[connected-aquaguide] START');
+    expect(source).toContain('[connected-aquaguide] END');
+    expect(source).toContain('[connected-aquaguide] BLOCKED');
   });
 });
