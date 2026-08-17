@@ -45,7 +45,7 @@ describe('connected AquaGuide Blind Smoke workflow safety', () => {
     expect(inputs.target_app_commit).toEqual(expect.objectContaining({
       required: true,
       type: 'string',
-      default: '8663b469c50605529367daf1b69ac0cd7cfb0cac',
+      default: '2add55a54402afc18b642b572d8ee8351ab72c53',
     }));
     expect(inputs.model).toEqual(expect.objectContaining({ required: true, type: 'string', default: 'deepseek-v4-flash' }));
     expect(inputs.max_steps?.options).toEqual(['10', '12', '15']);
