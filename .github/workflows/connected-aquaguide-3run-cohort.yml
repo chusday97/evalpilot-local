@@ -7,6 +7,11 @@ on:
         description: 'Type RUN_CONNECTED_AQUAGUIDE_3_RUN_COHORT to authorize three paid DeepSeek connected runs'
         required: true
         type: string
+      target_app_commit:
+        description: 'Exact AquaGuide commit SHA to evaluate'
+        required: true
+        default: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+        type: string
       model:
         description: 'DeepSeek model ID'
         required: true
@@ -35,7 +40,7 @@ jobs:
     env:
       EVALPILOT_AI_PROVIDER: deepseek
       EVALPILOT_DEEPSEEK_MODEL: ${{ inputs.model }}
-      TARGET_APP_COMMIT: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+      TARGET_APP_COMMIT: ${{ inputs.target_app_commit }}
       MAX_STEPS: ${{ inputs.max_steps }}
       CONFIRM_PAID_CALLS: ${{ inputs.confirm_paid_calls }}
       COHORT_RUN_COUNT: '3'
@@ -62,6 +67,11 @@ jobs:
             echo 'No remote model calls were made.' >&2
             exit 2
           fi
+          if [[ ! "$TARGET_APP_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'target_app_commit must be an exact 40-character lowercase Git SHA.' >&2
+            echo 'No remote model calls were made.' >&2
+            exit 2
+          fi
 
       - name: Checkout EvalPilot
         uses: actions/checkout@v4
@@ -70,7 +80,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: chusday97/aquaguide-tank-guide
-          ref: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+          ref: ${{ inputs.target_app_commit }}
           path: real-products/aquaguide
 
       - name: Setup Node

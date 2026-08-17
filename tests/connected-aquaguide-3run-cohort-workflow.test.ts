@@ -4,11 +4,15 @@ import { describe, expect, it } from 'vitest';
 const workflowPath = '.github/workflows/connected-aquaguide-3run-cohort.yml';
 
 describe('Connected AquaGuide 3-run cohort workflow', () => {
-  it('keeps paid execution manual, fixed to three sequential runs, and protected', async () => {
+  it('keeps paid execution manual, fixed to three sequential runs, protected, and exactly target-pinned', async () => {
     const workflow = await readFile(workflowPath, 'utf8');
 
     expect(workflow).toContain('workflow_dispatch:');
     expect(workflow).toContain('RUN_CONNECTED_AQUAGUIDE_3_RUN_COHORT');
+    expect(workflow).toContain('target_app_commit:');
+    expect(workflow).toContain('TARGET_APP_COMMIT: ${{ inputs.target_app_commit }}');
+    expect(workflow).toContain('ref: ${{ inputs.target_app_commit }}');
+    expect(workflow).toContain('^[0-9a-f]{40}$');
     expect(workflow).toContain("COHORT_RUN_COUNT: '3'");
     expect(workflow).not.toContain('run_count:');
     expect(workflow).not.toContain('matrix:');
@@ -28,6 +32,7 @@ describe('Connected AquaGuide 3-run cohort workflow', () => {
     expect(workflow).toContain('--input connected-aquaguide-cohort-run-3.json');
     expect(workflow).toContain("summary.analysisMode !== 'connected_aquaguide_3_run_variance_cohort'");
     expect(workflow).toContain('summary.runCount !== 3');
+    expect(workflow).toContain('summary.configuration?.targetAppGitSha !== process.env.TARGET_APP_COMMIT');
     expect(workflow).toContain('summary.boundaryHealthy !== true');
     expect(workflow).not.toContain('summary.fullPassRunCount !== 3');
     expect(workflow).not.toContain('summary.protocolHealthyRunCount !== 3');

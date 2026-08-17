@@ -42,22 +42,30 @@ describe('connected AquaGuide Blind Smoke workflow safety', () => {
     const dispatch = document.on?.workflow_dispatch as { inputs?: Record<string, WorkflowDispatchInput> };
     const inputs = dispatch.inputs ?? {};
     expect(inputs.confirm_paid_calls).toEqual(expect.objectContaining({ required: true, type: 'string' }));
+    expect(inputs.target_app_commit).toEqual(expect.objectContaining({
+      required: true,
+      type: 'string',
+      default: '8663b469c50605529367daf1b69ac0cd7cfb0cac',
+    }));
     expect(inputs.model).toEqual(expect.objectContaining({ required: true, type: 'string', default: 'deepseek-v4-flash' }));
     expect(inputs.max_steps?.options).toEqual(['10', '12', '15']);
     expect(inputs.runs).toBeUndefined();
     expect(inputs.allow_screenshot).toBeUndefined();
   });
 
-  it('reuses the protected environment but does not expose the DeepSeek key job-wide', async () => {
+  it('reuses the protected environment, parameterizes the exact target commit, and does not expose the DeepSeek key job-wide', async () => {
     const document = await workflow();
     const job = document.jobs?.['connected-aquaguide-blind-smoke'];
     expect(job?.environment).toEqual({ name: 'connected-model-calibration', deployment: false });
     expect(job?.env?.EVALPILOT_AI_PROVIDER).toBe('deepseek');
     expect(job?.env?.EVALPILOT_DEEPSEEK_API_KEY).toBeUndefined();
     expect(job?.env?.EVALPILOT_OPENAI_API_KEY).toBeUndefined();
-    expect(job?.env?.TARGET_APP_COMMIT).toBe('8663b469c50605529367daf1b69ac0cd7cfb0cac');
+    expect(job?.env?.TARGET_APP_COMMIT).toBe('${{ inputs.target_app_commit }}');
 
     const steps = job?.steps ?? [];
+    const checkout = steps.find((step) => step.name === 'Checkout pinned AquaGuide');
+    expect(checkout?.with?.ref).toBe('${{ inputs.target_app_commit }}');
+
     const secretSteps = steps.filter((step) => step.env?.EVALPILOT_DEEPSEEK_API_KEY);
     expect(secretSteps.map((step) => step.name)).toEqual([
       'Confirm remote-call authorization',
@@ -70,7 +78,7 @@ describe('connected AquaGuide Blind Smoke workflow safety', () => {
     }
   });
 
-  it('checks main, exact paid authorization, and the secret before checkout or any provider call', async () => {
+  it('checks main, exact paid authorization, target SHA shape, and the secret before checkout or any provider call', async () => {
     const document = await workflow();
     const steps = document.jobs?.['connected-aquaguide-blind-smoke']?.steps ?? [];
     const authorizationIndex = steps.findIndex((step) => step.name === 'Confirm remote-call authorization');
@@ -84,6 +92,8 @@ describe('connected AquaGuide Blind Smoke workflow safety', () => {
     expect(steps[authorizationIndex]?.run).toContain('refs/heads/main');
     expect(steps[authorizationIndex]?.run).toContain('RUN_CONNECTED_AQUAGUIDE_BLIND_SMOKE');
     expect(steps[authorizationIndex]?.run).toContain('EVALPILOT_DEEPSEEK_API_KEY');
+    expect(steps[authorizationIndex]?.run).toContain('TARGET_APP_COMMIT');
+    expect(steps[authorizationIndex]?.run).toContain('^[0-9a-f]{40}$');
   });
 
   it('validates a zero-call pinned preflight before the paid real-product run', async () => {
