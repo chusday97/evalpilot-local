@@ -55,6 +55,14 @@ describe('connected AquaGuide Daily low-patience persona Challenge workflow', ()
     expect(workflow).toContain('trustworthyProductFail');
     expect(workflow).toContain('challengeCoverageVerified: trustworthyPass');
     expect(workflow).toContain('allowScreenshotToProvider');
-    expect(workflow).not.toContain('result.productJourneyPassed !== true');
+
+    const productFailDeclaration = workflow.indexOf('const trustworthyProductFail');
+    const trustworthyVerdictGate = workflow.indexOf('if (!trustworthyPass && !trustworthyProductFail)');
+    const passOnlyBranch = workflow.indexOf('if (trustworthyPass) {');
+    const passOnlyProductCheck = workflow.indexOf('result.productJourneyPassed !== true');
+    expect(productFailDeclaration).toBeGreaterThan(-1);
+    expect(trustworthyVerdictGate).toBeGreaterThan(productFailDeclaration);
+    expect(passOnlyBranch).toBeGreaterThan(trustworthyVerdictGate);
+    expect(passOnlyProductCheck).toBeGreaterThan(passOnlyBranch);
   });
 });
