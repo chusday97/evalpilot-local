@@ -26,7 +26,9 @@ function candidate(source: EvalCase, gap: CoverageGap, suffix: string, changes: 
 }
 
 function gapFor(gaps: CoverageGap[], dimension: CoverageGap['dimension'], fallback: string, capabilityId: string): CoverageGap {
-  return gaps.find((item) => item.dimension === dimension) ?? { gapId: `gap-${dimension}-${fallback}`, kind: 'missing_asset', capabilityId, dimension, missingValue: fallback, priority: 'high', reason: `${dimension} 需要新的覆盖。`, candidateCaseIds: [] };
+  return gaps.find((item) => item.dimension === dimension && item.missingValue === fallback)
+    ?? gaps.find((item) => item.dimension === dimension)
+    ?? { gapId: `gap-${dimension}-${fallback}`, kind: 'missing_asset', capabilityId, dimension, missingValue: fallback, priority: 'high', reason: `${dimension} 需要新的覆盖。`, candidateCaseIds: [] };
 }
 
 export function generateChallengeCandidates(source: EvalCase, model: ProductModel, gaps: CoverageGap[], createdAt = new Date().toISOString()): EvalCase[] {

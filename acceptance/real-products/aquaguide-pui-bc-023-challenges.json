@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "lifecycle": "pui-bc-023-challenge-expansion",
+  "sourceRegressionCaseId": "case-regression-pui-bc-023",
+  "sourceCaseId": "blind-daily-check-risk",
+  "sourceConnectedRunId": "32035944562",
+  "targetAppGitSha": "3d73c033b6899e3a92144f6de99a05db8babde78",
+  "generatedAt": "2026-08-17T14:23:00.000Z",
+  "executionStatus": "candidate_not_run",
+  "candidates": [
+    {
+      "caseId": "case-challenge-blind-daily-check-risk-boundary",
+      "dimension": "input_quality",
+      "value": "boundary",
+      "priority": "medium",
+      "decision": "retain_candidate",
+      "note": "Generic generator currently marks the coverage target correctly, but the Daily-specific boundary mutation still needs an executable unknown/edge observation contract before any run."
+    },
+    {
+      "caseId": "case-challenge-blind-daily-check-risk-journey",
+      "dimension": "journey_stage",
+      "value": "backtrack",
+      "priority": "high",
+      "decision": "retain_candidate",
+      "note": "High-value recovery coverage, but the current generic mutation only adds a backtrack precondition; a concrete mid-task return/re-entry interaction contract is required before execution."
+    },
+    {
+      "caseId": "case-challenge-blind-daily-check-risk-persona",
+      "dimension": "persona",
+      "value": "persona-low-patience",
+      "priority": "high",
+      "decision": "selected_next",
+      "note": "Directly re-tests the original information-architecture risk with one-attempt tolerance and no retries, while preserving the same verified Daily Check inputs and Oracle."
+    }
+  ],
+  "selectedNextCandidateId": "case-challenge-blind-daily-check-risk-persona",
+  "selectionReason": "PUI-BC-023 originated from semantic competition between Daily Check and Care Guide. The low-patience persona challenge attacks that root cause without injecting artificial product failures or changing the already-verified Daily Check business inputs.",
+  "claimBoundary": [
+    "Challenge candidates are generated from a trusted PASS but have not themselves been executed.",
+    "Candidate status does not count as verified coverage and must not inherit PASS statistics from the source case.",
+    "The latest connected PASS reported no observed pre-failure signals, so the older /api/ai/chat 500 is not treated as the current primary Challenge trigger.",
+    "Boundary and backtrack candidates remain candidates until their product-specific interaction contracts are concrete enough to execute.",
+    "No paid connected Challenge run is authorized by this artifact."
+  ]
+}
