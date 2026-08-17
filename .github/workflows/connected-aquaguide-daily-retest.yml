@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       confirm_paid_calls:
-        description: 'Type RUN_CONNECTED_AQUAGUIDE_DAILY_RETEST to authorize the Daily Actor/Judge DeepSeek calls'
+        description: 'Type RUN_CONNECTED_AQUAGUIDE_DAILY_RETEST to authorize the Daily evaluation DeepSeek calls'
         required: true
         type: string
       target_app_commit:
@@ -150,6 +150,9 @@ jobs:
           }
           if (preflight.executionConfig?.setupMode !== 'aquaguide_gp003_local_storage_fixture') {
             throw new Error(`Unexpected Daily setup mode: ${preflight.executionConfig?.setupMode ?? 'none'}.`);
+          }
+          if (preflight.setupValidation?.ready !== true || preflight.setupValidation?.dailyTaskVisible !== true || preflight.setupValidation?.diagnosisRecordCount !== 0 || preflight.setupValidation?.remoteCallsMade !== false) {
+            throw new Error(`Daily browser setup validation failed: ${JSON.stringify(preflight.setupValidation ?? null)}.`);
           }
           if (preflight.provider?.provider !== 'deepseek' || preflight.provider?.model !== process.env.EVALPILOT_DEEPSEEK_MODEL) {
             throw new Error(`Unexpected provider/model: ${preflight.provider?.provider ?? 'none'} / ${preflight.provider?.model ?? 'none'}.`);

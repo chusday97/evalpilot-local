@@ -24,7 +24,9 @@ The setup shape is derived from AquaGuide's GP-003 returning-user Daily Check fi
 - onboarding already complete;
 - no existing diagnosis / Daily Check record.
 
-This setup makes zero remote model calls. It substitutes only the upstream prerequisites; it does not complete the evaluated Daily task.
+This setup makes zero EvalPilot provider calls. It substitutes only the upstream prerequisites; it does not complete the evaluated Daily task.
+
+Before any paid evaluation call, the no-call preflight launches a real Chromium page against the pinned AquaGuide build and requires the Daily task to be visible, the seeded aquarium to be active, zero pre-existing diagnosis records, and no page errors.
 
 ## Remote-call boundary
 
@@ -38,12 +40,15 @@ The workflow must not be triggered automatically.
 
 Screenshots remain disabled for the provider.
 
+Within the one Daily journey, remote calls may include Actor decisions, semantic step verification / reflection, and the final semantic Judge. The cost reduction comes from eliminating all remote calls for the Create Aquarium and Record Livestock prerequisite journeys, not from claiming that the Daily journey itself is only two model requests.
+
 The no-call preflight must report:
 
 - one case only: `blind-daily-check-risk`;
 - `journeyMode = daily_only`;
 - `prerequisiteRemoteCalls = 0`;
 - `remoteCallsMade = false`;
+- real-browser setup validation = ready;
 - exact pinned AquaGuide SHA.
 
 ## Product assertions

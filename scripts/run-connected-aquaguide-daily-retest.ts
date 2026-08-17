@@ -100,9 +100,60 @@ function executionConfig() {
   };
 }
 
+async function validateLocalSetup(): Promise<Record<string, unknown>> {
+  const browser = await chromium.launch({ headless: true });
+  const pageErrors: string[] = [];
+  try {
+    const context = await browser.newContext({ locale: benchmarkBrowserLocale });
+    const setupState = buildAquaGuideDailyRetestState();
+    await context.addInitScript(({ state, locale }) => {
+      window.localStorage.clear();
+      window.sessionStorage.clear();
+      window.localStorage.setItem('aquarium_app_state_v1', JSON.stringify(state));
+      window.localStorage.setItem('aquaguide_locale', locale);
+    }, { state: setupState, locale: benchmarkAppLocale });
+    const page = await context.newPage();
+    page.on('pageerror', (error) => pageErrors.push(error.message));
+    await page.goto(`${targetUrl}/aquarium`, { waitUntil: 'domcontentloaded' });
+    const dailyTask = page.locator('[data-daily-action="daily_check"]');
+    await dailyTask.waitFor({ state: 'visible', timeout: 10_000 });
+    const persisted = await page.evaluate(() => {
+      const raw = window.localStorage.getItem('aquarium_app_state_v1');
+      return raw ? JSON.parse(raw) as Record<string, unknown> : null;
+    });
+    const diagnosisRecords = Array.isArray(persisted?.diagnosisRecords) ? persisted.diagnosisRecords : null;
+    const ready = Boolean(persisted)
+      && persisted?.currentAquariumId === 'tank-connected-daily-retest'
+      && diagnosisRecords?.length === 0
+      && pageErrors.length === 0;
+    await context.close();
+    return {
+      ready,
+      dailyTaskVisible: true,
+      currentAquariumId: persisted?.currentAquariumId ?? null,
+      diagnosisRecordCount: diagnosisRecords?.length ?? null,
+      pageErrors,
+      remoteCallsMade: false,
+    };
+  } catch (error) {
+    return {
+      ready: false,
+      dailyTaskVisible: false,
+      currentAquariumId: null,
+      diagnosisRecordCount: null,
+      pageErrors,
+      remoteCallsMade: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  } finally {
+    await browser.close();
+  }
+}
+
 if (process.argv.includes('--preflight')) {
   const connection = aiConnectionStatus();
-  const canRun = connection.configured && connection.provider === 'deepseek';
+  const setupValidation = await validateLocalSetup();
+  const canRun = connection.configured && connection.provider === 'deepseek' && setupValidation.ready === true;
   const preflight = {
     schemaVersion: 1,
     analysisMode: `${AQUAGUIDE_DAILY_RETEST_ANALYSIS_MODE}_preflight`,
@@ -114,9 +165,10 @@ if (process.argv.includes('--preflight')) {
     targetUrl,
     caseIds: [evalCase.caseId],
     executionConfig: executionConfig(),
+    setupValidation,
     oracleAssertionIds: evalCase.oracle.deterministicAssertions.map((item) => item.assertionId),
     claimBoundary: [
-      'Preflight is planning only and makes zero remote provider calls.',
+      'Preflight validates the pinned product setup in a real browser and makes zero remote provider calls.',
       'Only blind-daily-check-risk is eligible for remote execution; Create Aquarium and Record Livestock are replaced by deterministic local setup.',
       'The local setup shape is derived from AquaGuide GP-003 returning-user Daily Check fixture and creates no diagnosis record before the Actor starts.',
       'This is a same EvalCase retest for PUI-BC-023 plus end-to-end confirmation of the PUI-BC-024 output fix; it is not a model reliability estimate or human usability study.',

@@ -70,6 +70,7 @@ describe('connected AquaGuide Daily-only retest contract', () => {
     expect(script).toContain("startingUrl: `${targetUrl}/aquarium`");
     expect(script).toContain('allowScreenshotToProvider: false');
     expect(script).toContain('prerequisiteRemoteCalls: 0');
+    expect(script).toContain('async function validateLocalSetup()');
     expect(script).not.toContain('blind-create-usable-aquarium');
     expect(script).not.toContain('blind-record-existing-livestock');
 
@@ -78,10 +79,13 @@ describe('connected AquaGuide Daily-only retest contract', () => {
     expect(workflow).not.toMatch(/^\s+pull_request:/m);
     expect(workflow).not.toMatch(/^\s+schedule:/m);
     expect(workflow).toContain('RUN_CONNECTED_AQUAGUIDE_DAILY_RETEST');
+    expect(workflow).toContain('Daily evaluation DeepSeek calls');
     expect(workflow).toContain('default: 3d73c033b6899e3a92144f6de99a05db8babde78');
     expect(workflow).toContain('connected_aquaguide_daily_blind_retest_preflight');
     expect(workflow).toContain("JSON.stringify(['blind-daily-check-risk'])");
     expect(workflow).toContain('preflight.executionConfig?.prerequisiteRemoteCalls !== 0');
+    expect(workflow).toContain('preflight.setupValidation?.ready !== true');
+    expect(workflow).toContain('preflight.setupValidation?.diagnosisRecordCount !== 0');
     expect(workflow).toContain('result.productJourneyPassed !== true');
     expect(workflow).toContain("result.taskResult?.semanticVerdict !== 'pass'");
   });
