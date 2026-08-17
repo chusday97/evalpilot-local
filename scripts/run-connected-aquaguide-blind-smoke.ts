@@ -28,7 +28,11 @@ function boundedInteger(name: string, raw: string, min: number, max: number): nu
 const targetUrl = arg('--url', 'http://127.0.0.1:3000').replace(/\/$/, '');
 const outputDir = resolve(arg('--output', 'connected-aquaguide-blind-output'));
 const maxAgentSteps = boundedInteger('--max-steps', arg('--max-steps', '12'), 1, 20);
-const pinnedCommit = '8663b469c50605529367daf1b69ac0cd7cfb0cac';
+const defaultPinnedCommit = '2add55a54402afc18b642b572d8ee8351ab72c53';
+const pinnedCommit = (process.env.TARGET_APP_COMMIT ?? defaultPinnedCommit).trim();
+if (!/^[0-9a-f]{40}$/.test(pinnedCommit)) {
+  throw new Error('TARGET_APP_COMMIT must be an exact 40-character lowercase Git SHA.');
+}
 const oracleOnlyMarker = 'SECRET_ORACLE_ONLY_MARKER_DO_NOT_SEND_TO_ACTOR';
 const benchmarkBrowserLocale = 'en-US';
 const benchmarkAppLocale = 'en';
