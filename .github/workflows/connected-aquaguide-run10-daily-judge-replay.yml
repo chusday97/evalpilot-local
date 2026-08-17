@@ -1,0 +1,122 @@
+name: Connected AquaGuide Run10 Daily Judge Replay
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_paid_calls:
+        description: Type RUN_CONNECTED_AQUAGUIDE_DAILY_JUDGE_REPLAY to authorize the single retained-evidence Judge replay
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  replay-daily-judge:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main'
+    env:
+      EVALPILOT_AI_PROVIDER: deepseek
+      EVALPILOT_DEEPSEEK_MODEL: deepseek-v4-flash
+      EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
+      SOURCE_RUN_ID: '31999907665'
+      SOURCE_ARTIFACT: connected-aquaguide-blind-smoke-31999907665-1
+      TARGET_APP_COMMIT: 2add55a54402afc18b642b572d8ee8351ab72c53
+
+    steps:
+      - name: Checkout EvalPilot
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install EvalPilot
+        run: npm ci
+
+      - name: Download retained Run10 evidence
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.SOURCE_ARTIFACT }}
+          path: replay-source
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ env.SOURCE_RUN_ID }}
+
+      - name: Locate Daily evidence packet
+        id: evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          evidence_path="$(grep -rl '"caseId": "blind-daily-check-risk"' replay-source --include='evidence-packet.json' | head -n 1)"
+          if [[ -z "$evidence_path" ]]; then
+            echo 'Run10 artifact does not contain the Daily Check Evidence Packet.' >&2
+            exit 2
+          fi
+          echo "path=$evidence_path" >> "$GITHUB_OUTPUT"
+
+      - name: Record zero-call Judge replay preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsx scripts/replay-connected-aquaguide-daily-judge.ts \
+            --preflight \
+            --evidence-packet '${{ steps.evidence.outputs.path }}' \
+            --expected-target "$TARGET_APP_COMMIT" \
+            | tee connected-aquaguide-daily-judge-replay-preflight.json
+
+      - name: Validate zero-call Judge replay preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const preflight = JSON.parse(await readFile('connected-aquaguide-daily-judge-replay-preflight.json', 'utf8'));
+          if (preflight.analysisMode !== 'connected_aquaguide_daily_judge_replay_preflight') throw new Error('Unexpected replay preflight contract.');
+          if (preflight.remoteCallsMade !== false || preflight.status !== 'ready' || preflight.canRun !== true) throw new Error('Judge replay preflight is not a ready zero-call plan.');
+          if (preflight.sourceRunId !== 'run-ai-2026-08-17T06-13-27-705Z') throw new Error(`Unexpected retained Daily run: ${preflight.sourceRunId}`);
+          if (preflight.targetAppGitSha !== process.env.TARGET_APP_COMMIT) throw new Error('Retained target SHA does not match Run10 target.');
+          const verdicts = preflight.deterministic?.checks?.map((item) => item.verdict) ?? [];
+          if (JSON.stringify(verdicts) !== JSON.stringify(['pass', 'pass', 'pass'])) throw new Error(`Retained evidence deterministic gate is not all-pass: ${JSON.stringify(verdicts)}`);
+          NODE
+
+      - name: Confirm paid Judge replay authorization
+        shell: bash
+        env:
+          CONFIRM_PAID_CALLS: ${{ inputs.confirm_paid_calls }}
+        run: |
+          set -euo pipefail
+          if [[ "$CONFIRM_PAID_CALLS" != 'RUN_CONNECTED_AQUAGUIDE_DAILY_JUDGE_REPLAY' ]]; then
+            echo 'Remote Judge replay was not explicitly authorized. Preflight made zero remote calls.' >&2
+            exit 2
+          fi
+          if [[ -z "$EVALPILOT_DEEPSEEK_API_KEY" ]]; then
+            echo 'DeepSeek calibration secret is not configured. No remote Judge call was made.' >&2
+            exit 2
+          fi
+
+      - name: Replay Daily semantic Judge on retained evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          npx tsx scripts/replay-connected-aquaguide-daily-judge.ts \
+            --evidence-packet '${{ steps.evidence.outputs.path }}' \
+            --expected-target "$TARGET_APP_COMMIT" \
+            --confirm RUN_CONNECTED_AQUAGUIDE_DAILY_JUDGE_REPLAY \
+            --output connected-aquaguide-daily-judge-replay.json \
+            | tee connected-aquaguide-daily-judge-replay.stdout.json
+
+      - name: Upload Judge replay evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: connected-aquaguide-daily-judge-replay-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            connected-aquaguide-daily-judge-replay-preflight.json
+            connected-aquaguide-daily-judge-replay.json
+            connected-aquaguide-daily-judge-replay.stdout.json
+          if-no-files-found: warn
+          retention-days: 30
