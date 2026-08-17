@@ -149,9 +149,9 @@ const cases: EvalCase[] = [
       recentOperation: '没有特别操作',
     },
     assertions: [
-      { assertionId: 'blind-daily-risk', type: 'text_visible', target: 'High Risk', expected: true, negated: false },
-      { assertionId: 'blind-daily-action', type: 'text_visible', target: 'Increase aeration or surface disturbance immediately', expected: true, negated: false },
-      { assertionId: 'blind-daily-recorded-high-risk', type: 'text_visible', target: 'Re-check Recommended', expected: true, negated: false },
+      { assertionId: 'blind-daily-risk', type: 'text_visible', target: 'Act now', expected: true, negated: false },
+      { assertionId: 'blind-daily-action', type: 'text_visible', target: 'Do this first', expected: true, negated: false },
+      { assertionId: 'blind-daily-recorded-high-risk', type: 'text_visible', target: '已保存今天的检查记录。', expected: true, negated: false },
     ],
   }),
 ];
@@ -236,7 +236,7 @@ if (process.argv.includes('--preflight')) {
     claimBoundary: [
       'Preflight is local planning only and makes zero remote provider calls.',
       'This smoke uses the pinned AquaGuide commit and the existing three Blind Experience journeys.',
-      'The benchmark browser locale is fixed to en-US and the AquaGuide application locale is fixed to en so deterministic Oracle text cannot drift with runner locale.',
+      'The benchmark browser locale is fixed to en-US and the AquaGuide application locale is fixed to en; deterministic Oracle targets use stable visible product-state markers from the pinned product contract rather than assuming generated diagnosis copy is English.',
       'A single connected run can expose protocol or behavior badcases but cannot estimate model variance.',
       'Dependent journeys are blocked when their upstream journey does not pass, preventing cascade misattribution.',
       'Recoverable action execution failures are preserved as sidecar evidence and do not change the terminal verdict by themselves.',
@@ -469,7 +469,7 @@ if (process.argv.includes('--preflight')) {
     taskResults,
     claimBoundary: [
       'This is one connected-model smoke on a pinned real product, not a model reliability estimate or human usability study.',
-      'The browser locale is fixed to en-US and AquaGuide application locale is fixed to en; all locale-sensitive deterministic Oracle targets in this benchmark use that English contract.',
+      'The browser locale is fixed to en-US and AquaGuide application locale is fixed to en; deterministic Oracle targets use stable visible product-state markers from the pinned product contract rather than assuming generated diagnosis copy is English.',
       'runtimeFailureSource separates provider transport/model failures from evaluator runtime failures without changing the persisted EvalCaseResult schema in this narrow regression fix.',
       'observedPreFailureSignals preserves deterministic action execution failures that occurred before the final task outcome; these sidecar signals do not override the terminal runtime failure or automatically prove a Product Failure.',
       'A pointer_interception signal records what Playwright deterministically observed at the product/evaluator interaction boundary; human-user impact still requires separate confirmation.',
