@@ -11,13 +11,13 @@ import { runBlindExperienceCase } from '../src/ux-evaluation/blind-experience-se
 import { collectObservedPreFailureSignals } from '../src/ux-evaluation/pre-failure-signals.js';
 import {
   AQUAGUIDE_DAILY_RETEST_ANALYSIS_MODE,
-  AQUAGUIDE_DAILY_RETEST_CASE_ID,
   AQUAGUIDE_DAILY_RETEST_DEFAULT_TARGET,
   AQUAGUIDE_DAILY_RETEST_ORACLE_MARKER,
   AQUAGUIDE_DAILY_RETEST_SETUP_MODE,
   buildAquaGuideDailyRetestCase,
   buildAquaGuideDailyRetestState,
 } from '../src/validation/aquaguide-daily-retest-contract.js';
+import { selectAquaGuidePuiBc023NextChallenge } from '../src/validation/aquaguide-pui-bc-023-challenges.js';
 
 function arg(name: string, fallback?: string): string {
   const index = process.argv.indexOf(name);
@@ -49,6 +49,8 @@ class AuditedProvider implements AiProvider {
   constructor(
     private readonly delegate: AiProvider,
     private readonly audits: ProviderAudit[],
+    private readonly fallbackCaseId: string,
+    private readonly oracleMarker: string,
   ) {
     this.info = delegate.info;
   }
@@ -57,8 +59,8 @@ class AuditedProvider implements AiProvider {
     const combinedPrompt = `${request.systemPrompt}\n${request.userPrompt}`;
     const audit: ProviderAudit = {
       schemaName: request.schemaName,
-      caseId: String(request.metadata.caseId ?? AQUAGUIDE_DAILY_RETEST_CASE_ID),
-      markerPresent: combinedPrompt.includes(AQUAGUIDE_DAILY_RETEST_ORACLE_MARKER),
+      caseId: String(request.metadata.caseId ?? this.fallbackCaseId),
+      markerPresent: combinedPrompt.includes(this.oracleMarker),
       status: 'ok',
       errorCode: null,
       errorMessage: null,
@@ -86,7 +88,15 @@ if (!/^[0-9a-f]{40}$/.test(pinnedCommit)) {
 const benchmarkBrowserLocale = 'en-US';
 const benchmarkAppLocale = 'en';
 const jsonOutput = process.argv.includes('--json');
-const evalCase = buildAquaGuideDailyRetestCase();
+const challengeMode = arg('--challenge', 'none');
+if (challengeMode !== 'none' && challengeMode !== 'persona') {
+  throw new Error(`Unsupported --challenge mode: ${challengeMode}. Expected none or persona.`);
+}
+const isPersonaChallenge = challengeMode === 'persona';
+const evalCase = isPersonaChallenge ? selectAquaGuidePuiBc023NextChallenge() : buildAquaGuideDailyRetestCase();
+const analysisMode = isPersonaChallenge
+  ? 'connected_aquaguide_daily_persona_challenge'
+  : AQUAGUIDE_DAILY_RETEST_ANALYSIS_MODE;
 
 function executionConfig() {
   return {
@@ -94,7 +104,8 @@ function executionConfig() {
     allowScreenshotToProvider: false,
     benchmarkLocale: benchmarkBrowserLocale,
     applicationLocale: benchmarkAppLocale,
-    journeyMode: 'daily_only',
+    challengeMode,
+    journeyMode: isPersonaChallenge ? 'daily_persona_challenge' : 'daily_only',
     setupMode: AQUAGUIDE_DAILY_RETEST_SETUP_MODE,
     prerequisiteRemoteCalls: 0,
   };
@@ -156,7 +167,7 @@ if (process.argv.includes('--preflight')) {
   const canRun = connection.configured && connection.provider === 'deepseek' && setupValidation.ready === true;
   const preflight = {
     schemaVersion: 1,
-    analysisMode: `${AQUAGUIDE_DAILY_RETEST_ANALYSIS_MODE}_preflight`,
+    analysisMode: `${analysisMode}_preflight`,
     status: canRun ? 'ready' : 'blocked',
     canRun,
     remoteCallsMade: false,
@@ -169,9 +180,13 @@ if (process.argv.includes('--preflight')) {
     oracleAssertionIds: evalCase.oracle.deterministicAssertions.map((item) => item.assertionId),
     claimBoundary: [
       'Preflight validates the pinned product setup in a real browser and makes zero remote provider calls.',
-      'Only blind-daily-check-risk is eligible for remote execution; Create Aquarium and Record Livestock are replaced by deterministic local setup.',
+      isPersonaChallenge
+        ? 'Only case-challenge-blind-daily-check-risk-persona is eligible for remote execution; deterministic local setup replaces prerequisite journeys.'
+        : 'Only blind-daily-check-risk is eligible for remote execution; Create Aquarium and Record Livestock are replaced by deterministic local setup.',
       'The local setup shape is derived from AquaGuide GP-003 returning-user Daily Check fixture and creates no diagnosis record before the Actor starts.',
-      'This is a same EvalCase retest for PUI-BC-023 plus end-to-end confirmation of the PUI-BC-024 output fix; it is not a model reliability estimate or human usability study.',
+      isPersonaChallenge
+        ? 'This is an unexecuted low-patience persona Challenge derived from the trusted PUI-BC-023 PASS; preflight readiness is not Challenge coverage.'
+        : 'This is a same EvalCase retest for PUI-BC-023 plus end-to-end confirmation of the PUI-BC-024 output fix; it is not a model reliability estimate or human usability study.',
       'Screenshots are not sent to the provider.',
     ],
   };
@@ -181,11 +196,11 @@ if (process.argv.includes('--preflight')) {
   await mkdir(outputDir, { recursive: true });
   const baseProvider = configuredEvaluationProvider();
   if (baseProvider.info.providerId !== 'deepseek') {
-    throw new Error(`Connected AquaGuide Daily retest requires DeepSeek; received ${baseProvider.info.providerId}.`);
+    throw new Error(`Connected AquaGuide Daily evaluation requires DeepSeek; received ${baseProvider.info.providerId}.`);
   }
 
   const providerAudits: ProviderAudit[] = [];
-  const provider = new AuditedProvider(baseProvider, providerAudits);
+  const provider = new AuditedProvider(baseProvider, providerAudits, evalCase.caseId, AQUAGUIDE_DAILY_RETEST_ORACLE_MARKER);
   const browser = await chromium.launch({ headless: true });
   const context = await browser.newContext({ locale: benchmarkBrowserLocale });
   const setupState = buildAquaGuideDailyRetestState();
@@ -326,7 +341,7 @@ if (process.argv.includes('--preflight')) {
 
   const diagnostic = {
     schemaVersion: 1,
-    analysisMode: AQUAGUIDE_DAILY_RETEST_ANALYSIS_MODE,
+    analysisMode,
     generatedAt: new Date().toISOString(),
     targetAppGitSha: pinnedCommit,
     targetUrl,
@@ -354,17 +369,23 @@ if (process.argv.includes('--preflight')) {
     },
     taskResult,
     claimBoundary: [
-      'This retest executes only blind-daily-check-risk against one pinned AquaGuide commit.',
+      isPersonaChallenge
+        ? 'This Challenge executes only case-challenge-blind-daily-check-risk-persona against one pinned AquaGuide commit.'
+        : 'This retest executes only blind-daily-check-risk against one pinned AquaGuide commit.',
       'Create Aquarium and Record Livestock use deterministic local setup and make zero remote model calls.',
-      'A PASS requires a healthy Blind Experience protocol, deterministic Oracle PASS, semantic Judge PASS, completed Agent run, and failureSource=null.',
-      'PUI-BC-023 is eligible for lifecycle closure only after this same EvalCase produces that complete connected PASS.',
-      'PUI-BC-024 is already deterministic product-regression verified; this connected retest adds end-to-end evidence but is not required to establish the code fix.',
-      'Provider timeout, evaluator interruption, missing Judge Oracle visibility, or unknown attribution makes this run non-PASS and must not be promoted to Product Failure by absence of success evidence alone.',
+      isPersonaChallenge
+        ? 'A healthy Challenge run may produce either a trustworthy PASS or a trustworthy Product FAIL; Product FAIL is an evaluation result, not an evaluator failure.'
+        : 'A PASS requires a healthy Blind Experience protocol, deterministic Oracle PASS, semantic Judge PASS, completed Agent run, and failureSource=null.',
+      isPersonaChallenge
+        ? 'Challenge coverage becomes verified only on trustworthy PASS; a trustworthy Product FAIL remains evidence for product triage and does not inherit PASS coverage.'
+        : 'PUI-BC-023 is eligible for lifecycle closure only after this same EvalCase produces that complete connected PASS.',
+      'PUI-BC-024 is already deterministic product-regression verified; its output assertions remain end-to-end guards.',
+      'Provider timeout, evaluator interruption, missing Judge Oracle visibility, or unknown attribution makes the result non-trustworthy and must not be promoted to Product Failure by absence of success evidence alone.',
       'No screenshot was sent to the provider.',
     ],
   };
 
-  const diagnosticPath = resolve(outputDir, 'connected-aquaguide-daily-retest.json');
+  const diagnosticPath = resolve(outputDir, isPersonaChallenge ? 'connected-aquaguide-daily-persona-challenge.json' : 'connected-aquaguide-daily-retest.json');
   const auditPath = resolve(outputDir, 'knowledge-boundary-audit.json');
   await writeFile(diagnosticPath, JSON.stringify(diagnostic, null, 2));
   await writeFile(auditPath, JSON.stringify({ provider: provider.info, requests: providerAudits }, null, 2));
