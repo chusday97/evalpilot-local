@@ -1,4 +1,4 @@
-name: One-shot Dispatch Daily Retest
+name: One-shot Authorized AquaGuide Daily Blind Retest
 
 on:
   push:
@@ -8,34 +8,162 @@ on:
       - '.github/workflows/one-shot-dispatch-daily-retest.yml'
 
 permissions:
-  actions: write
   contents: read
 
 jobs:
-  dispatch:
-    if: github.event.head_commit.message == 'chore: dispatch authorized Daily-only connected retest'
+  connected-aquaguide-daily-retest:
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: connected-model-calibration
+      deployment: false
+    env:
+      EVALPILOT_AI_PROVIDER: deepseek
+      EVALPILOT_DEEPSEEK_MODEL: deepseek-v4-flash
+      TARGET_APP_COMMIT: 3d73c033b6899e3a92144f6de99a05db8babde78
+      OUTPUT_DIR: connected-aquaguide-daily-retest-output
+      MAX_STEPS: '12'
+      CONFIRM_PAID_CALLS: RUN_CONNECTED_AQUAGUIDE_DAILY_RETEST
+
     steps:
-      - name: Dispatch authorized Daily-only connected retest
+      - name: Confirm remote-call authorization
         shell: bash
         env:
-          GH_TOKEN: ${{ github.token }}
+          EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
         run: |
           set -euo pipefail
-          body='{"ref":"main","inputs":{"confirm_paid_calls":"RUN_CONNECTED_AQUAGUIDE_DAILY_RETEST","target_app_commit":"3d73c033b6899e3a92144f6de99a05db8babde78","model":"deepseek-v4-flash","max_steps":"12"}}'
-          status="$(curl --silent --show-error --location \
-            --output /tmp/dispatch-response.txt \
-            --write-out '%{http_code}' \
-            --request POST \
-            --header "Authorization: Bearer $GH_TOKEN" \
-            --header 'Accept: application/vnd.github+json' \
-            --header 'X-GitHub-Api-Version: 2022-11-28' \
-            --header 'Content-Type: application/json' \
-            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/connected-aquaguide-daily-retest.yml/dispatches" \
-            --data "$body")"
-          if [[ "$status" != '204' ]]; then
-            cat /tmp/dispatch-response.txt >&2 || true
-            echo "workflow_dispatch returned HTTP $status" >&2
+          if [[ "$GITHUB_REF" != "refs/heads/main" ]]; then
+            echo 'Connected AquaGuide Daily Retest is restricted to main.' >&2
             exit 2
           fi
-          echo 'workflow_dispatch accepted (HTTP 204).'
+          if [[ "$CONFIRM_PAID_CALLS" != "RUN_CONNECTED_AQUAGUIDE_DAILY_RETEST" ]]; then
+            echo 'Remote model calls were not explicitly authorized.' >&2
+            exit 2
+          fi
+          if [[ -z "$EVALPILOT_DEEPSEEK_API_KEY" ]]; then
+            echo 'Environment secret EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY is not configured.' >&2
+            echo 'No remote model calls were made.' >&2
+            exit 2
+          fi
+          if [[ ! "$TARGET_APP_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+            echo 'target_app_commit must be an exact 40-character lowercase Git SHA.' >&2
+            echo 'No remote model calls were made.' >&2
+            exit 2
+          fi
+
+      - name: Checkout EvalPilot
+        uses: actions/checkout@v4
+
+      - name: Checkout pinned AquaGuide
+        uses: actions/checkout@v4
+        with:
+          repository: chusday97/aquaguide-tank-guide
+          ref: 3d73c033b6899e3a92144f6de99a05db8babde78
+          path: real-products/aquaguide
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Install EvalPilot
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Install AquaGuide
+        working-directory: real-products/aquaguide
+        run: npm ci
+
+      - name: Start AquaGuide web
+        working-directory: real-products/aquaguide
+        run: |
+          npm run dev:web > ../../connected-aquaguide-daily-vite.log 2>&1 &
+          echo $! > ../../connected-aquaguide-daily-vite.pid
+
+      - name: Wait for AquaGuide
+        run: |
+          for attempt in $(seq 1 80); do
+            if curl --fail --silent http://127.0.0.1:3000/ >/dev/null; then
+              exit 0
+            fi
+            sleep 0.25
+          done
+          cat connected-aquaguide-daily-vite.log || true
+          exit 1
+
+      - name: Record no-call Daily preflight
+        shell: bash
+        env:
+          EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+          npx tsx scripts/run-connected-aquaguide-daily-retest.ts \
+            --preflight \
+            --url http://127.0.0.1:3000 \
+            --output "$OUTPUT_DIR" \
+            --max-steps "$MAX_STEPS" \
+            --json | tee connected-aquaguide-daily-preflight.json
+
+      - name: Validate no-call Daily preflight
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const preflight = JSON.parse(await readFile('connected-aquaguide-daily-preflight.json', 'utf8'));
+          if (preflight.analysisMode !== 'connected_aquaguide_daily_blind_retest_preflight') throw new Error('Daily preflight contract is missing.');
+          if (preflight.status !== 'ready' || preflight.canRun !== true || preflight.remoteCallsMade !== false) throw new Error('Daily preflight is not a ready, zero-call plan.');
+          if (JSON.stringify(preflight.caseIds) !== JSON.stringify(['blind-daily-check-risk'])) throw new Error(`Unexpected Daily case set: ${JSON.stringify(preflight.caseIds)}`);
+          if (preflight.executionConfig?.journeyMode !== 'daily_only' || preflight.executionConfig?.prerequisiteRemoteCalls !== 0) throw new Error('Daily retest must not spend remote calls on prerequisite journeys.');
+          if (preflight.executionConfig?.setupMode !== 'aquaguide_gp003_local_storage_fixture') throw new Error(`Unexpected Daily setup mode: ${preflight.executionConfig?.setupMode ?? 'none'}.`);
+          if (preflight.setupValidation?.ready !== true || preflight.setupValidation?.dailyTaskVisible !== true || preflight.setupValidation?.diagnosisRecordCount !== 0 || preflight.setupValidation?.remoteCallsMade !== false) throw new Error(`Daily browser setup validation failed: ${JSON.stringify(preflight.setupValidation ?? null)}.`);
+          if (preflight.provider?.provider !== 'deepseek' || preflight.provider?.model !== process.env.EVALPILOT_DEEPSEEK_MODEL) throw new Error(`Unexpected provider/model: ${preflight.provider?.provider ?? 'none'} / ${preflight.provider?.model ?? 'none'}.`);
+          if (preflight.targetAppGitSha !== process.env.TARGET_APP_COMMIT) throw new Error('Pinned AquaGuide commit changed during Daily preflight.');
+          if (preflight.executionConfig?.allowScreenshotToProvider !== false) throw new Error('Screenshots must remain disabled for the Daily retest.');
+          NODE
+
+      - name: Run connected AquaGuide Daily retest
+        shell: bash
+        env:
+          EVALPILOT_DEEPSEEK_API_KEY: ${{ secrets.EVALPILOT_CALIBRATION_DEEPSEEK_API_KEY }}
+        run: |
+          set -euo pipefail
+          npx tsx scripts/run-connected-aquaguide-daily-retest.ts \
+            --url http://127.0.0.1:3000 \
+            --output "$OUTPUT_DIR" \
+            --max-steps "$MAX_STEPS" \
+            --json | tee connected-aquaguide-daily-result.json
+
+      - name: Validate Daily connected PASS
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { readFile } from 'node:fs/promises';
+          const result = JSON.parse(await readFile('connected-aquaguide-daily-result.json', 'utf8'));
+          if (result.analysisMode !== 'connected_aquaguide_daily_blind_retest') throw new Error('Connected Daily result is missing the expected retest contract.');
+          if (result.targetAppGitSha !== process.env.TARGET_APP_COMMIT) throw new Error('Connected Daily retest did not evaluate the pinned AquaGuide commit.');
+          if (result.protocolHealthy !== true) throw new Error(`Daily protocol unhealthy: providerFailures=${result.providerFailureCount}, evaluatorFailures=${result.evaluatorFailureCount}, unknownFailures=${result.unknownFailureCount}, actorOracleLeaks=${result.actorOracleLeakCount}, judgeOracleVisible=${result.judgeOracleVisible}.`);
+          if (result.productJourneyPassed !== true || result.taskResult?.verdict !== 'pass' || result.taskResult?.failureSource !== null) throw new Error(`Daily same-case did not PASS: verdict=${result.taskResult?.verdict ?? 'none'}, failureSource=${result.taskResult?.failureSource ?? 'none'}, runtimeSource=${result.taskResult?.runtimeFailureSource ?? 'none'}.`);
+          const checks = new Map((result.taskResult?.deterministicChecks || []).map(check => [check.assertionId, check.verdict]));
+          for (const assertionId of ['blind-daily-risk','blind-daily-action','blind-daily-recorded-high-risk','blind-daily-breathing-only-summary','blind-daily-no-false-water-abnormal-summary','blind-daily-no-false-water-change-action']) {
+            if (checks.get(assertionId) !== 'pass') throw new Error(`Daily regression assertion did not pass: ${assertionId}=${checks.get(assertionId) ?? 'missing'}.`);
+          }
+          if (result.taskResult?.semanticVerdict !== 'pass' || result.taskResult?.semanticTaskCompletion !== 'complete') throw new Error(`Semantic Judge did not confirm complete PASS: verdict=${result.taskResult?.semanticVerdict ?? 'none'}, completion=${result.taskResult?.semanticTaskCompletion ?? 'none'}.`);
+          NODE
+
+      - name: Upload connected AquaGuide Daily evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: connected-aquaguide-daily-retest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            connected-aquaguide-daily-preflight.json
+            connected-aquaguide-daily-result.json
+            connected-aquaguide-daily-retest-output/
+            connected-aquaguide-daily-vite.log
+          if-no-files-found: warn
+          retention-days: 30
