@@ -1,0 +1,50 @@
+{
+  "schemaVersion": 1,
+  "lifecycle": "pui-bc-023-connected-closure",
+  "badcaseId": "PUI-BC-023",
+  "sourceCaseId": "blind-daily-check-risk",
+  "regressionCaseId": "case-regression-pui-bc-023",
+  "connectedRunId": "32035944562",
+  "passingRunId": "run-ai-2026-08-17T13-54-33-447Z",
+  "workflowHeadSha": "a57c9f79d5b658098a0ad858daec985abe4a6291",
+  "targetAppGitSha": "3d73c033b6899e3a92144f6de99a05db8babde78",
+  "artifactId": 9291145132,
+  "artifactDigest": "sha256:e12a67b59d01c9bb9c1a8d56eb9a0804e165be765c1753f2d5e2cb3f5dad8cf2",
+  "protocolHealthy": true,
+  "productJourneyPassed": true,
+  "actorOracleLeakCount": 0,
+  "judgeOracleVisible": true,
+  "failureCounts": {
+    "provider": 0,
+    "evaluator": 0,
+    "unknown": 0
+  },
+  "hybrid": {
+    "verdict": "pass",
+    "failureSource": null
+  },
+  "semantic": {
+    "verdict": "pass",
+    "taskCompletion": "complete",
+    "confidence": 0.95
+  },
+  "deterministicAssertionIds": [
+    "blind-daily-risk",
+    "blind-daily-action",
+    "blind-daily-recorded-high-risk",
+    "blind-daily-breathing-only-summary",
+    "blind-daily-no-false-water-abnormal-summary",
+    "blind-daily-no-false-water-change-action"
+  ],
+  "actorOutcome": {
+    "firstRoute": "Daily Aquarium Check",
+    "actionCount": 9,
+    "savedTodayRecord": true
+  },
+  "claimBoundary": [
+    "AI-blind connected evidence; not a human-user failure-rate estimate.",
+    "Regression promotion is based on the same EvalCase passing with failureSource=null.",
+    "PUI-BC-024 output assertions are retained as end-to-end guards but are a separate root cause from PUI-BC-023.",
+    "No screenshot was sent to the model provider."
+  ]
+}
