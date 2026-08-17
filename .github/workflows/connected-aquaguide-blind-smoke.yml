@@ -10,7 +10,7 @@ on:
       target_app_commit:
         description: 'Exact AquaGuide commit SHA to evaluate'
         required: true
-        default: 8663b469c50605529367daf1b69ac0cd7cfb0cac
+        default: 2add55a54402afc18b642b572d8ee8351ab72c53
         type: string
       model:
         description: 'DeepSeek model ID'
