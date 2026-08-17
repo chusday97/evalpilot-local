@@ -1,0 +1,41 @@
+name: One-shot Dispatch Daily Retest
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - '.github/workflows/one-shot-dispatch-daily-retest.yml'
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    if: github.event.head_commit.message == 'chore: dispatch authorized Daily-only connected retest'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Dispatch authorized Daily-only connected retest
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          body='{"ref":"main","inputs":{"confirm_paid_calls":"RUN_CONNECTED_AQUAGUIDE_DAILY_RETEST","target_app_commit":"3d73c033b6899e3a92144f6de99a05db8babde78","model":"deepseek-v4-flash","max_steps":"12"}}'
+          status="$(curl --silent --show-error --location \
+            --output /tmp/dispatch-response.txt \
+            --write-out '%{http_code}' \
+            --request POST \
+            --header "Authorization: Bearer $GH_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --header 'Content-Type: application/json' \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/workflows/connected-aquaguide-daily-retest.yml/dispatches" \
+            --data "$body")"
+          if [[ "$status" != '204' ]]; then
+            cat /tmp/dispatch-response.txt >&2 || true
+            echo "workflow_dispatch returned HTTP $status" >&2
+            exit 2
+          fi
+          echo 'workflow_dispatch accepted (HTTP 204).'
